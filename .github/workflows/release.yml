@@ -29,7 +29,7 @@ jobs:
       VERSAO: ${{ inputs.versao }}
       REGISTRO: ghcr.io/daniloeng
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ inputs.sha || github.sha }}
           fetch-depth: 0
@@ -47,7 +47,25 @@ jobs:
             echo "A tag v$VERSAO já existe." >&2
             exit 1
           fi
-      - uses: docker/login-action@v3
+      - name: Conferir o commit (na main e com o CI verde)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sha=$(git rev-parse HEAD)
+          git fetch -q origin main
+          git merge-base --is-ancestor "$sha" origin/main || { echo "$sha não está na main." >&2; exit 1; }
+          # Todas as verificações do CI concluídas e verdes nesse commit.
+          gh api "repos/${{ github.repository }}/commits/$sha/check-runs?per_page=100" \
+            --jq '[.check_runs[] | select(.app.slug == "github-actions") | {name, conclusion}]' > checks.json
+          python3 - <<'PY'
+          import json
+          checks = json.load(open("checks.json"))
+          ci = [c for c in checks if c["name"].lower() not in ("release", "tag", "claude")]
+          ruins = [c for c in ci if c["conclusion"] != "success"]
+          assert ci and not ruins, f"CI não está verde neste commit: {ruins or 'nenhuma verificação'}"
+          print("CI verde:", ", ".join(c["name"] for c in ci))
+          PY
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -57,13 +75,18 @@ jobs:
           for svc in gateway status-service tenant-service catalogo-service pedidos-service pagamentos-service; do
             dir=services/$svc
             img="$REGISTRO/plataforma-$svc:$VERSAO"
+            # Tag de imagem é imutável: uma versão publicada não é sobrescrita por um novo run.
+            if docker manifest inspect "$img" > /dev/null 2>&1; then
+              echo "$img já existe; escolha outra versão." >&2
+              exit 1
+            fi
             docker build -f "$dir/Dockerfile" -t "$img" \
               --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
               --label "org.opencontainers.image.version=$VERSAO" .
             docker push "$img"
             echo "- \`$img\`" >> "$GITHUB_STEP_SUMMARY"
           done
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
         with:
           version: v3.17.3
       - name: Empacotar o chart
@@ -78,3 +101,4 @@ jobs:
           git push origin "v$VERSAO"
           gh release create "v$VERSAO" dist/*.tgz --title "v$VERSAO" --generate-notes \
             --notes "Imagens em ghcr.io/daniloeng/plataforma-<serviço>:$VERSAO. Instalação: deploy/argocd/README.md."
+          echo "Pacotes novos no ghcr.io nascem privados: torne-os públicos (Package settings) para o cluster baixar sem credencial." >> "$GITHUB_STEP_SUMMARY"

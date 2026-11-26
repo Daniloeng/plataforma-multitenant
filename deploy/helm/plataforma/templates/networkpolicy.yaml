@@ -1,0 +1,129 @@
+{{- if .Values.networkPolicy.enabled }}
+# Fronteira de rede (ADR-0016). Tudo o que entra no namespace é negado, menos:
+#   gateway:8000          de qualquer lugar (é a porta de entrada)
+#   gateway:8001          só do status-service (métricas com nomes de tenants)
+#   serviços de negócio   só do gateway e do status-service (os cabeçalhos X-* vêm só do gateway)
+#   mongo-<db>            só do serviço dono e do status-service (banco por serviço)
+#   pulsar                dos pods da plataforma e do KEDA
+#   keycloak:8080         de qualquer lugar (login); 9000 só do status-service
+# O port-forward entra pelo próprio pod e não passa por estas regras.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nega-entrada
+  labels:
+    {{- include "plataforma.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway
+  labels:
+    {{- include "plataforma.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: gateway }
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - { port: {{ .Values.gateway.port }} }
+    - from:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: status-service }
+      ports:
+        - { port: {{ .Values.gateway.managementPort }} }
+{{- range $name, $svc := .Values.services }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "plataforma.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: {{ $name }} }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: gateway }
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: status-service }
+      ports:
+        - { port: {{ $svc.port }} }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mongo-{{ $svc.mongo }}
+  labels:
+    {{- include "plataforma.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: mongo-{{ $svc.mongo }} }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: {{ $name }} }
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: status-service }
+        # O próprio nó (replica set) fala consigo pelo nome do serviço headless.
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: mongo-{{ $svc.mongo }} }
+      ports:
+        - { port: 27017 }
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pulsar
+  labels:
+    {{- include "plataforma.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: pulsar }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/part-of: plataforma }
+      ports:
+        - { port: 6650 }
+        - { port: 8080 }
+    {{- with .Values.networkPolicy.pulsarAdminNamespaces }}
+    - from:
+        {{- range . }}
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ . }} }
+        {{- end }}
+      ports:
+        - { port: 8080 }
+    {{- end }}
+{{- if .Values.keycloak.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keycloak
+  labels:
+    {{- include "plataforma.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: keycloak }
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - { port: 8080 }
+    - from:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: status-service }
+      ports:
+        - { port: 9000 }
+{{- end }}
+{{- end }}

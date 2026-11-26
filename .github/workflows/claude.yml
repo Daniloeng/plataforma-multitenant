@@ -2,7 +2,8 @@ name: Claude
 
 # Claude Code no GitHub: responde a "@claude" em issues e PRs. Só roda se o segredo
 # ANTHROPIC_API_KEY existir no repositório (sem ele, o job termina avisando, sem custo) e só para
-# quem tem acesso de escrita, já que o repositório é público.
+# quem tem acesso de escrita, já que o repositório é público. Ele lê texto de issues e PRs, que
+# podem ser de terceiros: o que ele propõe passa por PR e revisão humana, como o resto.
 on:
   issue_comment:
     types: [created]
@@ -39,11 +40,12 @@ jobs:
           else
             echo "::notice::Sem o segredo ANTHROPIC_API_KEY: o Claude não roda neste repositório."
           fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         if: steps.chave.outputs.ok == 'true'
         with:
           fetch-depth: 1
-      - uses: anthropics/claude-code-action@v1
+      # Fixada por SHA: tag móvel com acesso ao segredo seria uma porta para a cadeia de suprimentos.
+      - uses: anthropics/claude-code-action@4411a9e9b0283becf4b924f7bce360fd7756c78c # v1
         if: steps.chave.outputs.ok == 'true'
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}

@@ -489,19 +489,36 @@ jobs:
           print("UP no Kubernetes:", s["runtime"])
           PY
           infra/seed.sh
+      - name: Fronteira de rede (NetworkPolicy)
+        run: |
+          # De um pod qualquer do namespace, os serviços e o MongoDB não respondem; só o gateway.
+          kubectl -n plataforma run intruso --image=curlimages/curl:8.11.1 --restart=Never --command -- sleep 300
+          kubectl -n plataforma wait pod/intruso --for=condition=Ready --timeout 2m
+          kubectl -n plataforma exec intruso -- curl -fsS -m 5 -o /dev/null http://gateway:8000/api/status
+          if kubectl -n plataforma exec intruso -- curl -sS -m 5 -o /dev/null http://pedidos-service:8083/actuator/health; then
+            echo "pedidos-service respondeu a um pod que não é o gateway"; exit 1
+          fi
+          if kubectl -n plataforma exec intruso -- curl -sS -m 5 -o /dev/null telnet://mongo-pedidos-0.mongo-pedidos:27017; then
+            echo "mongo-pedidos aceitou conexão de um pod que não é o pedidos-service"; exit 1
+          fi
+          kubectl -n plataforma delete pod intruso --wait=false
       - name: Lease do relay com duas réplicas do pedidos-service
         run: |
-          total=0
-          for pod in $(kubectl -n plataforma get pods -l app.kubernetes.io/name=pedidos-service -o name); do
-            v=$(kubectl get --raw "/api/v1/namespaces/plataforma/pods/${pod#pod/}:8083/proxy/actuator/prometheus" |
-              awk '/^plataforma_outbox_relay_lider/ {print int($2)}')
-            echo "${pod#pod/}: líder=$v"
-            total=$((total + v))
-          done
           test "$(kubectl -n plataforma get pods -l app.kubernetes.io/name=pedidos-service --no-headers | wc -l)" = 2
+          total=0; porta=18083
+          for pod in $(kubectl -n plataforma get pods -l app.kubernetes.io/name=pedidos-service -o name); do
+            kubectl -n plataforma port-forward "$pod" "$porta:8083" > /dev/null 2>&1 &
+            pf=$!
+            for i in $(seq 1 20); do curl -fsS "localhost:$porta/actuator/prometheus" > m.txt 2>/dev/null && break; sleep 1; done
+            kill "$pf"
+            v=$(awk '/^plataforma_outbox_relay_lider/ {print int($2)}' m.txt)
+            echo "${pod#pod/}: líder=$v"
+            total=$((total + v)); porta=$((porta + 1))
+          done
           test "$total" = 1
       - name: KEDA escala o pagamentos-service pelo backlog do Pulsar
         run: |
+          kubectl -n plataforma port-forward svc/pulsar 8080:8080 > pf-pulsar.log 2>&1 &
           kubectl -n plataforma wait scaledobject/pagamentos-service --for=condition=Ready --timeout 3m
           # Pausa o consumidor (0 réplicas) para acumular backlog de pedido.criado.
           kubectl -n plataforma annotate scaledobject/pagamentos-service autoscaling.keda.sh/paused-replicas=0 --overwrite
@@ -516,46 +533,43 @@ jobs:
                   return json.load(r)["access_token"]
           bruno = token("bruno")
           def call(method, path, body=None, key=None):
-              req = urllib.request.Request("http://localhost:8000" + path, method=method,
-                                           data=None if body is None else json.dumps(body).encode())
-              req.add_header("Authorization", "Bearer " + bruno)
-              req.add_header("X-Tenant-Id", "acme")
-              req.add_header("Content-Type", "application/json")
-              if key:
-                  req.add_header("Idempotency-Key", key)
               for _ in range(60):
+                  req = urllib.request.Request("http://localhost:8000" + path, method=method,
+                                               data=None if body is None else json.dumps(body).encode())
+                  req.add_header("Authorization", "Bearer " + bruno)
+                  req.add_header("X-Tenant-Id", "acme")
+                  req.add_header("Content-Type", "application/json")
+                  if key:
+                      req.add_header("Idempotency-Key", key)
                   try:
                       with urllib.request.urlopen(req) as r:
-                          return r.status, json.load(r)
+                          return json.load(r)
                   except urllib.error.HTTPError as e:
-                      if e.code == 429:  # limite do plano: espera e repete
-                          time.sleep(1); continue
-                      if e.code == 409 and "produto-indisponivel" in e.read().decode():
-                          time.sleep(1); continue  # cópia local do catálogo ainda chegando
-                      raise
+                      corpo = e.read().decode()
+                      if e.code == 429 or (e.code == 409 and "produto-indisponivel" in corpo):
+                          time.sleep(1)  # limite do plano, ou cópia local do catálogo chegando
+                          continue
+                      raise SystemExit(f"{method} {path}: HTTP {e.code} {corpo}")
               raise SystemExit("limite de tentativas")
-          _, produtos = call("GET", "/api/v1/produtos?busca=FITA-ISO")
-          produto = produtos["itens"][0]["id"]
-          ids = []
-          for i in range(60):
-              _, p = call("POST", "/api/v1/pedidos", {"itens": [{"produtoId": produto, "quantidade": 1}]}, str(uuid.uuid4()))
-              ids.append(p["id"])
+          produto = call("GET", "/api/v1/produtos?busca=FITA-ISO")["itens"][0]["id"]
+          ids = [call("POST", "/api/v1/pedidos", {"itens": [{"produtoId": produto, "quantidade": 1}]},
+                      str(uuid.uuid4()))["id"] for _ in range(120)]
           json.dump(ids, open("pedidos.json", "w"))
           print(len(ids), "pedidos PENDENTE com o pagamentos-service parado")
           PY
           backlog() {
-            curl -fsS localhost:8000/api/status > /dev/null  # mantém o port-forward vivo
-            kubectl -n plataforma exec statefulset/pulsar -- curl -fsS \
-              http://localhost:8080/admin/v2/persistent/plataforma/pedidos/pedido.criado.v1/stats |
+            curl -fsS http://localhost:8080/admin/v2/persistent/plataforma/pedidos/pedido.criado.v1/stats |
               python3 -c 'import json,sys; print(json.load(sys.stdin)["subscriptions"]["pagamentos-service-pedido-criado"]["msgBacklog"])'
           }
-          echo "backlog antes: $(backlog)"
-          test "$(backlog)" -ge 40
-          # Volta o KEDA: com backlog 60 e limite 20 por réplica, ele pede 3 réplicas (o máximo).
+          # O relay publica em lotes: espera os 120 chegarem ao tópico.
+          for i in $(seq 1 60); do b=$(backlog); [ "$b" -ge 120 ] && break; sleep 1; done
+          echo "backlog antes: $b"
+          test "$b" -ge 120
+          # Volta o KEDA: backlog 120 e limite 20 por réplica pedem o máximo (3).
           kubectl -n plataforma annotate scaledobject/pagamentos-service autoscaling.keda.sh/paused-replicas-
           max=0
           for i in $(seq 1 90); do
-            r=$(kubectl -n plataforma get deploy/pagamentos-service -o jsonpath='{.spec.replicas}')
+            r=$(kubectl -n plataforma get hpa keda-hpa-pagamentos-service -o jsonpath='{.status.desiredReplicas}' 2>/dev/null)
             [ "${r:-0}" -gt "$max" ] && max=$r
             [ "$max" -ge 2 ] && break
             sleep 2
@@ -563,10 +577,35 @@ jobs:
           echo "réplicas pedidas pelo KEDA: $max"
           kubectl -n plataforma get scaledobject,hpa
           test "$max" -ge 2
-          # O backlog esvazia e os pedidos saem de PENDENTE.
-          for i in $(seq 1 90); do b=$(backlog); [ "$b" = 0 ] && break; sleep 2; done
+          # O backlog esvazia e os pedidos saem de PENDENTE (o gateway simulado aprova).
+          for i in $(seq 1 120); do b=$(backlog); [ "$b" = 0 ] && break; sleep 2; done
           echo "backlog depois: $b"
           test "$b" = 0
+          python3 - <<'PY'
+          import json, time, urllib.request, urllib.parse
+          data = urllib.parse.urlencode({"grant_type": "password", "client_id": "plataforma-cli",
+                                         "username": "bruno", "password": "senha123"}).encode()
+          with urllib.request.urlopen("http://localhost:8180/realms/plataforma/protocol/openid-connect/token", data) as r:
+              bruno = json.load(r)["access_token"]
+          ids = json.load(open("pedidos.json"))
+          for pid in ids[:: len(ids) // 6]:
+              for _ in range(30):
+                  req = urllib.request.Request(f"http://localhost:8000/api/v1/pedidos/{pid}")
+                  req.add_header("Authorization", "Bearer " + bruno)
+                  req.add_header("X-Tenant-Id", "acme")
+                  try:
+                      with urllib.request.urlopen(req) as r:
+                          status = json.load(r)["status"]
+                  except urllib.error.HTTPError as e:
+                      if e.code != 429:
+                          raise
+                      status = "?"
+                  if status == "CONFIRMADO":
+                      break
+                  time.sleep(1)
+              assert status == "CONFIRMADO", (pid, status)
+          print("pedidos confirmados depois da escala")
+          PY
       - name: Diagnóstico em caso de falha
         if: failure()
         run: |
@@ -576,4 +615,5 @@ jobs:
             echo "== $d"; kubectl -n plataforma logs deploy/$d --all-containers --tail 80 || true
           done
           kubectl -n plataforma logs statefulset/pulsar --tail 80 || true
+          kubectl -n plataforma get networkpolicy,hpa,scaledobject || true
           kubectl -n keda logs deploy/keda-operator --tail 80 || true

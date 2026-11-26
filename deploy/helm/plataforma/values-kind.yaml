@@ -7,3 +7,5 @@ image:
 
 keda:
   enabled: true
+  # Reage rápido no CI, para o teste ver a escala antes de o backlog esvaziar.
+  pollingInterval: 5

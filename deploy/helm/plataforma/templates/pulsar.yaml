@@ -33,6 +33,7 @@ spec:
         app.kubernetes.io/name: pulsar
         app.kubernetes.io/component: broker
     spec:
+      {{- include "plataforma.podSecurity" . | nindent 6 }}
       containers:
         - name: pulsar
           image: {{ .Values.pulsar.image }}
@@ -104,6 +105,7 @@ spec:
         app.kubernetes.io/name: pulsar-init
     spec:
       restartPolicy: OnFailure
+      {{- include "plataforma.podSecurity" . | nindent 6 }}
       initContainers:
         - name: aguarda-broker
           image: {{ .Values.pulsar.initImage }}

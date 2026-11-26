@@ -10,6 +10,7 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation
 spec:
   restartPolicy: Never
+  {{- include "plataforma.podSecurity" . | nindent 2 }}
   containers:
     - name: status
       image: {{ .Values.pulsar.initImage }}

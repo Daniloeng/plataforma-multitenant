@@ -10,19 +10,20 @@ ferramentas gratuitas.
 
 **Demo:** <https://daniloeng.github.io/plataforma-multitenant/> (frontend em modo demo, API simulada)
 
-## Estado atual: Dia 10 de 22
+## Estado atual: Dia 11 de 22 (MVP1, `v0.1.0-mvp1`)
 
 | Componente | Situação |
 |---|---|
 | `status-service` | ✅ Ativo: saúde de MongoDB x4, Pulsar e serviços em `GET /api/status`, com métricas por serviço (requisições, p99, erros, outbox e eventos) |
 | Observabilidade | ✅ Métricas Prometheus em todo serviço, traces OpenTelemetry que atravessam o Pulsar, Grafana e Tempo no perfil `observabilidade` do Compose, 10 alertas testados com `promtool` e runbooks (ADR-0015) |
+| Kubernetes | ✅ Chart Helm (`deploy/helm/plataforma`) testado num kind a cada PR; KEDA escala o pagamentos-service pelo backlog do Pulsar; GitOps com Argo CD (`deploy/argocd`); imagens no `ghcr.io` pelo workflow de release (ADR-0016) |
 | Gateway + Keycloak | ✅ Ativo: única entrada (porta 8000), login OIDC, troca de tenant, rate limit por plano |
 | Tenants | ✅ Ativo: cadastro em `/api/v1/tenants` (só `plataforma-admin`), publica `tenant.criado` e `tenant.alterado`; promoção de nível (`POST /api/v1/tenants/{id}/promocao`) com namespace Pulsar próprio para Bridge e Silo |
 | Biblioteca comum | ✅ `platform-spring`: contexto de tenant, outbox transacional com lease do relay entre réplicas, consumidor padrão de eventos (`EventSubscriber`), identidade do gateway (`Caller`), database por tenant com migração online (ADR-0014) |
 | Catálogo | ✅ Ativo: produtos e preços por tenant em `/api/v1/produtos`, limite de produtos por plano, publica `produto.alterado` e `preco.alterado` |
 | Pedidos | ✅ Ativo: `/api/v1/pedidos` com preço da cópia local do catálogo, `Idempotency-Key`, cancelamento e histórico da saga; linha do tempo ao vivo (SSE) em `/api/v1/pedidos/{id}/linha-do-tempo`; tenants Bridge e Silo em database própria (`pedidos_t_<tenant>`), visível em `/api/v1/isolamento/pedidos` |
 | Pagamentos | ✅ Ativo: cobra cada `pedido.criado` num gateway simulado (aprova até R$ 10.000,00), estorna pedidos cancelados, ledger de partida dobrada em `/api/v1/ledger/lancamentos`; Pedidos confirma, cancela recusados e expira PENDENTE após 15 min |
-| Contratos | 10 eventos Avro, 6 APIs OpenAPI, 15 ADRs ([arquitetura](docs/arquitetura/event-storming.md)) |
+| Contratos | 10 eventos Avro, 6 APIs OpenAPI, 16 ADRs ([arquitetura](docs/arquitetura/event-storming.md)) |
 | Cobertura (linhas) | `platform-core` 100% · `contracts` 100% · `platform-spring` 88,1% · `gateway` 91,6% · `catalogo-service` 94,2% · `pedidos-service` 94,0% · `pagamentos-service` 99,1% · `tenant-service` 95,4% · `status-service` 99,0% · frontend 99,7% (mínimo exigido: 80%) |
 
 ## Arquitetura (visão alvo)
@@ -120,6 +121,21 @@ CLAUDE.md                 regras e comandos para o Claude Code
 
 Cada dia equivale a ~10 h de trabalho executado pelo Claude Code e revisado pelo Danilo, e termina
 com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
+
+### Dia 11: Kubernetes e MVP1 · [detalhes](docs/dias/11.md)
+
+- **Feito:** chart Helm com a plataforma inteira (MongoDB x4, Pulsar, Keycloak, gateway, serviços e
+  status-service); job no CI que sobe um kind, instala o chart e testa de ponta a ponta; KEDA
+  escalando o pagamentos-service pelo backlog do `pedido.criado`; duas réplicas do pedidos-service
+  com um só líder do relay; Argo CD com app of apps; workflow de release com imagens no `ghcr.io`
+  e a tag `v0.1.0-mvp1`; workflow do Claude Code no GitHub (só roda com o segredo
+  `ANTHROPIC_API_KEY`); ADR-0016. A página de saúde mostra onde a plataforma está rodando.
+- **Por quê:** o MVP1 fecha a fase de construção; daqui em diante o foco é QA, e um ambiente
+  Kubernetes reproduzível em cada PR é a base para os testes de isolamento, E2E e caos.
+- **Como testar:** `kind create cluster`, construa as imagens, `helm install` com
+  `values-kind.yaml` e `helm test` (passo a passo em `docs/dias/11.md`).
+- **Claude Code:** frontend por subagente em paralelo; revisão do `arquiteto`; workflow do Claude
+  Code Action no GitHub.
 
 ### Dia 10: observabilidade · [detalhes](docs/dias/10.md)
 
@@ -283,6 +299,6 @@ com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
 | 8 ✅ | Saga completa | Linha do tempo do pedido (SSE) |
 | 9 ✅ | Níveis Pool, Bridge e Silo | Selo e promoção de nível |
 | 10 ✅ | Observabilidade (OpenTelemetry, Prometheus, Grafana) | Saúde por serviço |
-| 11 | Helm, kind, KEDA, Argo CD; **MVP1** | MVP1 completo |
+| 11 ✅ | Helm, kind, KEDA, Argo CD; **MVP1** | MVP1 completo |
 | 12 a 17 | Estratégia de QA, mutação, contratos, isolamento, E2E, consistência de eventos | Painéis de qualidade |
 | 18 a 22 | Performance (k6), caos, segurança, pipeline de certificação, **go/no-go v1.0.0** | Painel go/no-go |

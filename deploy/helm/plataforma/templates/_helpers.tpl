@@ -45,8 +45,8 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
     - sh
     - -c
     - >-
-      until curl -fsS -o /dev/null http://pulsar:8080/admin/v2/namespaces/plataforma/{{ $namespace }}/retention;
-      do echo "aguardando o namespace plataforma/{{ $namespace }}"; sleep 3; done
+      until curl -fsS http://pulsar:8080/admin/v2/namespaces/plataforma/pagamentos/schemaCompatibilityStrategy | grep -q FULL;
+      do echo "aguardando os namespaces do Pulsar"; sleep 3; done
   resources:
     requests: { cpu: 10m, memory: 16Mi }
     limits: { memory: 64Mi }
@@ -61,6 +61,18 @@ securityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true
   capabilities: { drop: [ALL] }
+{{- end }}
+
+{{/* Segurança do pod: perfil seccomp padrão do runtime (exigido pelo Pod Security "restricted"). */}}
+{{- define "plataforma.podSecurity" -}}
+securityContext:
+  seccompProfile: { type: RuntimeDefault }
+{{- end }}
+
+{{/* /tmp gravável para a JVM (raiz somente leitura). */}}
+{{- define "plataforma.tmpVolume" -}}
+- name: tmp
+  emptyDir: { sizeLimit: 256Mi }
 {{- end }}
 
 {{/* Probes do Actuator (ADR-0015): readiness tira do Service, liveness reinicia. */}}

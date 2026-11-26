@@ -75,6 +75,9 @@ public class EventSubscriber implements SmartLifecycle {
 
   private volatile ObservationRegistry observations = ObservationRegistry.NOOP;
 
+  /** Mensagens buscadas adiantado por consumidor (padrão do Pulsar: 1000). */
+  private volatile int receiverQueueSize = 1000;
+
   /** Filas por assinatura: cada assinatura tem as suas, uma por tenant. */
   private final List<TenantLanes> lanes = new CopyOnWriteArrayList<>();
 
@@ -93,6 +96,18 @@ public class EventSubscriber implements SmartLifecycle {
     this.tx = tx;
     this.service = service;
     this.maxRedeliveries = maxRedeliveries;
+  }
+
+  /**
+   * Quantas mensagens cada consumidor busca adiantado. Valor pequeno deixa o backlog no broker,
+   * onde réplicas novas (KEDA) podem pegá-lo; vale para as assinaturas feitas depois.
+   */
+  public void setReceiverQueueSize(int receiverQueueSize) {
+    this.receiverQueueSize = receiverQueueSize;
+  }
+
+  public int receiverQueueSize() {
+    return receiverQueueSize;
   }
 
   /**
@@ -159,6 +174,7 @@ public class EventSubscriber implements SmartLifecycle {
               .subscriptionName(subscriptionName(r.name()))
               .subscriptionType(SubscriptionType.Key_Shared)
               .subscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
+              .receiverQueueSize(receiverQueueSize)
               .negativeAckRedeliveryDelay(1, TimeUnit.SECONDS)
               .deadLetterPolicy(
                   DeadLetterPolicy.builder()

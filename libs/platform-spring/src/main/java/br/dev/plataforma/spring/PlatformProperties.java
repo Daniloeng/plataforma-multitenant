@@ -25,7 +25,7 @@ public record PlatformProperties(
     Isolation isolation) {
 
   public PlatformProperties {
-    events = events == null ? new Events(0) : events;
+    events = events == null ? new Events(0, 0) : events;
     tenancy = tenancy == null ? new Tenancy(null, null) : tenancy;
     outbox = outbox == null ? new OutboxProps(null, null, null, 0, null) : outbox;
     idempotency = idempotency == null ? new Idempotency(null) : idempotency;
@@ -113,10 +113,14 @@ public record PlatformProperties(
 
   /**
    * @param maxRedeliveries tentativas antes de mandar a mensagem para o dead letter (padrão: 10)
+   * @param receiverQueueSize mensagens que cada consumidor busca adiantado (padrão: 1000, o do
+   *     Pulsar). Serviço que escala pelo backlog (KEDA, ADR-0016) usa um valor pequeno: em
+   *     Key_Shared, o que já foi entregue a uma réplica não passa para as que sobem depois.
    */
-  public record Events(int maxRedeliveries) {
+  public record Events(int maxRedeliveries, int receiverQueueSize) {
     public Events {
       maxRedeliveries = maxRedeliveries <= 0 ? 10 : maxRedeliveries;
+      receiverQueueSize = receiverQueueSize <= 0 ? 1000 : receiverQueueSize;
     }
   }
 

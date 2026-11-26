@@ -12,6 +12,21 @@ spec:
     app.kubernetes.io/name: gateway
   ports:
     - { name: http, port: {{ .Values.gateway.port }} }
+---
+# Actuator do gateway num Service à parte e sempre interno: as métricas têm nomes de tenants, e a
+# porta pública pode virar LoadBalancer.
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-management
+  labels:
+    {{- include "plataforma.labels" . | nindent 4 }}
+    app.kubernetes.io/name: gateway
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: gateway
+  ports:
     - { name: management, port: {{ .Values.gateway.managementPort }} }
 ---
 apiVersion: apps/v1
@@ -22,7 +37,8 @@ metadata:
     {{- include "plataforma.labels" . | nindent 4 }}
     app.kubernetes.io/name: gateway
 spec:
-  replicas: {{ .Values.gateway.replicas }}
+  # Uma só: o rate limit por plano é em memória (ver values.yaml).
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: gateway
@@ -38,6 +54,7 @@ spec:
         prometheus.io/path: /actuator/prometheus
     spec:
       terminationGracePeriodSeconds: 30
+      {{- include "plataforma.podSecurity" . | nindent 6 }}
       initContainers:
         {{- include "plataforma.waitFor" (list . "" "tenants") | nindent 8 }}
       containers:
@@ -64,5 +81,4 @@ spec:
           volumeMounts:
             - { name: tmp, mountPath: /tmp }
       volumes:
-        - name: tmp
-          emptyDir: {}
+        {{- include "plataforma.tmpVolume" . | nindent 8 }}

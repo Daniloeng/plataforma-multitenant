@@ -12,7 +12,6 @@ spec:
   destinations:
     - { server: https://kubernetes.default.svc, namespace: plataforma }
     - { server: https://kubernetes.default.svc, namespace: keda }
-    - { server: https://kubernetes.default.svc, namespace: argocd }
   # O KEDA instala CRDs e papéis de cluster.
   clusterResourceWhitelist:
     - { group: "", kind: Namespace }
@@ -21,3 +20,20 @@ spec:
     - { group: rbac.authorization.k8s.io, kind: ClusterRoleBinding }
     - { group: admissionregistration.k8s.io, kind: ValidatingWebhookConfiguration }
     - { group: apiregistration.k8s.io, kind: APIService }
+---
+# Projeto só da raiz (app of apps): ela cria Applications no namespace argocd e nada mais, então um
+# commit em apps/ não consegue pôr outro tipo de recurso lá.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: raiz
+  namespace: argocd
+spec:
+  description: App of apps da plataforma
+  sourceRepos:
+    - https://github.com/Daniloeng/plataforma-multitenant.git
+  destinations:
+    - { server: https://kubernetes.default.svc, namespace: argocd }
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - { group: argoproj.io, kind: Application }

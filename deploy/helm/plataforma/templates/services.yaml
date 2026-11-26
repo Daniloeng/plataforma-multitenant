@@ -40,6 +40,7 @@ spec:
         prometheus.io/path: /actuator/prometheus
     spec:
       terminationGracePeriodSeconds: 30
+      {{- include "plataforma.podSecurity" $ | nindent 6 }}
       initContainers:
         {{- include "plataforma.waitFor" (list $ $svc.mongo $svc.mongo) | nindent 8 }}
       containers:
@@ -52,6 +53,10 @@ spec:
             - name: MONGO_URI
               value: {{ printf "mongodb://%s/%s?replicaSet=rs-%s" (include "plataforma.mongoHost" (list $ $svc.mongo)) $svc.mongo $svc.mongo | quote }}
             {{- include "plataforma.commonEnv" $ | nindent 12 }}
+            {{- range $k, $v := $svc.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
           {{- include "plataforma.probes" "http" | nindent 10 }}
           {{- include "plataforma.containerSecurity" $ | nindent 10 }}
           resources:
@@ -59,6 +64,5 @@ spec:
           volumeMounts:
             - { name: tmp, mountPath: /tmp }
       volumes:
-        - name: tmp
-          emptyDir: {}
+        {{- include "plataforma.tmpVolume" $ | nindent 8 }}
 {{- end }}

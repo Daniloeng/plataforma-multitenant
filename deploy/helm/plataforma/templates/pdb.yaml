@@ -1,0 +1,17 @@
+{{- range $name, $svc := .Values.services }}
+{{- if gt (int $svc.replicas) 1 }}
+---
+# Com mais de uma réplica, a manutenção de um nó não derruba todas de uma vez.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "plataforma.labels" $ | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+{{- end }}
+{{- end }}

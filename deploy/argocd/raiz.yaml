@@ -5,7 +5,7 @@ metadata:
   name: raiz
   namespace: argocd
 spec:
-  project: plataforma
+  project: raiz
   source:
     repoURL: https://github.com/Daniloeng/plataforma-multitenant.git
     targetRevision: main
@@ -15,3 +15,6 @@ spec:
     namespace: argocd
   syncPolicy:
     automated: { prune: true, selfHeal: true }
+    retry:
+      limit: 5
+      backoff: { duration: 10s, factor: 2, maxDuration: 3m }

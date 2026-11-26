@@ -18,6 +18,14 @@ class OutboxPropsTest {
   }
 
   @Test
+  void eventosTemPadroesDoPulsar() {
+    var events = new PlatformProperties.Events(0, 0);
+    assertThat(events.maxRedeliveries()).isEqualTo(10);
+    assertThat(events.receiverQueueSize()).isEqualTo(1000);
+    assertThat(new PlatformProperties.Events(3, 20).receiverQueueSize()).isEqualTo(20);
+  }
+
+  @Test
   void leaseCurtoSemSendTimeoutEncurtaOPadrao() {
     var props = new PlatformProperties.OutboxProps(null, null, null, 0, Duration.ofSeconds(6));
     assertThat(props.sendTimeout()).isEqualTo(Duration.ofSeconds(2));

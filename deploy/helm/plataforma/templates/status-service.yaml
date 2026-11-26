@@ -31,6 +31,7 @@ spec:
         app.kubernetes.io/name: status-service
         app.kubernetes.io/component: service
     spec:
+      {{- include "plataforma.podSecurity" . | nindent 6 }}
       containers:
         - name: status-service
           image: {{ include "plataforma.image" (list . "status-service") }}
@@ -47,7 +48,7 @@ spec:
               value: {{ printf "mongodb://%s/?directConnection=true" (include "plataforma.mongoHost" (list $ $db)) | quote }}
             {{- end }}
             - { name: PULSAR_ADMIN_URL, value: "http://pulsar:8080" }
-            - { name: GATEWAY_URL, value: "http://gateway:{{ .Values.gateway.managementPort }}" }
+            - { name: GATEWAY_URL, value: "http://gateway-management:{{ .Values.gateway.managementPort }}" }
             - { name: KEYCLOAK_MANAGEMENT_URL, value: "http://keycloak:9000" }
             {{- range $name, $svc := .Values.services }}
             - name: {{ $name | upper | replace "-" "_" }}_URL
@@ -60,5 +61,4 @@ spec:
           volumeMounts:
             - { name: tmp, mountPath: /tmp }
       volumes:
-        - name: tmp
-          emptyDir: {}
+        {{- include "plataforma.tmpVolume" . | nindent 8 }}

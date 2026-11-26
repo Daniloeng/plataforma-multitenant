@@ -15,8 +15,11 @@ keycloak:
   enabled: true
   image: keycloak/keycloak:26.4.7
   hostname: http://localhost:8180
-  # Só para estudo: em produção, um Secret externo (ver docs/adr/0016).
-  adminPassword: admin
+  # Senha do admin do console. Vazia: gerada na instalação e guardada no Secret keycloak-admin
+  # (mantida nas atualizações). Para usar um Secret próprio, com a chave "senha": existingSecret.
+  adminPassword: ""
+  existingSecret: ""
+  # Só modo dev (start-dev, sem TLS, usuários de demonstração): não exponha por Ingress (ADR-0016).
   resources:
     requests: { cpu: 100m, memory: 512Mi }
     limits: { memory: 768Mi }
@@ -62,15 +65,18 @@ services:
     port: 8084
     mongo: pagamentos
     replicas: 1
+    env:
+      # Escala pelo backlog (KEDA): fila pequena deixa o backlog no broker para as réplicas novas.
+      PLATAFORMA_EVENTS_RECEIVERQUEUESIZE: "20"
 
 serviceResources:
   requests: { cpu: 100m, memory: 384Mi }
   limits: { memory: 512Mi }
 
+# Uma réplica só: o rate limit por plano é em memória e se multiplicaria com mais réplicas.
 gateway:
   port: 8000
   managementPort: 8001
-  replicas: 1
   service:
     type: ClusterIP
   resources:
@@ -82,6 +88,14 @@ statusService:
   resources:
     requests: { cpu: 50m, memory: 256Mi }
     limits: { memory: 384Mi }
+
+# Fronteira de rede (ADR-0016): no Compose, os serviços só eram alcançáveis pela rede interna. Aqui,
+# sem isto, qualquer pod do cluster chamaria um serviço com X-Tenant-Id e X-Papeis forjados ou leria
+# o MongoDB de outro serviço.
+networkPolicy:
+  enabled: true
+  # Namespaces que leem o admin do Pulsar (o operador do KEDA).
+  pulsarAdminNamespaces: [keda]
 
 tracing:
   # Liga a exportação OTLP quando houver um coletor (Tempo) no cluster.

@@ -6,6 +6,9 @@ apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
   name: {{ .Values.keda.service }}
+  annotations:
+    # Argo CD: na primeira sincronização o CRD do KEDA pode ainda não existir.
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
   labels:
     {{- include "plataforma.labels" . | nindent 4 }}
 spec:

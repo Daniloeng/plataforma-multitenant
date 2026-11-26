@@ -1,4 +1,26 @@
 {{- if .Values.keycloak.enabled }}
+{{- if not .Values.keycloak.existingSecret }}
+# Senha do admin: a dos values ou, vazia, uma gerada na primeira instalação e mantida depois.
+{{- $existing := lookup "v1" "Secret" .Release.Namespace "keycloak-admin" }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: keycloak-admin
+  labels:
+    {{- include "plataforma.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+type: Opaque
+data:
+  {{- if .Values.keycloak.adminPassword }}
+  senha: {{ .Values.keycloak.adminPassword | b64enc }}
+  {{- else if $existing }}
+  senha: {{ index $existing.data "senha" }}
+  {{- else }}
+  senha: {{ randAlphaNum 24 | b64enc }}
+  {{- end }}
+---
+{{- end }}
 # Identidade (ADR-0009): realm "plataforma" importado na subida, em modo dev (estudo).
 apiVersion: v1
 kind: ConfigMap
@@ -45,6 +67,7 @@ spec:
       annotations:
         checksum/realm: {{ .Files.Get "files/realm-plataforma.json" | sha256sum }}
     spec:
+      {{- include "plataforma.podSecurity" . | nindent 6 }}
       containers:
         - name: keycloak
           image: {{ .Values.keycloak.image }}
@@ -54,7 +77,11 @@ spec:
             - { name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC, value: "true" }
             - { name: KC_HEALTH_ENABLED, value: "true" }
             - { name: KC_BOOTSTRAP_ADMIN_USERNAME, value: admin }
-            - { name: KC_BOOTSTRAP_ADMIN_PASSWORD, value: {{ .Values.keycloak.adminPassword | quote }} }
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default "keycloak-admin" .Values.keycloak.existingSecret }}
+                  key: senha
             - { name: JAVA_OPTS_KC_HEAP, value: "-XX:MaxRAMPercentage=60" }
           ports:
             - { name: http, containerPort: 8080 }

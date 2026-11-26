@@ -38,6 +38,7 @@ spec:
         app.kubernetes.io/name: mongo-{{ $db }}
         app.kubernetes.io/component: database
     spec:
+      {{- include "plataforma.podSecurity" $ | nindent 6 }}
       containers:
         - name: mongo
           image: {{ $.Values.mongo.image }}

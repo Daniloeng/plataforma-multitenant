@@ -2,5 +2,10 @@
 keda:
   enabled: true
 
+keycloak:
+  # Emissor dos tokens: o endereço pelo qual o navegador fala com o Keycloak. Na homologação
+  # gerenciada pelo Argo CD, o acesso é por port-forward enquanto o Keycloak rodar em modo dev.
+  hostname: http://localhost:8180
+
 tracing:
   export: false

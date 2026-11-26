@@ -57,7 +57,10 @@ import org.testcontainers.utility.DockerImageName;
 @SpringBootTest(
     classes = TestApp.class,
     webEnvironment = SpringBootTest.WebEnvironment.NONE,
-    properties = "plataforma.outbox.interval=1h") // o teste dispara o relay à mão
+    properties = {
+      "plataforma.outbox.interval=1h", // o teste dispara o relay à mão
+      "plataforma.events.receiver-queue-size=25"
+    })
 class PlatformSpringIT {
 
   static final TenantId ACME = new TenantId("acme");
@@ -95,6 +98,13 @@ class PlatformSpringIT {
   @Autowired br.dev.plataforma.spring.events.EventDecoder decoder;
   @Autowired PulsarClient pulsar;
   @Autowired PlatformTransactionManager txManager;
+  @Autowired br.dev.plataforma.spring.events.EventSubscriber subscriber;
+
+  @Test
+  void filaDoConsumidorVemDaConfiguracao() {
+    // Pequena em quem escala pelo backlog (KEDA, ADR-0016): o backlog fica no broker.
+    assertThat(subscriber.receiverQueueSize()).isEqualTo(25);
+  }
 
   TransactionTemplate tx;
 

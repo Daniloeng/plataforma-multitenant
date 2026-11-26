@@ -6,7 +6,8 @@ merge na `main`.
 
 ```
 deploy/argocd/
-  projeto.yaml          AppProject "plataforma": só este repositório e os charts do KEDA
+  projeto.yaml          AppProjects: "plataforma" (este repositório e o chart do KEDA, namespaces
+                        plataforma e keda) e "raiz" (só cria Applications no argocd)
   raiz.yaml             app of apps: aplica tudo o que está em apps/
   apps/keda.yaml        KEDA (chart oficial), antes da plataforma (sync-wave -1)
   apps/plataforma.yaml  a plataforma, no namespace "plataforma"
@@ -23,8 +24,15 @@ kubectl -n argocd get applications -w
 ```
 
 As imagens vêm do `ghcr.io/daniloeng`, publicadas pelo workflow `release.yml` na versão do chart
-(`appVersion`). Para publicar uma versão nova: suba o `appVersion`, faça o merge e rode o
-workflow de release com a mesma versão.
+(`appVersion`). Pacotes novos no ghcr.io nascem privados: torne-os públicos uma vez (Package
+settings), senão o cluster fica em `ImagePullBackOff`.
+
+O Argo CD segue a `main`. Entre o merge que sobe o `appVersion` e o fim do release, a imagem nova
+ainda não existe e os pods novos esperam por ela (os antigos continuam de pé). Por isso, rode o
+release logo depois do merge; ele só publica commit da `main` com o CI verde.
+
+O `ScaledObject` tem `SkipDryRunOnMissingResource`: na primeira sincronização o CRD do KEDA pode
+ainda não existir (a onda -1 não espera a saúde de uma Application).
 
 O CI não instala o Argo CD: ele confere os manifests com `kubeconform` e instala o chart direto
 com Helm no kind. Um Argo CD efêmero só sincronizaria a `main`, e não o código do PR.
