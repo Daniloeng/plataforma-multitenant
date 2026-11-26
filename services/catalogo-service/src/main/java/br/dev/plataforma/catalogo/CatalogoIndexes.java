@@ -13,15 +13,22 @@ public class CatalogoIndexes {
 
   @Bean
   SmartInitializingSingleton catalogoIndices(MongoOperations mongo) {
-    return () ->
-        // SKU único por tenant; também serve à listagem (tenantId + ordem por SKU).
-        mongo
-            .indexOps(ProdutoDocument.class)
-            .createIndex(
-                new Index()
-                    .on("tenantId", Sort.Direction.ASC)
-                    .on("sku", Sort.Direction.ASC)
-                    .unique()
-                    .named("ux_tenant_sku"));
+    return () -> {
+      // SKU único por tenant; também serve à listagem (tenantId + ordem por SKU).
+      mongo
+          .indexOps(ProdutoDocument.class)
+          .createIndex(
+              new Index()
+                  .on("tenantId", Sort.Direction.ASC)
+                  .on("sku", Sort.Direction.ASC)
+                  .unique()
+                  .named("ux_tenant_sku"));
+      // A coleção da cópia local dos tenants nasce aqui, fora de transação: se nascesse no
+      // primeiro evento, dois tenant.criado processados juntos criariam a mesma coleção em duas
+      // transações, e uma delas abortaria com conflito de escrita.
+      if (!mongo.collectionExists(TenantPlano.class)) {
+        mongo.createCollection(TenantPlano.class);
+      }
+    };
   }
 }

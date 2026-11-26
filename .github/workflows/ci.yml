@@ -156,8 +156,13 @@ jobs:
           }
           ANA=$(token ana); BRUNO=$(token bruno)
           api() { curl -sS -o resp.json -w '%{http_code}' "$@"; }
-          # O seed criou produtos em acme; o catálogo aprendeu o plano de acme pelo tenant.criado.
-          test "$(api http://localhost:8000/api/v1/produtos -H "Authorization: Bearer $BRUNO" -H 'X-Tenant-Id: acme')" = 200
+          # O seed criou produtos em acme; o catálogo aprende o plano de acme pelo tenant.criado
+          # (consistência eventual: espera a cópia local chegar, até 30 s).
+          for i in $(seq 1 30); do
+            test "$(api http://localhost:8000/api/v1/produtos -H "Authorization: Bearer $BRUNO" -H 'X-Tenant-Id: acme')" = 200
+            python3 -c 'import json,sys; sys.exit(json.load(open("resp.json"))["plano"] != "PROFISSIONAL")' && break
+            sleep 1
+          done
           cat resp.json
           python3 - <<'PY'
           import json
