@@ -10,6 +10,7 @@ public record PedidoView(
     StatusPedido status,
     List<ItemView> itens,
     Dinheiro total,
+    String pagamentoId,
     MotivoCancelamento motivoCancelamento,
     Instant criadoEm,
     Instant atualizadoEm) {
@@ -34,6 +35,7 @@ public record PedidoView(
                         new Dinheiro(i.precoUnitarioCentavos(), doc.getMoeda())))
             .toList(),
         new Dinheiro(doc.getTotalCentavos(), doc.getMoeda()),
+        doc.getPagamentoId(),
         doc.getMotivoCancelamento(),
         doc.getCriadoEm(),
         doc.getAtualizadoEm());

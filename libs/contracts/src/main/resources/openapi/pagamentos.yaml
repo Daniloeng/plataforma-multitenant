@@ -4,12 +4,14 @@ info:
   version: 1.0.0
   description: >-
     Consulta de pagamentos e do ledger (partidas dobradas) do tenant. A autorização e a captura
-    acontecem de forma assíncrona, a partir de pedido.criado; não há POST de pagamento na API.
+    acontecem de forma assíncrona, a partir de pedido.criado, num gateway de pagamento simulado
+    (aprova até um limite de valor e recusa acima dele); não há POST de pagamento na API. Um
+    pedido é cobrado no máximo uma vez; cancelado depois da captura, é estornado (ADR-0012).
 servers:
   - url: http://localhost:8084
 security:
   - jwt: []
-x-autorizacao: "Papel gestor-tenant."
+x-autorizacao: "Papel gestor-tenant ou plataforma-admin; os demais recebem 403."
 tags:
   - name: pagamentos
   - name: ledger
@@ -26,6 +28,9 @@ paths:
         - name: pedidoId
           in: query
           schema: { type: string }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/StatusPagamento' }
       responses:
         '200':
           description: Página de pagamentos.
@@ -37,8 +42,11 @@ paths:
                 properties:
                   itens:
                     type: array
+                    description: Do mais recente para o mais antigo.
                     items: { $ref: '#/components/schemas/Pagamento' }
                   proximoCursor: { type: [string, 'null'] }
+        '400': { $ref: '_comum.yaml#/components/responses/RequisicaoInvalida' }
+        '403': { $ref: '#/components/responses/SemPermissao' }
   /api/v1/pagamentos/{pagamentoId}:
     parameters:
       - $ref: '_comum.yaml#/components/parameters/TenantId'
@@ -55,6 +63,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Pagamento' }
+        '403': { $ref: '#/components/responses/SemPermissao' }
         '404': { $ref: '_comum.yaml#/components/responses/NaoEncontrado' }
   /api/v1/ledger/lancamentos:
     parameters:
@@ -63,7 +72,18 @@ paths:
       tags: [ledger]
       operationId: listarLancamentos
       summary: Extrato do ledger do tenant (lançamentos imutáveis)
+      description: >-
+        Do lançamento mais recente para o mais antigo. Captura: débito em CAIXA_GATEWAY e crédito
+        em RECEITA_TENANT. Estorno: débito em ESTORNOS e crédito em CAIXA_GATEWAY. O saldo é a
+        receita líquida do tenant (créditos em RECEITA_TENANT menos débitos em ESTORNOS), em todas
+        as páginas, na moeda pedida: valores de moedas diferentes nunca são somados. Os itens
+        trazem lançamentos de todas as moedas.
       parameters:
+        - name: moeda
+          in: query
+          required: false
+          description: Moeda (ISO 4217) do saldo. Padrão BRL.
+          schema: { type: string, pattern: '^[A-Z]{3}$', default: BRL }
         - $ref: '_comum.yaml#/components/parameters/Cursor'
         - $ref: '_comum.yaml#/components/parameters/Limite'
       responses:
@@ -80,10 +100,18 @@ paths:
                     items: { $ref: '#/components/schemas/Lancamento' }
                   saldo: { $ref: '_comum.yaml#/components/schemas/Dinheiro' }
                   proximoCursor: { type: [string, 'null'] }
+        '400': { $ref: '_comum.yaml#/components/responses/RequisicaoInvalida' }
+        '403': { $ref: '#/components/responses/SemPermissao' }
 components:
   securitySchemes:
     jwt:
       $ref: '_comum.yaml#/components/securitySchemes/jwt'
+  responses:
+    SemPermissao:
+      description: O papel do usuário não permite a operação.
+      content:
+        application/problem+json:
+          schema: { $ref: '_comum.yaml#/components/schemas/Problema' }
   schemas:
     StatusPagamento:
       type: string
@@ -96,8 +124,10 @@ components:
         pedidoId: { type: string }
         status: { $ref: '#/components/schemas/StatusPagamento' }
         valor: { $ref: '_comum.yaml#/components/schemas/Dinheiro' }
+        clienteId: { type: string, description: Cliente B2B dono do pedido. }
         motivoRecusa: { type: [string, 'null'] }
         criadoEm: { type: string, format: date-time }
+        atualizadoEm: { type: string, format: date-time }
     Lancamento:
       type: object
       description: Uma partida do ledger. Todo movimento gera um débito e um crédito de mesmo valor.
@@ -105,6 +135,7 @@ components:
       properties:
         id: { type: string }
         pagamentoId: { type: string }
+        pedidoId: { type: string }
         conta:
           type: string
           enum: [CAIXA_GATEWAY, RECEITA_TENANT, ESTORNOS]

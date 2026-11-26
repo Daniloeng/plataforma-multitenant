@@ -50,3 +50,5 @@ plataforma:
         url: ${CATALOGO_SERVICE_URL:http://localhost:8082}
       - name: pedidos-service
         url: ${PEDIDOS_SERVICE_URL:http://localhost:8083}
+      - name: pagamentos-service
+        url: ${PAGAMENTOS_SERVICE_URL:http://localhost:8084}

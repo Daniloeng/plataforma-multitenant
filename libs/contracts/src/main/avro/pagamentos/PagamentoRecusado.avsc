@@ -51,7 +51,7 @@
     {
       "name": "motivo",
       "type": "string",
-      "doc": "Código de recusa do gateway simulado."
+      "doc": "Motivo legível da recusa, para exibição; não é um código estável."
     }
   ]
 }

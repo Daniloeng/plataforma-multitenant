@@ -1,7 +1,10 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { App } from '../App';
+import { apiUrl } from '../api/http';
+import { pedidoHash } from '../hooks/useHashRoute';
+import { POLL_INTERVALO_MS, POLL_TENTATIVAS } from './PedidosPage';
 import type { Pedido } from '../api/pedidos';
 import { createDemoAuthClient } from '../auth/demo';
 import { pedidosSnapshot, resetPedidosStore } from '../mocks/pedidos';
@@ -165,7 +168,13 @@ describe('PedidosPage — comprador', () => {
     await waitFor(() => expect(linhas()).toHaveLength(1));
     expect(linhas()[0]).toHaveAccessibleName('ped-farmaceutica-0005');
     await user.selectOptions(screen.getByLabelText('Status'), 'CONFIRMADO');
-    expect(await screen.findByText('Nenhum pedido confirmado.')).toBeVisible();
+    await waitFor(() => expect(linhas()[0]).toHaveAccessibleName('ped-farmaceutica-0003'));
+    expect(linhas()).toHaveLength(1);
+    await user.selectOptions(screen.getByLabelText('Status'), 'PENDENTE');
+    await waitFor(() => expect(linhas()[0]).toHaveAccessibleName('ped-farmaceutica-0008'));
+    resetPedidosStore({ [FARMA]: [] });
+    await user.click(screen.getByRole('button', { name: 'Atualizar lista' }));
+    expect(await screen.findByText('Nenhum pedido pendente.')).toBeVisible();
   });
 
   it('cancela com confirmação inline: "Não" volta atrás, "Sim, cancelar" muda o selo', async () => {
@@ -223,15 +232,15 @@ describe('PedidosPage — comprador', () => {
     );
   });
 
-  it('com filtro Pendente, o pedido cancelado sai da lista', async () => {
+  it('com filtro Confirmado, o pedido cancelado sai da lista', async () => {
     const user = await abrir('Bruno Lima');
     await tabela();
-    await user.selectOptions(screen.getByLabelText('Status'), 'PENDENTE');
-    await waitFor(() => expect(linhas()).toHaveLength(2));
+    await user.selectOptions(screen.getByLabelText('Status'), 'CONFIRMADO');
+    await waitFor(() => expect(linhas()).toHaveLength(1));
     const row = linha('ped-farmaceutica-0003');
     await user.click(within(row).getByRole('button', { name: /Cancelar pedido/ }));
     await user.click(within(row).getByRole('button', { name: 'Sim, cancelar' }));
-    await waitFor(() => expect(linhas()).toHaveLength(1));
+    expect(await screen.findByText('Nenhum pedido confirmado.')).toBeVisible();
   });
 
   it('erro ao cancelar mostra o detail do Problem Details', async () => {
@@ -367,7 +376,7 @@ describe('PedidosPage — gestor', () => {
   it('ana vê vários clientes e troca de tenant recarregando a lista', async () => {
     const user = await abrir('Ana Souza', 'distribuidora-aurora');
     await tabela();
-    expect(linhas()).toHaveLength(3);
+    expect(linhas()).toHaveLength(4);
     expect(new Set(linhas().map((r) => within(r).getAllByRole('cell')[1]!.textContent))).toEqual(
       new Set(['cli-mercado-bom-preco', 'cli-padaria-trigo-de-ouro']),
     );
@@ -419,5 +428,206 @@ describe('PedidosPage — gestor', () => {
       expect(screen.queryByRole('button', { name: 'Carregando…' })).not.toBeInTheDocument(),
     );
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+});
+
+describe('PedidosPage — pagamento no detalhe', () => {
+  /** Cria um pedido como bruno direto no pedidos-service simulado. */
+  async function criarComoBruno(quantidade: number): Promise<Pedido> {
+    const response = await fetch(apiUrl('api/v1/pedidos'), {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer demo-bruno',
+        'X-Tenant-Id': FARMA,
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `chave-${quantidade}-poll`,
+      },
+      body: JSON.stringify({
+        itens: [{ produtoId: 'prd-farmaceutica-boa-saude-001', quantidade }],
+      }),
+    });
+    expect(response.status).toBe(201);
+    return (await response.json()) as Pedido;
+  }
+
+  /** GETs do detalhe de um pedido feitos pela tela. */
+  function contaGets(id: string): () => number {
+    let n = 0;
+    server.events.on('request:start', ({ request }) => {
+      if (request.method === 'GET' && new URL(request.url).pathname === `/api/v1/pedidos/${id}`) {
+        n += 1;
+      }
+    });
+    return () => n;
+  }
+
+  /** Avança o relógio falso (setTimeout e Date) e deixa as respostas chegarem. */
+  async function avancar(ms: number) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  }
+
+  function situacao() {
+    return within(screen.getByRole('article')).getAllByRole('status')[0]!;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('depois de criar, consulta de novo a cada 1,5 s até a confirmação chegar (pago, com o pagamentoId)', async () => {
+    const novo = await criarComoBruno(2);
+    const gets = contaGets(novo.id);
+    await abrir('Bruno Lima', undefined, pedidoHash(novo.id));
+    await screen.findByRole('heading', { name: `Pedido ${novo.id}` });
+    expect(situacao()).toHaveTextContent('Aguardando o pagamento.');
+    expect(situacao()).toHaveTextContent('esta tela consulta de novo a cada 1,5 s');
+    expect(within(screen.getByRole('article')).getByText('Pendente')).toBeVisible();
+    expect(gets()).toBe(1);
+
+    await avancar(POLL_INTERVALO_MS);
+    expect(gets()).toBe(2);
+    expect(within(screen.getByRole('article')).getByText('Confirmado')).toHaveClass('pill--up');
+    expect(situacao()).toHaveTextContent(
+      'Pago. Pagamento aprovado pag-n00001; o pedido está confirmado.',
+    );
+
+    // Confirmado: o poll para.
+    await avancar(POLL_INTERVALO_MS * 3);
+    expect(gets()).toBe(2);
+  });
+
+  it('acima do limite, a consulta mostra o cancelamento por pagamento recusado', async () => {
+    const novo = await criarComoBruno(50);
+    await abrir('Bruno Lima', undefined, pedidoHash(novo.id));
+    await screen.findByRole('heading', { name: `Pedido ${novo.id}` });
+    await avancar(POLL_INTERVALO_MS);
+    expect(situacao()).toHaveTextContent(
+      'Pagamento recusado. O gateway de pagamento recusou a cobrança e o pedido foi cancelado; nada foi cobrado.',
+    );
+    expect(screen.getByText('Pagamento recusado', { selector: 'dd' })).toBeVisible();
+    // O comprador não consulta pagamentos (403): não aparece o motivo do gateway.
+    expect(situacao()).not.toHaveTextContent('Motivo:');
+  });
+
+  it('para depois de 10 consultas sem resposta; "Consultar de novo" recomeça; falha de rede conta como tentativa', async () => {
+    const gets = contaGets('ped-farmaceutica-0008');
+    await abrir('Bruno Lima', undefined, '#/pedidos/ped-farmaceutica-0008');
+    await screen.findByRole('heading', { name: 'Pedido ped-farmaceutica-0008' });
+    server.use(http.get('*/api/v1/pedidos/:id', () => HttpResponse.error(), { once: true }));
+    for (let i = 0; i < POLL_TENTATIVAS; i++) await avancar(POLL_INTERVALO_MS);
+    expect(gets()).toBe(1 + POLL_TENTATIVAS);
+    expect(situacao()).toHaveTextContent('Aguardando o pagamento. A confirmação ainda não chegou.');
+    // A falha de uma consulta não tirou o pedido da tela.
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await avancar(POLL_INTERVALO_MS * 2);
+    expect(gets()).toBe(1 + POLL_TENTATIVAS);
+
+    act(() => {
+      screen.getByRole('button', { name: 'Consultar de novo' }).click();
+    });
+    await avancar(POLL_INTERVALO_MS);
+    expect(gets()).toBe(2 + POLL_TENTATIVAS);
+    expect(screen.queryByRole('button', { name: 'Consultar de novo' })).not.toBeInTheDocument();
+  });
+
+  it('para de consultar ao sair da tela', async () => {
+    const gets = contaGets('ped-farmaceutica-0008');
+    await abrir('Bruno Lima', undefined, '#/pedidos/ped-farmaceutica-0008');
+    await screen.findByRole('heading', { name: 'Pedido ped-farmaceutica-0008' });
+    await avancar(POLL_INTERVALO_MS);
+    expect(gets()).toBe(2);
+    act(() => {
+      window.location.hash = '#/pedidos';
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    await tabela();
+    await avancar(POLL_INTERVALO_MS * 4);
+    expect(gets()).toBe(2);
+  });
+
+  it('pedido pago e depois cancelado mostra o estorno; cancelado antes da cobrança, "Sem cobrança"', async () => {
+    await abrir('Administradora', FARMA, '#/pedidos/ped-farmaceutica-0005');
+    await screen.findByRole('heading', { name: 'Pedido ped-farmaceutica-0005' });
+    expect(situacao()).toHaveTextContent(
+      'Estornado. O pedido foi pago (pag-farmaceutica-0005) e cancelado depois: o valor foi devolvido ao cliente.',
+    );
+    act(() => {
+      window.location.hash = '#/pedidos/ped-farmaceutica-0002';
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    await screen.findByRole('heading', { name: 'Pedido ped-farmaceutica-0002' });
+    expect(situacao()).toHaveTextContent(
+      'Sem cobrança. O pedido foi cancelado antes do pagamento.',
+    );
+  });
+
+  it('o gestor vê o motivo da recusa do pagamentos-service (ou que ele está indisponível)', async () => {
+    await abrir('Administradora', FARMA, '#/pedidos/ped-farmaceutica-0004');
+    await screen.findByRole('heading', { name: 'Pedido ped-farmaceutica-0004' });
+    await waitFor(() =>
+      expect(situacao()).toHaveTextContent(
+        'Motivo: Valor acima do limite de aprovação do gateway simulado (R$ 10.000,00).',
+      ),
+    );
+
+    server.use(http.get('*/api/v1/pagamentos', () => HttpResponse.error(), { once: true }));
+    act(() => {
+      window.location.hash = '#/pedidos/ped-distribuidora-x';
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    await screen.findByRole('alert');
+    act(() => {
+      window.location.hash = '#/pedidos/ped-farmaceutica-0004';
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    await waitFor(() =>
+      expect(situacao()).toHaveTextContent(
+        'Motivo: Motivo indisponível: Não foi possível conectar ao pagamentos-service.',
+      ),
+    );
+  });
+
+  it('recusa sem pagamento no serviço e pedido confirmado sem pagamentoId', async () => {
+    resetPedidosStore({
+      [FARMA]: [
+        {
+          id: 'ped-r',
+          clienteId: 'cli-x',
+          status: 'CANCELADO',
+          motivoCancelamento: 'PAGAMENTO_RECUSADO',
+          itens: [],
+          total: { centavos: 0, moeda: 'BRL' },
+          criadoEm: '2026-11-20T12:00:00Z',
+        },
+        {
+          id: 'ped-c',
+          clienteId: 'cli-x',
+          status: 'CONFIRMADO',
+          itens: [],
+          total: { centavos: 0, moeda: 'BRL' },
+          criadoEm: '2026-11-20T12:00:00Z',
+        },
+      ],
+    });
+    server.use(
+      http.get('*/api/v1/pagamentos', () => HttpResponse.json({ itens: [], proximoCursor: null })),
+    );
+    await abrir('Administradora', FARMA, '#/pedidos/ped-r');
+    await screen.findByRole('heading', { name: 'Pedido ped-r' });
+    await waitFor(() =>
+      expect(situacao()).toHaveTextContent('Motivo: O gateway não informou o motivo.'),
+    );
+    act(() => {
+      window.location.hash = '#/pedidos/ped-c';
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    await screen.findByRole('heading', { name: 'Pedido ped-c' });
+    expect(situacao()).toHaveTextContent('Pago. Pagamento aprovado; o pedido está confirmado.');
   });
 });

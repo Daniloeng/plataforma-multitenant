@@ -3,10 +3,10 @@ import { ROADMAP } from '../data/roadmap';
 import { RoadmapSection } from './RoadmapSection';
 
 describe('RoadmapSection', () => {
-  it('lista status-service, Tenants, Gateway, Catálogo e Pedidos ativos e Pagamentos planejado', () => {
+  it('lista status-service, Tenants, Gateway, Catálogo, Pedidos e Pagamentos ativos e a Saga planejada', () => {
     render(<RoadmapSection />);
     const items = screen.getAllByRole('listitem');
-    expect(items).toHaveLength(6);
+    expect(items).toHaveLength(7);
 
     const status = screen.getByRole('listitem', { name: 'status-service' });
     expect(status).toHaveTextContent('Dia 1');
@@ -38,7 +38,15 @@ describe('RoadmapSection', () => {
 
     const pagamentos = screen.getByRole('listitem', { name: 'Pagamentos' });
     expect(pagamentos).toHaveTextContent('Dia 7');
-    expect(within(pagamentos).getByText('Planejado')).toHaveClass('pill--planned');
+    expect(within(pagamentos).getByText('Ativo')).toHaveClass('pill--up');
+    expect(pagamentos).toHaveTextContent('ledger de partidas dobradas');
+    expect(pagamentos).toHaveTextContent(
+      'pagamento.aprovado, pagamento.recusado e pagamento.estornado',
+    );
+
+    const saga = screen.getByRole('listitem', { name: 'Saga do pedido' });
+    expect(saga).toHaveTextContent('Dia 8');
+    expect(within(saga).getByText('Planejado')).toHaveClass('pill--planned');
   });
 
   it('cada serviço tem responsabilidade em uma frase', () => {

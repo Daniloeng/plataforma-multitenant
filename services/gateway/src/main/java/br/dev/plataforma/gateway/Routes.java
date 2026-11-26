@@ -23,6 +23,11 @@ public class Routes {
         .route(
             "pedidos",
             r -> r.path("/api/v1/pedidos", "/api/v1/pedidos/**").uri(props.services().pedidos()))
+        .route(
+            "pagamentos",
+            r ->
+                r.path("/api/v1/pagamentos", "/api/v1/pagamentos/**", "/api/v1/ledger/**")
+                    .uri(props.services().pagamentos()))
         .build();
   }
 }

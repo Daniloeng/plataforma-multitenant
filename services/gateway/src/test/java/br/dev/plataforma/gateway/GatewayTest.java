@@ -45,6 +45,7 @@ class GatewayTest {
     registry.add("plataforma.gateway.services.status", BACKEND::url);
     registry.add("plataforma.gateway.services.catalogo", BACKEND::url);
     registry.add("plataforma.gateway.services.pedidos", BACKEND::url);
+    registry.add("plataforma.gateway.services.pagamentos", BACKEND::url);
   }
 
   @AfterAll
@@ -403,5 +404,23 @@ class GatewayTest {
         .containsEntry("X-Cliente-Id", "cli-bruno")
         .containsEntry("Idempotency-Key", "chave-de-teste-1")
         .containsEntry("X-Papeis", "comprador");
+  }
+
+  @Test
+  void pagamentosELedgerVaoParaOPagamentosService() {
+    for (String uri :
+        new String[] {"/api/v1/pagamentos?status=APROVADO", "/api/v1/ledger/lancamentos"}) {
+      web.mutateWith(ANA)
+          .get()
+          .uri(uri)
+          .header("X-Tenant-Id", "acme")
+          .exchange()
+          .expectStatus()
+          .isOk();
+      assertThat(BACKEND.lastHeaders)
+          .containsEntry("path", uri)
+          .containsEntry("X-Tenant-Id", "acme")
+          .containsEntry("X-Papeis", "gestor-tenant");
+    }
   }
 }
