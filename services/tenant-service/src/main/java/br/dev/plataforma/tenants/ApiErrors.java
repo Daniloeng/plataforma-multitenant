@@ -1,9 +1,13 @@
 package br.dev.plataforma.tenants;
 
+import com.mongodb.MongoException;
 import java.net.URI;
 import java.util.stream.Collectors;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.dao.TransientDataAccessException;
+import org.springframework.data.mongodb.UncategorizedMongoDbException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -49,6 +53,40 @@ public class ApiErrors extends ResponseEntityExceptionHandler {
         "conflito",
         "Alteração concorrente",
         "O tenant mudou durante a alteração; leia de novo e repita.");
+  }
+
+  @ExceptionHandler(TenantExceptions.LevelChangeNotSupported.class)
+  ProblemDetail levelChange(TenantExceptions.LevelChangeNotSupported e) {
+    return problem(
+        HttpStatus.CONFLICT, "conflito", "Mudança de nível não suportada", e.getMessage());
+  }
+
+  /**
+   * Duas transações gravando o mesmo documento ao mesmo tempo: o MongoDB aborta uma delas com
+   * WriteConflict (rótulo TransientTransactionError), que o Spring não traduz para
+   * DuplicateKeyException nem OptimisticLockingFailureException. Para o cliente é o mesmo 409.
+   */
+  @ExceptionHandler({TransientDataAccessException.class, UncategorizedMongoDbException.class})
+  ProblemDetail transientConflict(DataAccessException e) {
+    if (!isTransientTransactionError(e)) {
+      throw e;
+    }
+    return problem(
+        HttpStatus.CONFLICT,
+        "conflito",
+        "Alteração concorrente",
+        "Outra requisição alterou o mesmo tenant ao mesmo tempo; repita a operação.");
+  }
+
+  static boolean isTransientTransactionError(Throwable e) {
+    for (Throwable t = e; t != null; t = t.getCause()) {
+      if (t instanceof MongoException m
+          && (m.hasErrorLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL)
+              || m.getCode() == 112)) {
+        return true;
+      }
+    }
+    return e instanceof TransientDataAccessException;
   }
 
   @ExceptionHandler(TenantExceptions.InvalidRequest.class)

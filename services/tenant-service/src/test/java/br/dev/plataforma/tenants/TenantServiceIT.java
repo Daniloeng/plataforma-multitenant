@@ -141,6 +141,7 @@ class TenantServiceIT {
       TenantCriado evento = AvroCodec.decode(msg.getValue(), TenantCriado.class);
       assertThat(evento.getTenantId()).isEqualTo("acme");
       assertThat(evento.getPlano()).isEqualTo(Plano.PROFISSIONAL);
+      assertThat(evento.getVersao()).isZero();
       consumer.acknowledge(msg);
     }
   }
@@ -157,23 +158,52 @@ class TenantServiceIT {
             .subscribe()) {
 
       Resposta alterado =
-          chamar("PATCH", "/api/v1/tenants/beta", "{\"ativo\":false,\"nivelIsolamento\":\"SILO\"}");
+          chamar("PATCH", "/api/v1/tenants/beta", "{\"ativo\":false,\"plano\":\"EMPRESARIAL\"}");
 
       assertThat(alterado.status()).isEqualTo(200);
       assertThat(alterado.corpo().get("ativo").asBoolean()).isFalse();
-      assertThat(alterado.corpo().get("nivelIsolamento").asText()).isEqualTo("SILO");
-      assertThat(alterado.corpo().get("plano").asText()).isEqualTo("GRATUITO");
+      assertThat(alterado.corpo().get("plano").asText()).isEqualTo("EMPRESARIAL");
+      assertThat(alterado.corpo().get("nivelIsolamento").asText()).isEqualTo("POOL");
 
       Message<byte[]> msg = consumer.receive(20, TimeUnit.SECONDS);
       assertThat(msg).isNotNull();
       TenantAlterado evento = AvroCodec.decode(msg.getValue(), TenantAlterado.class);
       assertThat(evento.getAtivo()).isFalse();
-      assertThat(evento.getNivelIsolamento()).isEqualTo(NivelIsolamento.SILO);
+      assertThat(evento.getNivelIsolamento()).isEqualTo(NivelIsolamento.POOL);
+      assertThat(evento.getVersao()).as("versão sobe a cada alteração").isEqualTo(1);
     }
 
     Resposta renomeado = chamar("PATCH", "/api/v1/tenants/beta", "{\"nome\":\" Beta S.A. \"}");
     assertThat(renomeado.corpo().get("nome").asText()).isEqualTo("Beta S.A.");
     assertThat(renomeado.corpo().get("ativo").asBoolean()).isFalse();
+  }
+
+  @Test
+  void patchSemMudancaRealNaoGravaNemPublica() throws Exception {
+    criar("zeta", "GRATUITO");
+    long antes = mongo.count(new Query(), OutboxMessage.class);
+
+    Resposta igual =
+        chamar(
+            "PATCH",
+            "/api/v1/tenants/zeta",
+            "{\"plano\":\"GRATUITO\",\"ativo\":true,\"nivelIsolamento\":\"POOL\"}");
+
+    assertThat(igual.status()).isEqualTo(200);
+    assertThat(mongo.count(new Query(), OutboxMessage.class)).isEqualTo(antes);
+    assertThat(mongo.findById("zeta", TenantDocument.class).version()).isZero();
+  }
+
+  @Test
+  void trocarNivelDeIsolamentoPorPatchDa409() throws Exception {
+    criar("omega", "GRATUITO");
+
+    Resposta r = chamar("PATCH", "/api/v1/tenants/omega", "{\"nivelIsolamento\":\"SILO\"}");
+
+    assertThat(r.status()).isEqualTo(409);
+    assertThat(r.corpo().get("title").asText()).isEqualTo("Mudança de nível não suportada");
+    assertThat(mongo.findById("omega", TenantDocument.class).nivelIsolamento())
+        .isEqualTo(NivelIsolamento.POOL);
   }
 
   @Test

@@ -14,6 +14,9 @@ import org.springframework.data.mongodb.core.mapping.Document;
  * @param topic tópico Pulsar de destino
  * @param key chave da mensagem ({@code tenantId:aggregateId}), que garante ordem por agregado
  * @param payload evento serializado em Avro binário
+ * @param schema schema Avro (JSON) com que o payload foi escrito; o relay o anuncia ao Pulsar, e
+ *     não o schema atual da classe, para itens gravados antes de um deploy não saírem marcados com
+ *     a versão errada
  * @param traceparent contexto de trace, se houver
  * @param occurredAt instante do fato
  * @param publishedAt instante da publicação; nulo enquanto pendente
@@ -28,6 +31,7 @@ public record OutboxMessage(
     String topic,
     String key,
     byte[] payload,
+    String schema,
     String traceparent,
     Instant occurredAt,
     Instant publishedAt,

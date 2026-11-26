@@ -47,6 +47,25 @@ class TenantDocumentTest {
   }
 
   @Test
+  void mesmoEstadoIgnoraDatasEVersao() {
+    TenantDocument tocado = acme.withChanges(new TenantChange("ACME", null, null, true), AGORA);
+    assertThat(tocado.sameStateAs(acme)).isTrue();
+    assertThat(
+            acme.withChanges(new TenantChange("Outra", null, null, null), AGORA).sameStateAs(acme))
+        .isFalse();
+    assertThat(
+            acme.withChanges(new TenantChange(null, Plano.PROFISSIONAL, null, null), AGORA)
+                .sameStateAs(acme))
+        .isFalse();
+    assertThat(
+            acme.withChanges(new TenantChange(null, null, NivelIsolamento.SILO, null), AGORA)
+                .sameStateAs(acme))
+        .isFalse();
+    assertThat(acme.withChanges(new TenantChange(null, null, null, false), AGORA).sameStateAs(acme))
+        .isFalse();
+  }
+
+  @Test
   void alteracaoVaziaENomeEmBranco() {
     assertThat(new TenantChange(null, null, null, null).isEmpty()).isTrue();
     assertThat(new TenantChange(null, null, null, false).isEmpty()).isFalse();

@@ -61,6 +61,7 @@ public class TenantService {
             .setNome(saved.nome())
             .setPlano(saved.plano())
             .setNivelIsolamento(saved.nivelIsolamento())
+            .setVersao(saved.version())
             .build(),
         id);
     return TenantView.of(saved);
@@ -76,6 +77,11 @@ public class TenantService {
     }
     String id = parseId(rawId);
     TenantDocument current = find(id);
+    // Mudar de nível move os dados do tenant (outra database ou cluster): é um job de migração
+    // (ADR-0005, Dia 9), não um PATCH. Até lá, o nível só é escolhido na criação.
+    if (change.nivelIsolamento() != null && change.nivelIsolamento() != current.nivelIsolamento()) {
+      throw new TenantExceptions.LevelChangeNotSupported(id);
+    }
     Instant now = now();
     TenantChange normalized =
         new TenantChange(
@@ -83,8 +89,13 @@ public class TenantService {
             change.plano(),
             change.nivelIsolamento(),
             change.ativo());
+    TenantDocument changed = current.withChanges(normalized, now);
+    if (changed.sameStateAs(current)) {
+      // Nada mudou: não grava nem emite tenant.alterado (evita invalidar caches à toa).
+      return TenantView.of(current);
+    }
     // save() com @Version: se outra alteração gravou antes, lança OptimisticLockingFailure (409).
-    TenantDocument saved = mongo.save(current.withChanges(normalized, now));
+    TenantDocument saved = mongo.save(changed);
     outbox.append(
         TenantAlterado.newBuilder()
             .setEventId(UUID.randomUUID())
@@ -94,6 +105,7 @@ public class TenantService {
             .setPlano(saved.plano())
             .setNivelIsolamento(saved.nivelIsolamento())
             .setAtivo(saved.ativo())
+            .setVersao(saved.version())
             .build(),
         id);
     return TenantView.of(saved);

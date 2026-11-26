@@ -16,10 +16,16 @@ public class Outbox {
 
   private final MongoOperations mongo;
   private final EventCatalog catalog;
+  private final String service;
 
-  public Outbox(MongoOperations mongo, EventCatalog catalog) {
+  /**
+   * @param service contexto deste serviço ({@code x-produtor}, ex.: tenants); se informado, só
+   *     eventos que ele produz podem entrar no outbox (só o dono publica, ADR-0003)
+   */
+  public Outbox(MongoOperations mongo, EventCatalog catalog, String service) {
     this.mongo = mongo;
     this.catalog = catalog;
+    this.service = service;
   }
 
   /**
@@ -35,6 +41,16 @@ public class Outbox {
               + " (@Transactional)");
     }
     EventContract contract = catalog.of(event.getClass());
+    if (service != null && !service.equals(contract.producer())) {
+      throw new IllegalArgumentException(
+          "O serviço '"
+              + service
+              + "' não pode publicar "
+              + contract.event()
+              + ": o produtor é '"
+              + contract.producer()
+              + "'.");
+    }
     String eventId = field(event, "eventId").toString();
     String tenantId = field(event, "tenantId").toString();
     Object traceparent = field(event, "traceparent");
@@ -47,6 +63,7 @@ public class Outbox {
             contract.topic(),
             tenantId + ":" + aggregateId,
             AvroCodec.encode(event),
+            event.getSchema().toString(),
             traceparent == null ? null : traceparent.toString(),
             occurredAt,
             null,

@@ -3,6 +3,7 @@ package br.dev.plataforma.spring;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import br.dev.plataforma.contracts.EventCatalog;
 import br.dev.plataforma.contracts.tenants.NivelIsolamento;
 import br.dev.plataforma.contracts.tenants.Plano;
 import br.dev.plataforma.contracts.tenants.TenantCriado;
@@ -164,6 +165,7 @@ class PlatformSpringIT {
 
     OutboxMessage gravada = mongo.findById(evento.getEventId().toString(), OutboxMessage.class);
     assertThat(gravada.publishedAt()).isNotNull();
+    assertThat(gravada.schema()).isEqualTo(TenantCriado.getClassSchema().toString());
     assertThat(relay.publishPending()).as("nada mais pendente").isZero();
   }
 
@@ -188,6 +190,16 @@ class PlatformSpringIT {
     List<OutboxMessage> todas = mongo.findAll(OutboxMessage.class);
     assertThat(todas).extracting(OutboxMessage::attempts).containsExactlyInAnyOrder(1, 0);
     assertThat(todas).anyMatch(m -> "IOException".equals(m.lastError()));
+  }
+
+  @Test
+  void outboxDeUmServicoRecusaEventoDeOutroProdutor() {
+    Outbox doPedidos = new Outbox(mongo, EventCatalog.defaultCatalog(), "pedidos");
+
+    assertThatThrownBy(() -> tx.executeWithoutResult(s -> doPedidos.append(evento("acme"), "acme")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("produtor é 'tenants'");
+    assertThat(mongo.count(new Query(), OutboxMessage.class)).isZero();
   }
 
   @Test
@@ -239,7 +251,7 @@ class PlatformSpringIT {
   }
 
   @Test
-  void guardaPreencheTenantDoContextoERecusaOutroTenant() {
+  void guardaPreencheTenantDoContextoERecusaOutroTenant() throws Exception {
     TenantContext.runAs(new TenantId("acme"), () -> mongo.insert(new Nota("n1", null, "a")));
     assertThat(mongo.findById("n1", Nota.class).getTenantId()).isEqualTo("acme");
 
@@ -254,6 +266,17 @@ class PlatformSpringIT {
     // Fora de requisição (ex.: job), um documento com tenant explícito é aceito
     mongo.insert(new Nota("n4", "globex", "d"));
     assertThat(mongo.findById("n4", Nota.class).getTenantId()).isEqualTo("globex");
+
+    // Na leitura também: findById sem filtro de tenant não vaza documento de outro tenant
+    assertThatThrownBy(
+            () ->
+                TenantContext.callAs(
+                    new TenantId("acme"), null, () -> mongo.findById("n4", Nota.class)))
+        .isInstanceOf(CrossTenantAccessException.class);
+    assertThat(
+            TenantContext.callAs(new TenantId("acme"), null, () -> mongo.findById("n1", Nota.class))
+                .texto)
+        .isEqualTo("a");
   }
 
   @Test

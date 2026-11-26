@@ -28,8 +28,14 @@ management:
     health:
       probes:
         enabled: true
+      group:
+        readiness:
+          # Pronto só com o MongoDB respondendo: o status-service e o Kubernetes leem esta probe.
+          include: readinessState,mongo
 
 plataforma:
+  # Contexto produtor (x-produtor): o outbox recusa eventos de outro serviço.
+  service: tenants
   tenancy:
     # API administrativa: opera sobre o catálogo de tenants, sem X-Tenant-Id (ADR-0005).
     excluded-paths:

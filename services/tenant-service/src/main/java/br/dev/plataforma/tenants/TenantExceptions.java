@@ -19,6 +19,15 @@ final class TenantExceptions {
     }
   }
 
+  static final class LevelChangeNotSupported extends RuntimeException {
+    LevelChangeNotSupported(String id) {
+      super(
+          "O nível de isolamento de '"
+              + id
+              + "' não muda por PATCH: a migração entre níveis chega no Dia 9.");
+    }
+  }
+
   static final class InvalidRequest extends RuntimeException {
     InvalidRequest(String message) {
       super(message);

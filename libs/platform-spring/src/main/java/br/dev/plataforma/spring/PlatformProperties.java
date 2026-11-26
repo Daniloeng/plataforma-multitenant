@@ -7,12 +7,15 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /**
  * Configuração da biblioteca comum ({@code plataforma.*}).
  *
+ * @param service contexto deste serviço, como em {@code x-produtor} (ex.: tenants); se informado, o
+ *     outbox recusa eventos de outro produtor
  * @param tenancy regras do cabeçalho de tenant
  * @param outbox publicação de eventos
  * @param idempotency retenção dos registros de deduplicação e do outbox publicado
  */
 @ConfigurationProperties("plataforma")
-public record PlatformProperties(Tenancy tenancy, OutboxProps outbox, Idempotency idempotency) {
+public record PlatformProperties(
+    String service, Tenancy tenancy, OutboxProps outbox, Idempotency idempotency) {
 
   public PlatformProperties {
     tenancy = tenancy == null ? new Tenancy(null, null) : tenancy;

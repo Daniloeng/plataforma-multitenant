@@ -21,7 +21,14 @@ public class PulsarEventPublisher implements EventPublisher, AutoCloseable {
   private final PulsarClient client;
   private final EventCatalog catalog;
   private final Duration timeout;
-  private final Map<String, Producer<byte[]>> producers = new ConcurrentHashMap<>();
+
+  /**
+   * Um produtor por (tópico, schema gravado): itens antigos saem com o schema com que foram
+   * escritos.
+   */
+  private final Map<ProducerKey, Producer<byte[]>> producers = new ConcurrentHashMap<>();
+
+  private record ProducerKey(String topic, String schema) {}
 
   public PulsarEventPublisher(PulsarClient client, EventCatalog catalog, Duration timeout) {
     this.client = client;
@@ -31,7 +38,9 @@ public class PulsarEventPublisher implements EventPublisher, AutoCloseable {
 
   @Override
   public void publish(OutboxMessage message) throws Exception {
-    Producer<byte[]> producer = producers.computeIfAbsent(message.topic(), this::createProducer);
+    Producer<byte[]> producer =
+        producers.computeIfAbsent(
+            new ProducerKey(message.topic(), message.schema()), this::createProducer);
     TypedMessageBuilder<byte[]> builder =
         producer
             .newMessage()
@@ -47,15 +56,21 @@ public class PulsarEventPublisher implements EventPublisher, AutoCloseable {
     builder.sendAsync().get(timeout.toMillis(), TimeUnit.MILLISECONDS);
   }
 
-  private Producer<byte[]> createProducer(String topic) {
+  private Producer<byte[]> createProducer(ProducerKey key) {
+    String topic = key.topic();
     EventContract contract =
         catalog.all().stream()
             .filter(c -> c.topic().equals(topic))
             .findFirst()
             .orElseThrow(() -> new IllegalArgumentException("Tópico fora do catálogo: " + topic));
+    // Itens gravados antes desta versão da biblioteca não têm schema: usa o do contrato.
+    org.apache.avro.Schema schema =
+        key.schema() == null
+            ? contract.schema()
+            : new org.apache.avro.Schema.Parser().parse(key.schema());
     try {
       return client
-          .newProducer(new AvroBytesSchema(contract.schema()))
+          .newProducer(new AvroBytesSchema(schema))
           .topic(topic)
           .enableBatching(false)
           .sendTimeout((int) timeout.toMillis(), TimeUnit.MILLISECONDS)

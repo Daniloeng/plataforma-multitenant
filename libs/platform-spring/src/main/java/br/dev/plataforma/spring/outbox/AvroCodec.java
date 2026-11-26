@@ -4,9 +4,11 @@ import br.dev.plataforma.contracts.AvroTrust;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import org.apache.avro.Schema;
 import org.apache.avro.io.BinaryEncoder;
 import org.apache.avro.io.DecoderFactory;
 import org.apache.avro.io.EncoderFactory;
+import org.apache.avro.specific.SpecificData;
 import org.apache.avro.specific.SpecificDatumReader;
 import org.apache.avro.specific.SpecificDatumWriter;
 import org.apache.avro.specific.SpecificRecord;
@@ -34,7 +36,25 @@ public final class AvroCodec {
     }
   }
 
-  /** Lê um evento gravado com o schema atual da classe. */
+  /**
+   * Lê um evento escrito com o schema {@code writer} (o da mensagem, resolvido pelo schemaVersion
+   * no Schema Registry) e o converte para o schema atual da classe. É o caminho certo para
+   * consumidores: aceita produtores com versão mais nova ou mais antiga do contrato (FULL).
+   */
+  public static <T extends SpecificRecord> T decode(byte[] bytes, Schema writer, Class<T> type) {
+    try {
+      Schema reader = SpecificData.get().getSchema(type);
+      return new SpecificDatumReader<T>(writer, reader)
+          .read(null, DecoderFactory.get().binaryDecoder(bytes, null));
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
+  /**
+   * Lê um evento escrito com o mesmo schema da classe (só quando os dois lados são da mesma
+   * versão).
+   */
   public static <T extends SpecificRecord> T decode(byte[] bytes, Class<T> type) {
     try {
       return new SpecificDatumReader<>(type)

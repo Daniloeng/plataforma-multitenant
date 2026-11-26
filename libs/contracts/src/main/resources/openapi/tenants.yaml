@@ -73,7 +73,10 @@ paths:
     patch:
       tags: [tenants]
       operationId: alterarTenant
-      summary: Altera plano, nível ou situação e publica tenant.alterado
+      summary: Altera nome, plano ou situação e publica tenant.alterado
+      description: >-
+        Campos ausentes não mudam; um PATCH sem mudança real não publica evento. O nível de
+        isolamento só é escolhido na criação: trocar de nível é uma migração (Dia 9) e responde 409.
       requestBody:
         required: true
         content:
@@ -87,6 +90,7 @@ paths:
               schema: { $ref: '#/components/schemas/Tenant' }
         '400': { $ref: '_comum.yaml#/components/responses/RequisicaoInvalida' }
         '404': { $ref: '_comum.yaml#/components/responses/NaoEncontrado' }
+        '409': { $ref: '_comum.yaml#/components/responses/Conflito' }
 components:
   securitySchemes:
     jwt:

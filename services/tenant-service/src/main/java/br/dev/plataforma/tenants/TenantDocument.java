@@ -24,6 +24,14 @@ public record TenantDocument(
     Instant atualizadoEm,
     @Version Long version) {
 
+  /** Mesmo conteúdo de negócio, ignorando datas e versão. */
+  boolean sameStateAs(TenantDocument other) {
+    return nome.equals(other.nome)
+        && plano == other.plano
+        && nivelIsolamento == other.nivelIsolamento
+        && ativo == other.ativo;
+  }
+
   TenantDocument withChanges(TenantChange change, Instant now) {
     return new TenantDocument(
         id,

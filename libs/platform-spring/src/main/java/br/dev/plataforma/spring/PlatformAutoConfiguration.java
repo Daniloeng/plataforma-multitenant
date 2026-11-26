@@ -12,7 +12,7 @@ import br.dev.plataforma.spring.tenancy.TenantGuard;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Clock;
 import org.apache.pulsar.client.api.PulsarClient;
-import org.springframework.boot.ApplicationRunner;
+import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -85,8 +85,8 @@ public class PlatformAutoConfiguration {
     }
 
     @Bean
-    Outbox outbox(MongoOperations mongo, EventCatalog catalog) {
-      return new Outbox(mongo, catalog);
+    Outbox outbox(MongoOperations mongo, EventCatalog catalog, PlatformProperties props) {
+      return new Outbox(mongo, catalog, props.service());
     }
 
     @Bean
@@ -94,9 +94,13 @@ public class PlatformAutoConfiguration {
       return new IdempotentConsumer(mongo, clock);
     }
 
+    /**
+     * Cria os índices quando os singletons ficam prontos, antes de o servidor web aceitar
+     * requisições: o índice único da deduplicação precisa existir antes do primeiro evento.
+     */
     @Bean
-    ApplicationRunner platformIndexes(MongoOperations mongo, PlatformProperties props) {
-      return args -> IdempotencyIndexes.ensure(mongo, props.idempotency().retention());
+    SmartInitializingSingleton platformIndexes(MongoOperations mongo, PlatformProperties props) {
+      return () -> IdempotencyIndexes.ensure(mongo, props.idempotency().retention());
     }
   }
 
