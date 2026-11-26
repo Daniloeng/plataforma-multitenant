@@ -1,0 +1,117 @@
+# Infraestrutura local do Dia 1: um MongoDB por microsserviço + Pulsar standalone + status-service.
+#
+#   docker compose -f infra/docker-compose.yml up -d --wait        # tudo
+#   docker compose -f infra/docker-compose.yml up -d --wait pulsar # só o necessário
+#
+# Cada MongoDB roda como replica set de um nó (necessário para transações e change streams,
+# usados pelo outbox a partir do Dia 3) e com cache do WiredTiger limitado a 256 MB.
+name: plataforma
+
+# Cada nó tem replica set próprio (rs-<serviço>) e se anuncia pelo nome do serviço no Compose.
+# Assim um cliente nunca é redirecionado para o banco de outro serviço. Do host, conecte com
+# directConnection=true (ex.: mongodb://localhost:27018/?directConnection=true).
+x-mongo: &mongo
+  image: mongo:8.0
+  command: ["bash", "-c", "exec docker-entrypoint.sh mongod --replSet \"$$RS_NAME\" --bind_ip_all --wiredTigerCacheSizeGB 0.25 --quiet"]
+  restart: unless-stopped
+  deploy:
+    resources:
+      limits:
+        memory: 512m
+  healthcheck:
+    # Inicia o replica set na primeira vez; depois só confirma que o nó é PRIMARY.
+    test:
+      - CMD-SHELL
+      - >-
+        mongosh --quiet --eval "try { rs.status().ok } catch (e) {
+        rs.initiate({_id: '$$RS_NAME', members: [{_id: 0, host: '$$RS_HOST'}]}).ok };
+        db.hello().isWritablePrimary || quit(1)"
+    interval: 5s
+    timeout: 10s
+    retries: 20
+    start_period: 5s
+
+services:
+  mongo-tenants:
+    <<: *mongo
+    ports: ["27017:27017"]
+    volumes: ["mongo-tenants:/data/db"]
+    environment: { RS_NAME: rs-tenants, RS_HOST: "mongo-tenants:27017" }
+
+  mongo-catalogo:
+    <<: *mongo
+    ports: ["27018:27017"]
+    volumes: ["mongo-catalogo:/data/db"]
+    environment: { RS_NAME: rs-catalogo, RS_HOST: "mongo-catalogo:27017" }
+
+  mongo-pedidos:
+    <<: *mongo
+    ports: ["27019:27017"]
+    volumes: ["mongo-pedidos:/data/db"]
+    environment: { RS_NAME: rs-pedidos, RS_HOST: "mongo-pedidos:27017" }
+
+  mongo-pagamentos:
+    <<: *mongo
+    ports: ["27020:27017"]
+    volumes: ["mongo-pagamentos:/data/db"]
+    environment: { RS_NAME: rs-pagamentos, RS_HOST: "mongo-pagamentos:27017" }
+
+  pulsar:
+    image: apachepulsar/pulsar:4.0.7
+    command: ["bin/pulsar", "standalone", "--no-functions-worker", "--no-stream-storage"]
+    environment:
+      PULSAR_MEM: "-Xms256m -Xmx512m -XX:MaxDirectMemorySize=256m"
+    ports:
+      - "6650:6650" # protocolo binário (produtores e consumidores)
+      - "8080:8080" # admin HTTP
+    volumes: ["pulsar-data:/pulsar/data"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "bin/pulsar-admin", "brokers", "healthcheck"]
+      interval: 10s
+      timeout: 15s
+      retries: 20
+      start_period: 20s
+
+  # Cria o tenant Pulsar "plataforma" e um namespace por domínio. Roda uma vez e termina.
+  pulsar-init:
+    image: curlimages/curl:8.11.1
+    depends_on:
+      pulsar:
+        condition: service_healthy
+    volumes: ["./pulsar/init.sh:/init.sh:ro"]
+    entrypoint: ["sh", "/init.sh"]
+    environment:
+      PULSAR_ADMIN_URL: http://pulsar:8080
+    restart: "no"
+
+  status-service:
+    build:
+      context: ..
+      dockerfile: services/status-service/Dockerfile
+    image: plataforma/status-service:dev
+    ports: ["8090:8090"]
+    environment:
+      MONGO_TENANTS_URI: mongodb://mongo-tenants:27017/?directConnection=true
+      MONGO_CATALOGO_URI: mongodb://mongo-catalogo:27017/?directConnection=true
+      MONGO_PEDIDOS_URI: mongodb://mongo-pedidos:27017/?directConnection=true
+      MONGO_PAGAMENTOS_URI: mongodb://mongo-pagamentos:27017/?directConnection=true
+      PULSAR_ADMIN_URL: http://pulsar:8080
+    depends_on:
+      mongo-tenants: { condition: service_healthy }
+      mongo-catalogo: { condition: service_healthy }
+      mongo-pedidos: { condition: service_healthy }
+      mongo-pagamentos: { condition: service_healthy }
+      pulsar: { condition: service_healthy }
+      pulsar-init: { condition: service_completed_successfully }
+    deploy:
+      resources:
+        limits:
+          memory: 384m
+
+volumes:
+  mongo-tenants:
+  mongo-catalogo:
+  mongo-pedidos:
+  mongo-pagamentos:
+  pulsar-data:

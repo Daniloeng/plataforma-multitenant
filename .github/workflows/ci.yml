@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (Java 21, testes e cobertura ≥ 80%)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      # verify = formatação (Spotless) + testes unitários e de integração (Testcontainers) + JaCoCo ≥ 80%
+      - run: mvn -B verify
+      - name: Resumo de cobertura
+        if: always()
+        run: |
+          {
+            echo "### Cobertura do backend (linhas)"
+            echo "| Módulo | Linhas |"
+            echo "|---|---|"
+            for csv in $(find . -path '*/target/site/jacoco/jacoco.csv'); do
+              mod=$(echo "$csv" | cut -d/ -f2-3)
+              awk -F, -v m="$mod" 'NR>1{miss+=$8; cov+=$9} END{if (miss+cov>0) printf "| %s | %.1f%% |\n", m, 100*cov/(miss+cov)}' "$csv"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cobertura-backend
+          path: '**/target/site/jacoco/'
+          if-no-files-found: ignore
+
+  frontend:
+    name: Frontend (Vitest, cobertura ≥ 80% e build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm run test:coverage
+      - name: Resumo de cobertura
+        if: always()
+        run: |
+          node -e '
+            const s = require("./coverage/coverage-summary.json").total;
+            const l = ["### Cobertura do frontend", "| Métrica | % |", "|---|---|"];
+            for (const k of ["lines", "statements", "functions", "branches"]) l.push(`| ${k} | ${s[k].pct}% |`);
+            console.log(l.join("\n"));
+          ' >> "$GITHUB_STEP_SUMMARY"
+      - run: npm run build
+        env:
+          VITE_DEMO: 'true'
+          VITE_BASE: /plataforma-multitenant/
+
+  compose:
+    name: Ambiente local (Docker Compose sobe e /api/status responde UP)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Subir MongoDB x4, Pulsar e status-service
+        run: docker compose -f infra/docker-compose.yml up -d --build --wait --wait-timeout 300
+      - name: Conferir /api/status
+        run: |
+          curl -fsS http://localhost:8090/api/status | tee status.json
+          python3 - <<'PY'
+          import json
+          s = json.load(open("status.json"))
+          assert s["status"] == "UP", s
+          assert len(s["components"]) == 5, s
+          print("\nPlataforma UP com", len(s["components"]), "componentes")
+          PY
+      - name: Conferir namespaces Pulsar
+        run: |
+          curl -fsS http://localhost:8080/admin/v2/namespaces/plataforma | tee ns.json
+          for ns in tenants catalogo pedidos pagamentos; do grep -q "plataforma/$ns" ns.json; done
+      - name: Logs em caso de falha
+        if: failure()
+        run: docker compose -f infra/docker-compose.yml logs --tail 200
+      - if: always()
+        run: docker compose -f infra/docker-compose.yml down -v
