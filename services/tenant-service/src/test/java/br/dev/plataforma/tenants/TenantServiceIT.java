@@ -129,6 +129,7 @@ class TenantServiceIT {
       assertThat(criado.corpo().get("nivelIsolamento").asText()).isEqualTo("POOL");
       assertThat(criado.corpo().get("ativo").asBoolean()).isTrue();
       assertThat(criado.corpo().has("version")).isFalse();
+      assertThat(criado.corpo().get("versao").asLong()).isZero();
 
       Resposta lido = chamar("GET", "/api/v1/tenants/acme", null);
       assertThat(lido.status()).isEqualTo(200);

@@ -1,8 +1,9 @@
 import { http, HttpResponse } from 'msw';
 import type { StatusComponent, StatusResponse } from '../api/status';
+import { gatewayHandlers } from './gateway';
 import { tenantHandlers } from './tenants';
 
-export const DEMO_VERSION = '0.1.0-dia03';
+export const DEMO_VERSION = '0.1.0-dia04';
 
 type Random = () => number;
 
@@ -11,7 +12,7 @@ function jitter(base: number, spread: number, random: Random): number {
   return base + Math.round(random() * spread);
 }
 
-/** Monta uma resposta realista do status-service, com Mongo, Pulsar e tenant-service no ar. */
+/** Resposta realista do status-service: Mongo, Pulsar, tenant-service, gateway e Keycloak no ar. */
 export function buildDemoStatus(
   random: Random = Math.random,
   now: Date = new Date(),
@@ -47,11 +48,28 @@ export function buildDemoStatus(
         latencyMs: jitter(6, 6, random),
         details: 'readiness UP',
       },
+      {
+        // Desde o Dia 4: o gateway (porta de entrada das APIs) e o Keycloak (login).
+        name: 'gateway',
+        type: 'SERVICE',
+        status: 'UP',
+        latencyMs: jitter(4, 4, random),
+        details: 'readiness UP',
+      },
+      {
+        name: 'keycloak',
+        type: 'SERVICE',
+        status: 'UP',
+        latencyMs: jitter(12, 10, random),
+        details: 'realm plataforma',
+      },
     ],
   };
 }
 
 export const handlers = [
+  // /api/status continua público (sem token).
   http.get('*/api/status', () => HttpResponse.json(buildDemoStatus())),
+  ...gatewayHandlers,
   ...tenantHandlers,
 ];

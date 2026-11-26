@@ -132,3 +132,9 @@ components:
         nivelIsolamento: { $ref: '#/components/schemas/NivelIsolamento' }
         ativo: { type: boolean }
         criadoEm: { type: string, format: date-time }
+        versao:
+          type: integer
+          format: int64
+          description: >-
+            Versão do cadastro, a mesma do campo versao dos eventos tenant.*. Quem combina a
+            listagem com os eventos fica com a maior.

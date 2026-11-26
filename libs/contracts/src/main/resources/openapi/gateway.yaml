@@ -1,0 +1,97 @@
+openapi: 3.1.0
+info:
+  title: Gateway
+  version: 1.0.0
+  description: >-
+    Endpoints do próprio gateway. Todas as APIs da plataforma passam por ele: o gateway valida o
+    token do Keycloak, confere o tenant escolhido em X-Tenant-Id contra os tenants do usuário,
+    aplica o limite do plano do tenant e repassa X-Tenant-Id, X-Cliente-Id, X-Usuario e X-Papeis
+    verificados aos serviços (cabeçalhos com esses nomes vindos de fora são descartados).
+servers:
+  - url: http://localhost:8000
+security:
+  - jwt: []
+x-autorizacao: "Qualquer usuário autenticado; cada um só vê os próprios tenants (administradores veem todos)."
+tags:
+  - name: identidade
+paths:
+  /api/v1/me:
+    get:
+      tags: [identidade]
+      operationId: obterUsuarioAtual
+      summary: Usuário autenticado, papéis e os tenants a que tem acesso
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: false
+          description: >-
+            Tenant escolhido (opcional aqui). Quando informado, o gateway confere o acesso e conta a
+            requisição no limite do plano desse tenant.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Usuário atual.
+          headers:
+            X-RateLimit-Limit:
+              description: Requisições por segundo do plano do tenant escolhido.
+              schema: { type: integer }
+            X-RateLimit-Remaining:
+              description: Fichas restantes no balde do tenant.
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UsuarioAtual' }
+        '401': { $ref: '#/components/responses/NaoAutenticado' }
+        '403': { $ref: '#/components/responses/AcessoNegado' }
+        '429': { $ref: '#/components/responses/LimiteExcedido' }
+components:
+  securitySchemes:
+    jwt:
+      $ref: '_comum.yaml#/components/securitySchemes/jwt'
+  responses:
+    NaoAutenticado:
+      description: Sem token, token expirado ou de outro emissor/audiência.
+      content:
+        application/problem+json:
+          schema: { $ref: '_comum.yaml#/components/schemas/Problema' }
+    AcessoNegado:
+      description: Papel insuficiente, tenant que não é do usuário, inexistente ou suspenso.
+      content:
+        application/problem+json:
+          schema: { $ref: '_comum.yaml#/components/schemas/Problema' }
+    LimiteExcedido:
+      description: O tenant passou do limite do plano.
+      headers:
+        Retry-After:
+          description: Segundos até a próxima ficha.
+          schema: { type: integer }
+      content:
+        application/problem+json:
+          schema: { $ref: '_comum.yaml#/components/schemas/Problema' }
+  schemas:
+    UsuarioAtual:
+      type: object
+      required: [usuario, nome, papeis, tenants]
+      properties:
+        usuario: { type: string }
+        nome: { type: string }
+        papeis:
+          type: array
+          items:
+            type: string
+            enum: [plataforma-admin, gestor-tenant, comprador]
+        clienteId:
+          type: [string, 'null']
+          description: Cliente B2B do comprador (ADR-0007).
+        tenants:
+          type: array
+          items: { $ref: '#/components/schemas/TenantDoUsuario' }
+    TenantDoUsuario:
+      type: object
+      required: [id, nome, plano, nivelIsolamento, ativo]
+      properties:
+        id: { type: string }
+        nome: { type: string }
+        plano: { type: string, enum: [GRATUITO, PROFISSIONAL, EMPRESARIAL] }
+        nivelIsolamento: { type: string, enum: [POOL, BRIDGE, SILO] }
+        ativo: { type: boolean }

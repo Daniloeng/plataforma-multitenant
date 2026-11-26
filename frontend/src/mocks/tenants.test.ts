@@ -5,7 +5,7 @@ import { SEED_TENANTS, resetTenantStore, tenantStoreSnapshot } from './tenants';
 async function call(method: string, path = '', body?: unknown) {
   const response = await fetch(`${tenantsUrl()}${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer demo-admin' },
     body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body),
   });
   const text = await response.text();

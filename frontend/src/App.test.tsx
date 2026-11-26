@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { App } from './App';
+import { createDemoAuthClient } from './auth/demo';
 import { server } from './mocks/server';
 import { makeStatus } from './test/fixtures';
 
@@ -140,7 +141,7 @@ describe('App', () => {
     await screen.findByTestId('overall-status');
     expect(screen.getByRole('heading', { name: 'Microsserviços' })).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Progresso' })).toBeVisible();
-    expect(screen.getByText('Dia 3 de 22')).toBeVisible();
+    expect(screen.getByText('Dia 4 de 22')).toBeVisible();
   });
 
   it('mostra o selo de demo apenas no modo demo', async () => {
@@ -219,17 +220,17 @@ describe('App', () => {
     expect(card).toHaveClass('component--up');
   });
 
-  it('navega para a aba Tenants e cria um tenant', async () => {
+  it('navega para a aba Tenants, entra como admin (demo) e cria um tenant', async () => {
     const user = userEvent.setup();
     mockApi(makeStatus());
-    render(<App />);
+    render(<App authClient={createDemoAuthClient()} />);
     await screen.findByTestId('overall-status');
     const nav = screen.getByRole('navigation', { name: 'Páginas' });
     expect(
       within(nav)
         .getAllByRole('link')
         .map((a) => a.textContent),
-    ).toEqual(['Status', 'Tenants', 'Arquitetura']);
+    ).toEqual(['Status', 'Tenants', 'Arquitetura', 'Minha conta']);
     const tenants = within(nav).getByRole('link', { name: 'Tenants' });
     expect(tenants).toHaveAttribute('href', '#/tenants');
 
@@ -240,6 +241,12 @@ describe('App', () => {
     expect(document.title).toBe('Tenants');
     expect(screen.getByText(/Dados do tenant-service/)).toBeVisible();
     expect(screen.queryByTestId('overall-status')).not.toBeInTheDocument();
+
+    // Sem login, a página convida a entrar; no modo demo, com os usuários de demonstração.
+    expect(screen.getByRole('heading', { name: 'Entre para continuar' })).toBeVisible();
+    await user.click(
+      screen.getByRole('button', { name: /Entrar como Administradora da plataforma/ }),
+    );
 
     const table = await screen.findByRole('table', { name: 'Tenants cadastrados' });
     expect(within(table).getByRole('row', { name: 'metalurgica-serra-azul' })).toBeVisible();
@@ -252,10 +259,12 @@ describe('App', () => {
     expect(within(table).getAllByRole('row')[1]).toHaveAccessibleName('textil-norte');
   });
 
-  it('abre direto em Tenants quando a URL já tem #/tenants', async () => {
+  it('abre direto em Tenants quando a URL já tem #/tenants e pede login no Keycloak', async () => {
     window.location.hash = '#/tenants';
     render(<App />);
     expect(screen.getByRole('heading', { level: 1, name: 'Tenants' })).toBeVisible();
-    expect(await screen.findByRole('table', { name: 'Tenants cadastrados' })).toBeVisible();
+    expect(await screen.findByRole('button', { name: 'Entrar com o Keycloak' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Entrar' })).toBeVisible();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
 });

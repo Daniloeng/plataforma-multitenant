@@ -25,6 +25,13 @@ export const ROADMAP: readonly RoadmapService[] = [
     situation: 'Ativo',
   },
   {
+    name: 'Gateway + Keycloak',
+    day: 4,
+    responsibility:
+      'Porta única das APIs: valida o token do Keycloak, confere o tenant do X-Tenant-Id e limita requisições por plano.',
+    situation: 'Ativo',
+  },
+  {
     name: 'Catálogo',
     day: 5,
     responsibility: 'Mantém produtos, preços e estoque disponíveis para cada tenant.',
@@ -44,6 +51,6 @@ export const ROADMAP: readonly RoadmapService[] = [
   },
 ];
 
-export const CURRENT_DAY = 3;
+export const CURRENT_DAY = 4;
 export const TOTAL_DAYS = 22;
 export const REPOSITORY_URL = 'https://github.com/Daniloeng/plataforma-multitenant';

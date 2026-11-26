@@ -36,6 +36,16 @@ public record StatusProperties(
   /** O Pulsar a verificar, pelo admin HTTP. */
   public record PulsarTarget(@NotBlank String name, @NotNull URI adminUrl) {}
 
-  /** Um microsserviço a verificar, pela URL base (ex.: http://tenant-service:8081). */
-  public record ServiceTarget(@NotBlank String name, @NotNull URI url) {}
+  /**
+   * Um serviço a verificar, pela URL base (ex.: http://tenant-service:8081).
+   *
+   * @param healthPath caminho que responde 200 quando o serviço está pronto (padrão: a readiness do
+   *     Actuator; o Keycloak usa {@code health/ready})
+   */
+  public record ServiceTarget(@NotBlank String name, @NotNull URI url, String healthPath) {
+    public ServiceTarget {
+      healthPath =
+          healthPath == null || healthPath.isBlank() ? ServiceCheck.HEALTH_PATH : healthPath;
+    }
+  }
 }

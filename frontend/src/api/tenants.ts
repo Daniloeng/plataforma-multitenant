@@ -1,6 +1,8 @@
 // Cliente e tipos do contrato do Tenant Service (libs/contracts/.../openapi/tenants.yaml).
 
-import { ApiError, apiUrl } from './http';
+import { ApiError, apiFetch, apiUrl, readJson } from './http';
+
+export type { Problema } from './http';
 
 export const PLANOS = ['GRATUITO', 'PROFISSIONAL', 'EMPRESARIAL'] as const;
 export const NIVEIS_ISOLAMENTO = ['POOL', 'BRIDGE', 'SILO'] as const;
@@ -36,15 +38,6 @@ export interface AlteracaoTenant {
 export interface PaginaTenants {
   itens: Tenant[];
   proximoCursor: string | null;
-}
-
-/** Problem Details (RFC 9457), formato de erro de todas as APIs. */
-export interface Problema {
-  type: string;
-  title: string;
-  status: number;
-  detail?: string;
-  instance?: string;
 }
 
 /** Tamanho de página padrão do contrato (parâmetro `limite`). */
@@ -111,6 +104,9 @@ function isPaginaTenants(value: unknown): value is PaginaTenants {
 }
 
 // ---- Cliente HTTP ----
+// Desde o Dia 4 a API passa pelo gateway e exige o papel plataforma-admin (token Bearer). Ela é
+// administrativa e não é de um tenant: o X-Tenant-Id não é enviado (tenant: false), o que também
+// deixa o admin reativar um tenant suspenso mesmo com outro tenant selecionado.
 
 /** URL absoluta de /api/v1/tenants (ou de um tenant, quando `id` é informado). */
 export function tenantsUrl(
@@ -120,36 +116,6 @@ export function tenantsUrl(
 ): string {
   const path = id === undefined ? 'api/v1/tenants' : `api/v1/tenants/${encodeURIComponent(id)}`;
   return apiUrl(path, baseUrl, origin);
-}
-
-/** Lê o corpo de erro: usa o `detail` do Problem Details quando houver. */
-async function toApiError(response: Response): Promise<ApiError> {
-  let detail: string | null = null;
-  try {
-    const body: unknown = await response.json();
-    if (typeof body === 'object' && body !== null) {
-      const p = body as Partial<Problema>;
-      if (typeof p.detail === 'string' && p.detail.trim()) detail = p.detail;
-      else if (typeof p.title === 'string' && p.title.trim()) detail = p.title;
-    }
-  } catch {
-    // corpo vazio ou não JSON: fica só o código HTTP
-  }
-  return new ApiError(detail ?? `A API respondeu com HTTP ${response.status}.`, response.status);
-}
-
-async function readJson<T>(response: Response, guard: (v: unknown) => v is T): Promise<T> {
-  if (!response.ok) throw await toApiError(response);
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    throw new ApiError('A API devolveu uma resposta que não é JSON.', response.status);
-  }
-  if (!guard(body)) {
-    throw new ApiError('A resposta da API está fora do contrato esperado.', response.status);
-  }
-  return body;
 }
 
 const JSON_HEADERS = {
@@ -164,9 +130,10 @@ export async function listTenants(
   const url = new URL(tenantsUrl());
   url.searchParams.set('limite', String(options.limite ?? LIMITE_PADRAO));
   if (options.cursor) url.searchParams.set('cursor', options.cursor);
-  const response = await fetch(url, {
+  const response = await apiFetch(url, {
     headers: { Accept: JSON_HEADERS.Accept },
     signal: options.signal,
+    tenant: false,
   });
   const pagina = await readJson(response, isPaginaTenants);
   return { itens: pagina.itens, proximoCursor: pagina.proximoCursor ?? null };
@@ -174,7 +141,8 @@ export async function listTenants(
 
 /** POST /api/v1/tenants — cadastra um tenant (201). Erros 400/409 trazem o `detail`. */
 export async function createTenant(novo: NovoTenant): Promise<Tenant> {
-  const response = await fetch(tenantsUrl(), {
+  const response = await apiFetch(tenantsUrl(), {
+    tenant: false,
     method: 'POST',
     headers: JSON_HEADERS,
     body: JSON.stringify(novo),
@@ -184,7 +152,8 @@ export async function createTenant(novo: NovoTenant): Promise<Tenant> {
 
 /** PATCH /api/v1/tenants/{id} — altera nome, plano ou situação (200); o nível não muda (409). */
 export async function updateTenant(id: string, alteracao: AlteracaoTenant): Promise<Tenant> {
-  const response = await fetch(tenantsUrl(id), {
+  const response = await apiFetch(tenantsUrl(id), {
+    tenant: false,
     method: 'PATCH',
     headers: JSON_HEADERS,
     body: JSON.stringify(alteracao),

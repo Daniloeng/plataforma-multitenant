@@ -5,6 +5,10 @@ import { server } from '../mocks/server';
 import { resetTenantStore, tenantStoreSnapshot } from '../mocks/tenants';
 import { makeTenants } from '../test/fixtures';
 import { TenantsPage } from './TenantsPage';
+import { signInAs } from '../test/session';
+
+// Desde o Dia 4 a API de tenants exige token com o papel plataforma-admin.
+beforeEach(() => signInAs('admin'));
 
 function rows() {
   const table = screen.getByRole('table', { name: 'Tenants cadastrados' });

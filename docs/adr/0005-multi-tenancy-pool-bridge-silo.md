@@ -1,6 +1,6 @@
 # ADR-0005: Multi-tenancy com níveis Pool, Bridge e Silo, tenant resolvido no gateway
 
-- **Status:** Aceito
+- **Status:** Aceito; claim do tenant alterada pelo ADR-0009
 - **Data:** 2026-11-26
 
 ## Contexto

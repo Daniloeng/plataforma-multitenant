@@ -121,4 +121,24 @@ class ServiceCheckTest {
       Thread.interrupted();
     }
   }
+
+  @Test
+  void aceitaCaminhoDeSaudeProprio() {
+    assertThat(
+            new ServiceCheck(
+                    "keycloak", URI.create("http://keycloak:9000"), "health/ready", TIMEOUT)
+                .healthUri())
+        .hasToString("http://keycloak:9000/health/ready");
+  }
+
+  @Test
+  void alvoSemCaminhoUsaAReadinessDoActuator() {
+    URI url = URI.create("http://x:1");
+    assertThat(new StatusProperties.ServiceTarget("x", url, null).healthPath())
+        .isEqualTo(ServiceCheck.HEALTH_PATH);
+    assertThat(new StatusProperties.ServiceTarget("x", url, " ").healthPath())
+        .isEqualTo(ServiceCheck.HEALTH_PATH);
+    assertThat(new StatusProperties.ServiceTarget("x", url, "health/ready").healthPath())
+        .isEqualTo("health/ready");
+  }
 }

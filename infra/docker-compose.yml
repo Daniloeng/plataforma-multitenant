@@ -1,4 +1,6 @@
-# Ambiente local: um MongoDB por microsserviço, Pulsar standalone, tenant-service e status-service.
+# Ambiente local: um MongoDB por microsserviço, Pulsar standalone, Keycloak, gateway e serviços.
+# Do host, as APIs só são acessíveis pelo gateway (http://localhost:8000); o Keycloak fica em
+# http://localhost:8180 (console: admin/admin; usuários de demonstração: senha123).
 #
 #   docker compose -f infra/docker-compose.yml up -d --wait        # tudo
 #   docker compose -f infra/docker-compose.yml up -d --wait pulsar # só o necessário
@@ -90,7 +92,6 @@ services:
       context: ..
       dockerfile: services/status-service/Dockerfile
     image: plataforma/status-service:dev
-    ports: ["8090:8090"]
     environment:
       MONGO_TENANTS_URI: mongodb://mongo-tenants:27017/?directConnection=true
       MONGO_CATALOGO_URI: mongodb://mongo-catalogo:27017/?directConnection=true
@@ -98,6 +99,8 @@ services:
       MONGO_PAGAMENTOS_URI: mongodb://mongo-pagamentos:27017/?directConnection=true
       PULSAR_ADMIN_URL: http://pulsar:8080
       TENANT_SERVICE_URL: http://tenant-service:8081
+      GATEWAY_URL: http://gateway:8000
+      KEYCLOAK_MANAGEMENT_URL: http://keycloak:9000
     depends_on:
       mongo-tenants: { condition: service_healthy }
       mongo-catalogo: { condition: service_healthy }
@@ -115,7 +118,6 @@ services:
       context: ..
       dockerfile: services/tenant-service/Dockerfile
     image: plataforma/tenant-service:dev
-    ports: ["8081:8081"]
     environment:
       MONGO_URI: mongodb://mongo-tenants:27017/tenants?replicaSet=rs-tenants
       PULSAR_URL: pulsar://pulsar:6650
@@ -128,6 +130,61 @@ services:
       resources:
         limits:
           memory: 512m
+
+  # Identidade: realm "plataforma" importado de keycloak/realm-plataforma.json (ADR-0009).
+  # O emissor dos tokens é sempre http://localhost:8180, também para quem fala com o Keycloak
+  # pela rede interna (o gateway baixa as chaves por http://keycloak:8080).
+  keycloak:
+    image: keycloak/keycloak:26.4.7
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_HOSTNAME: http://localhost:8180
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      JAVA_OPTS_KC_HEAP: "-XX:MaxRAMPercentage=60"
+    ports: ["8180:8080"]
+    volumes: ["./keycloak/realm-plataforma.json:/opt/keycloak/data/import/realm.json:ro"]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 768m
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\r\n\r\n' >&3 &&
+          grep -q UP <&3
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  # Porta de entrada: valida o JWT, confere o tenant, aplica o limite do plano e roteia.
+  gateway:
+    build:
+      context: ..
+      dockerfile: services/gateway/Dockerfile
+    image: plataforma/gateway:dev
+    ports: ["8000:8000"]
+    environment:
+      KEYCLOAK_ISSUER: http://localhost:8180/realms/plataforma
+      KEYCLOAK_JWKS: http://keycloak:8080/realms/plataforma/protocol/openid-connect/certs
+      TENANT_SERVICE_URL: http://tenant-service:8081
+      STATUS_SERVICE_URL: http://status-service:8090
+      PULSAR_URL: pulsar://pulsar:6650
+      PULSAR_ADMIN_URL: http://pulsar:8080
+    depends_on:
+      keycloak: { condition: service_healthy }
+      pulsar: { condition: service_healthy }
+      pulsar-init: { condition: service_completed_successfully }
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 384m
 
 volumes:
   mongo-tenants:

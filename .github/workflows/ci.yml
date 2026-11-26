@@ -84,16 +84,16 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Subir MongoDB x4, Pulsar, tenant-service e status-service
-        run: docker compose -f infra/docker-compose.yml up -d --build --wait --wait-timeout 300
-      - name: Conferir /api/status
+      - name: Subir MongoDB x4, Pulsar, Keycloak, gateway e serviços
+        run: docker compose -f infra/docker-compose.yml up -d --build --wait --wait-timeout 420
+      - name: Conferir /api/status pelo gateway
         run: |
-          curl -fsS http://localhost:8090/api/status | tee status.json
+          curl -fsS http://localhost:8000/api/status | tee status.json
           python3 - <<'PY'
           import json
           s = json.load(open("status.json"))
           assert s["status"] == "UP", s
-          assert len(s["components"]) == 6, s
+          assert len(s["components"]) == 8, s
           print("\nPlataforma UP com", len(s["components"]), "componentes")
           PY
       - name: Conferir namespaces Pulsar
@@ -103,19 +103,50 @@ jobs:
             grep -q "plataforma/$ns" ns.json
             test "$(curl -fsS http://localhost:8080/admin/v2/namespaces/plataforma/$ns/schemaCompatibilityStrategy)" = '"FULL"'
           done
-      - name: Criar tenant e conferir tenant.criado no Pulsar (outbox de ponta a ponta)
+      - name: Serviços não ficam expostos fora do gateway
         run: |
-          curl -fsS -X POST http://localhost:8081/api/v1/tenants \
-            -H 'Content-Type: application/json' \
-            -d '{"id":"ci-smoke","nome":"Tenant do CI","plano":"GRATUITO"}' | tee tenant.json
-          curl -fsS http://localhost:8081/api/v1/tenants/ci-smoke
+          for url in http://localhost:8081/api/v1/tenants http://localhost:8090/api/status; do
+            if curl -fsS -m 3 "$url"; then echo "$url respondeu fora do gateway" && exit 1; fi
+          done
+      - name: Sem token, a API responde 401
+        run: test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/api/v1/me)" = 401
+      - name: Criar tenants pelo gateway (seed) e conferir tenant.criado no Pulsar
+        run: |
+          infra/seed.sh
           topico=http://localhost:8080/admin/v2/persistent/plataforma/tenants/tenant.criado.v1
           for i in $(seq 1 30); do
             n=$(curl -fsS "$topico/stats" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("msgInCounter", 0))' || echo 0)
-            [ "$n" -ge 1 ] && echo "tenant.criado publicado ($n mensagem)" && exit 0
+            [ "$n" -ge 3 ] && echo "tenant.criado publicado ($n mensagens)" && exit 0
             sleep 1
           done
           echo "tenant.criado não chegou ao Pulsar em 30 s" && exit 1
+      - name: Identidade e tenant de ponta a ponta (Keycloak → gateway → serviços)
+        run: |
+          token() {
+            curl -fsS http://localhost:8180/realms/plataforma/protocol/openid-connect/token \
+              -d grant_type=password -d client_id=plataforma-cli -d "username=$1" -d password=senha123 |
+              python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])'
+          }
+          ANA=$(token ana)
+          # O gateway aprende os tenants pelos eventos; espera acme e globex aparecerem para a ana.
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:8000/api/v1/me -H "Authorization: Bearer $ANA" > me.json
+            python3 -c 'import json; m=json.load(open("me.json")); exit(0 if len(m["tenants"]) == 2 else 1)' && break
+            sleep 1
+          done
+          cat me.json
+          python3 - <<'PY'
+          import json
+          m = json.load(open("me.json"))
+          assert m["usuario"] == "ana" and m["papeis"] == ["gestor-tenant"], m
+          assert sorted(t["id"] for t in m["tenants"]) == ["acme", "globex"], m
+          PY
+          # gestor-tenant não administra tenants; tenant alheio é recusado.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/api/v1/tenants -H "Authorization: Bearer $ANA")" = 403
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/api/v1/me -H "Authorization: Bearer $ANA" -H 'X-Tenant-Id: initech')" = 403
+          # O limite do plano aparece nos cabeçalhos (globex é GRATUITO: 5 req/s).
+          curl -fsS -D headers.txt -o /dev/null http://localhost:8000/api/v1/me -H "Authorization: Bearer $ANA" -H 'X-Tenant-Id: globex'
+          grep -i '^x-ratelimit-limit: 5' headers.txt
       - name: Logs em caso de falha
         if: failure()
         run: docker compose -f infra/docker-compose.yml logs --tail 200

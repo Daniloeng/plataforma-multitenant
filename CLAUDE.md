@@ -17,18 +17,23 @@ multi-tenant de pedidos B2B + pagamentos em microsserviços. O plano de 22 dias 
 ```
 libs/platform-core/       tipos compartilhados (TenantId, IsolationLevel), sem Spring
 libs/contracts/           contratos: eventos Avro (gera classes Java) e OpenAPI; EventCatalog
-libs/platform-spring/     autoconfiguração comum: TenantContext/filtro X-Tenant-Id, TenantGuard, Outbox + relay, IdempotentConsumer
-services/tenant-service/  cadastro de tenants, /api/v1/tenants (porta 8081); publica tenant.* pelo outbox
+libs/platform-spring/     autoconfiguração comum: TenantContext/filtro X-Tenant-Id, TenantGuard, Outbox + relay, IdempotentConsumer, EventDecoder
+services/gateway/         Spring Cloud Gateway (porta 8000): JWT do Keycloak, tenant do token, rate limit por plano, /api/v1/me
+services/tenant-service/  cadastro de tenants, /api/v1/tenants (porta 8081, só plataforma-admin); publica tenant.* pelo outbox
 services/status-service/  saúde de MongoDB x4, Pulsar e serviços em GET /api/status (porta 8090)
 frontend/                 React + Vite + TS; modo demo com MSW (GitHub Pages)
-infra/                    Docker Compose (MongoDB por serviço, Pulsar standalone) e scripts
+infra/                    Docker Compose (MongoDB por serviço, Pulsar, Keycloak), keycloak/realm-plataforma.json, seed.sh
 docs/dias/NN.md           diário detalhado de cada dia
 docs/adr/                 decisões de arquitetura (ADRs)
 docs/arquitetura/         event storming e diagramas (Mermaid)
 .claude/                  hooks (format, run-tests), subagentes (arquiteto, testador) e skills (adr)
 ```
-Novos microsserviços entram em `services/<nome>-service`, como módulo do `pom.xml` raiz, dependem de
+Novos microsserviços entram em `services/<nome>-service` (o `services/gateway` é a exceção: é
+infraestrutura de borda, não um serviço de negócio), como módulo do `pom.xml` raiz, dependem de
 `platform-spring` e seguem o `tenant-service` (Dockerfile, `application.yml`, `*IT` com Mongo + Pulsar).
+As dependências web, data-mongodb e pulsar do `platform-spring` são opcionais: o serviço declara as
+que usa. Todo serviço novo ganha uma rota em `services/gateway/.../Routes.java`, não publica porta
+no host no Compose e entra no `status-service`.
 
 ## Comandos
 | O quê | Comando |
@@ -38,7 +43,9 @@ Novos microsserviços entram em `services/<nome>-service`, como módulo do `pom.
 | Formatar Java | `mvn spotless:apply` |
 | Frontend | `cd frontend && npm ci && npm run test:coverage && npm run typecheck && npm run format:check` |
 | Ambiente local | `docker compose -f infra/docker-compose.yml up -d --build --wait` |
-| Frontend com API real | `cd frontend && npm run dev` (proxy `/api/v1/tenants` → `localhost:8081`, resto de `/api` → `localhost:8090`) |
+| Frontend com API real | `cd frontend && npm run dev` (proxy `/api` → gateway em `localhost:8000`; login no Keycloak em `localhost:8180`) |
+| Tenants de demonstração | `infra/seed.sh` (Compose de pé) |
+| Token para curl | `curl -s localhost:8180/realms/plataforma/protocol/openid-connect/token -d grant_type=password -d client_id=plataforma-cli -d username=ana -d password=senha123` |
 | Frontend em modo demo | `cd frontend && VITE_DEMO=true npm run dev` |
 | Só testes rápidos (sem `*IT`) | `mvn -B -q test -pl <módulo> -am -Dtest='!*IT' -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true` |
 
@@ -46,8 +53,10 @@ Novos microsserviços entram em `services/<nome>-service`, como módulo do `pom.
 - **Cobertura mínima de 80%** de linhas por módulo Java (JaCoCo) e no frontend (Vitest, 4 métricas).
   O CI falha abaixo disso. Toda funcionalidade nova chega com testes unitários e, quando tocar
   infraestrutura, teste de integração com Testcontainers (classes `*IT`, rodam no `mvn verify`).
-- **Multi-tenant**: o tenant vem só do cabeçalho `X-Tenant-Id` injetado pelo gateway (a partir do
-  Dia 4), nunca do corpo da requisição. Use `TenantId` (valida o formato) em vez de `String`.
+- **Multi-tenant**: o tenant vem só do cabeçalho `X-Tenant-Id` verificado pelo gateway contra a
+  claim `tenants` do token (ADR-0009), nunca do corpo da requisição. O cliente B2B vem de
+  `X-Cliente-Id`, o usuário de `X-Usuario` e os papéis de `X-Papeis`, todos escritos pelo gateway.
+  Use `TenantId` (valida o formato) em vez de `String`.
 - **Banco por serviço**: um serviço nunca lê o MongoDB de outro; integração só por eventos Pulsar
   ou API.
 - **Publicar evento só pelo outbox**: `Outbox.append(evento, aggregateId)` dentro do mesmo

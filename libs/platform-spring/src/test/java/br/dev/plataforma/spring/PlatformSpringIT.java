@@ -71,6 +71,7 @@ class PlatformSpringIT {
   static void propriedades(DynamicPropertyRegistry registry) {
     registry.add("spring.data.mongodb.uri", () -> MONGO.getReplicaSetUrl("plataforma"));
     registry.add("spring.pulsar.client.service-url", PULSAR::getPulsarBrokerUrl);
+    registry.add("spring.pulsar.admin.service-url", PULSAR::getHttpServiceUrl);
   }
 
   @BeforeAll
@@ -90,6 +91,7 @@ class PlatformSpringIT {
   @Autowired Outbox outbox;
   @Autowired OutboxRelay relay;
   @Autowired IdempotentConsumer idempotent;
+  @Autowired br.dev.plataforma.spring.events.EventDecoder decoder;
   @Autowired PulsarClient pulsar;
   @Autowired PlatformTransactionManager txManager;
 
@@ -163,6 +165,8 @@ class PlatformSpringIT {
       assertThat(msg.getProperty("traceparent")).startsWith("00-");
       assertThat(msg.getEventTime()).isEqualTo(evento.getOccurredAt().toEpochMilli());
       assertThat(AvroCodec.decode(msg.getValue(), TenantCriado.class)).isEqualTo(evento);
+      // O caminho de um consumidor real: schema do escritor vindo do Schema Registry
+      assertThat(decoder.decode(msg, TenantCriado.class)).isEqualTo(evento);
       consumer.acknowledge(msg);
     }
 

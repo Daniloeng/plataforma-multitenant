@@ -24,7 +24,10 @@ public class StatusConfiguration {
       checks.add(
           new PulsarCheck(props.pulsar().name(), props.pulsar().adminUrl(), props.timeout()));
     }
-    props.services().forEach(s -> checks.add(new ServiceCheck(s.name(), s.url(), props.timeout())));
+    props
+        .services()
+        .forEach(
+            s -> checks.add(new ServiceCheck(s.name(), s.url(), s.healthPath(), props.timeout())));
     return List.copyOf(checks);
   }
 
