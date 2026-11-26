@@ -10,18 +10,31 @@ export class ApiError extends Error {
   readonly problemType: string | null;
   /** Cabeçalho `Retry-After` (segundos), quando a resposta trouxer. */
   readonly retryAfterSeconds: number | null;
+  /**
+   * Corpo inteiro do Problem Details, com as propriedades de extensão (RFC 9457 §3.2), como
+   * `produtos` no 409 produto-indisponivel; null quando a resposta não trouxe um objeto JSON.
+   */
+  readonly problem: Readonly<Record<string, unknown>> | null;
 
   constructor(
     message: string,
     httpStatus: number | null = null,
     problemType: string | null = null,
     retryAfterSeconds: number | null = null,
+    problem: Readonly<Record<string, unknown>> | null = null,
   ) {
     super(message);
     this.name = 'ApiError';
     this.httpStatus = httpStatus;
     this.problemType = problemType;
     this.retryAfterSeconds = retryAfterSeconds;
+    this.problem = problem;
+  }
+
+  /** Propriedade de extensão do problema que é uma lista de textos (ex.: `produtos`), ou null. */
+  problemStrings(name: string): string[] | null {
+    const value = this.problem?.[name];
+    return Array.isArray(value) && value.every((v) => typeof v === 'string') ? value : null;
   }
 }
 
@@ -109,9 +122,11 @@ export function parseRetryAfter(value: string | null): number | null {
 export async function toApiError(response: Response): Promise<ApiError> {
   let detail: string | null = null;
   let type: string | null = null;
+  let problem: Record<string, unknown> | null = null;
   try {
     const body: unknown = await response.json();
-    if (typeof body === 'object' && body !== null) {
+    if (typeof body === 'object' && body !== null && !Array.isArray(body)) {
+      problem = body as Record<string, unknown>;
       const p = body as Partial<Problema>;
       if (typeof p.type === 'string') type = p.type;
       if (typeof p.detail === 'string' && p.detail.trim()) detail = p.detail;
@@ -125,6 +140,7 @@ export async function toApiError(response: Response): Promise<ApiError> {
     response.status,
     type,
     parseRetryAfter(response.headers.get('Retry-After')),
+    problem,
   );
 }
 

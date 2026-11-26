@@ -8,26 +8,21 @@ import {
   subtotal,
 } from '../../api/pedidos';
 import type { ItemCarrinho, UseCarrinho } from '../../hooks/useCarrinho';
-import { useEnviarPedido } from '../../hooks/useEnviarPedido';
+import { useEnviarPedido, type ErroEnvio } from '../../hooks/useEnviarPedido';
 import { pedidoHash } from '../../hooks/useHashRoute';
 
 /** Resumo do carrinho do comprador (por tenant) e o botão "Fazer pedido". */
 export function Carrinho({ carrinho }: { carrinho: UseCarrinho }) {
-  const { itens, unidades, totalEstimado, remover, esvaziar, definirQuantidade } = carrinho;
+  const { itens, unidades, totalEstimado, moedasDiferentes, remover, esvaziar, definirQuantidade } =
+    carrinho;
   const envio = useEnviarPedido();
-  const [invalidos, setInvalidos] = useState<ReadonlySet<string>>(new Set());
+  // Item com o campo de quantidade inválido -> a quantidade do item quando o campo ficou inválido.
+  // Se a quantidade muda por fora (ex.: "Adicionar" de novo), a linha volta a mostrar um número
+  // válido e a marca antiga deixa de valer sozinha, sem depender de um aviso da linha.
+  const [invalidos, setInvalidos] = useState<ReadonlyMap<string, number>>(new Map());
 
   const indisponivel = envio.erro?.problemType === PROBLEMA_PRODUTO_INDISPONIVEL;
-  // O detail do produto-indisponivel cita o id (ou o SKU): o item citado ganha destaque.
-  const citados = new Set(
-    indisponivel
-      ? itens
-          .filter(
-            (i) => envio.erro!.message.includes(i.produtoId) || envio.erro!.message.includes(i.sku),
-          )
-          .map((i) => i.produtoId)
-      : [],
-  );
+  const citados = new Set(indisponivel ? citadosNoErro(itens, envio.erro!) : []);
 
   async function fazerPedido() {
     const resultado = await envio.enviar(
@@ -38,17 +33,18 @@ export function Carrinho({ carrinho }: { carrinho: UseCarrinho }) {
     window.location.hash = pedidoHash(resultado.pedido.id);
   }
 
-  function marcarInvalido(produtoId: string, invalido: boolean) {
+  /** `quantidade` = a do item quando o campo ficou inválido; null = o campo voltou a valer. */
+  function marcarInvalido(produtoId: string, quantidade: number | null) {
     setInvalidos((prev) => {
-      if (prev.has(produtoId) === invalido) return prev;
-      const next = new Set(prev);
-      if (invalido) next.add(produtoId);
-      else next.delete(produtoId);
+      if ((prev.get(produtoId) ?? null) === quantidade) return prev;
+      const next = new Map(prev);
+      if (quantidade === null) next.delete(produtoId);
+      else next.set(produtoId, quantidade);
       return next;
     });
   }
 
-  const pendentesInvalidos = itens.some((i) => invalidos.has(i.produtoId));
+  const pendentesInvalidos = itens.some((i) => invalidos.get(i.produtoId) === i.quantidade);
 
   return (
     <section className="section card carrinho" aria-labelledby="carrinho-title">
@@ -77,24 +73,33 @@ export function Carrinho({ carrinho }: { carrinho: UseCarrinho }) {
                   envio.limparErro();
                   definirQuantidade(item.produtoId, q);
                 }}
-                onInvalido={(inv) => marcarInvalido(item.produtoId, inv)}
+                onInvalido={(inv) => marcarInvalido(item.produtoId, inv ? item.quantidade : null)}
                 onRemover={() => {
                   envio.limparErro();
-                  marcarInvalido(item.produtoId, false);
+                  marcarInvalido(item.produtoId, null);
                   remover(item.produtoId);
                 }}
               />
             ))}
           </ul>
 
-          <p className="carrinho__total">
-            <span>Total estimado</span>
-            <strong className="num">{formatDinheiro(totalEstimado)}</strong>
-          </p>
-          <p className="muted carrinho__aviso">
-            Estimativa com os preços do catálogo. O preço final é o do servidor, calculado quando o
-            pedido é criado.
-          </p>
+          {totalEstimado ? (
+            <>
+              <p className="carrinho__total">
+                <span>Total estimado</span>
+                <strong className="num">{formatDinheiro(totalEstimado)}</strong>
+              </p>
+              <p className="muted carrinho__aviso">
+                Estimativa com os preços do catálogo. O preço final é o do servidor, calculado
+                quando o pedido é criado.
+              </p>
+            </>
+          ) : null}
+          {moedasDiferentes ? (
+            <p className="alert carrinho__moedas" role="status">
+              Os produtos têm moedas diferentes; faça um pedido por moeda.
+            </p>
+          ) : null}
 
           {envio.erro ? (
             <div className={`alert${indisponivel ? ' alert--indisponivel' : ''}`} role="alert">
@@ -107,7 +112,10 @@ export function Carrinho({ carrinho }: { carrinho: UseCarrinho }) {
               </strong>{' '}
               {envio.erro.message}
               {indisponivel ? (
-                <p>Remova o item destacado (ou atualize a lista de produtos) e tente de novo.</p>
+                <p>
+                  {citados.size > 1 ? 'Remova os itens destacados' : 'Remova o item destacado'} (ou
+                  atualize a lista de produtos) e tente de novo.
+                </p>
               ) : null}
               {envio.erro.rede ? (
                 <p>
@@ -122,7 +130,7 @@ export function Carrinho({ carrinho }: { carrinho: UseCarrinho }) {
             <button
               type="button"
               className="button"
-              disabled={envio.enviando || pendentesInvalidos}
+              disabled={envio.enviando || pendentesInvalidos || moedasDiferentes}
               onClick={() => void fazerPedido()}
             >
               {envio.enviando
@@ -137,7 +145,7 @@ export function Carrinho({ carrinho }: { carrinho: UseCarrinho }) {
               disabled={envio.enviando}
               onClick={() => {
                 envio.limparErro();
-                setInvalidos(new Set());
+                setInvalidos(new Map());
                 esvaziar();
               }}
             >
@@ -148,6 +156,18 @@ export function Carrinho({ carrinho }: { carrinho: UseCarrinho }) {
       )}
     </section>
   );
+}
+
+/**
+ * Itens apontados pelo 409 produto-indisponivel: pelos ids exatos da propriedade `produtos`;
+ * se a resposta não a trouxer, pelo id ou SKU citado no detail (reserva).
+ */
+function citadosNoErro(itens: readonly ItemCarrinho[], erro: ErroEnvio): string[] {
+  const { produtos, message } = erro;
+  const citado = produtos
+    ? (i: ItemCarrinho) => produtos.includes(i.produtoId)
+    : (i: ItemCarrinho) => message.includes(i.produtoId) || message.includes(i.sku);
+  return itens.filter(citado).map((i) => i.produtoId);
 }
 
 interface LinhaProps {
@@ -162,7 +182,8 @@ function LinhaCarrinho({ item, destaque, onQuantidade, onInvalido, onRemover }: 
   const uid = useId();
   const [texto, setTexto] = useState(String(item.quantidade));
   const [erro, setErro] = useState<string | null>(null);
-  // A quantidade mudou por fora (ex.: "Adicionar" de novo): o campo acompanha.
+  // A quantidade mudou por fora (ex.: "Adicionar" de novo): o campo acompanha e o erro some (a
+  // marca de inválido no Carrinho é da quantidade antiga, então também deixa de valer).
   const [ultima, setUltima] = useState(item.quantidade);
   if (ultima !== item.quantidade) {
     setUltima(item.quantidade);

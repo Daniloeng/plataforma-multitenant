@@ -43,6 +43,12 @@ final class PedidosExceptions {
     }
   }
 
+  static final class TenantSuspenso extends RuntimeException {
+    TenantSuspenso() {
+      super("O tenant está suspenso: novos pedidos ficam bloqueados até a reativação.");
+    }
+  }
+
   static final class RequisicaoInvalida extends RuntimeException {
     RequisicaoInvalida(String message) {
       super(message);

@@ -60,6 +60,7 @@ public class PedidoService {
   @Transactional
   public PedidoView.Criacao criar(String clienteId, String chave, NovoPedido req) {
     TenantContext.require();
+    exigirTenantAtivo();
     if (chave == null || !CHAVE.matcher(chave).matches()) {
       throw new PedidosExceptions.RequisicaoInvalida(
           "Envie o cabeçalho Idempotency-Key com 8 a 64 caracteres (ex.: um UUID).");
@@ -114,7 +115,12 @@ public class PedidoService {
       itens.add(
           new PedidoDocument.Item(
               p.getProdutoId(), p.getSku(), p.getNome(), item.quantidade(), p.getPrecoCentavos()));
-      total = Math.addExact(total, Math.multiplyExact(p.getPrecoCentavos(), item.quantidade()));
+      try {
+        total = Math.addExact(total, Math.multiplyExact(p.getPrecoCentavos(), item.quantidade()));
+      } catch (ArithmeticException e) {
+        throw new PedidosExceptions.RequisicaoInvalida(
+            "O total do pedido é grande demais; divida em pedidos menores.");
+      }
     }
     Instant agora = agora();
     PedidoDocument salvo =
@@ -213,6 +219,18 @@ public class PedidoService {
             ? new Cursor(pagina.getLast().getCriadoEm(), pagina.getLast().getId()).codificar()
             : null;
     return new PedidoView.Pagina(pagina.stream().map(PedidoView::of).toList(), proximo);
+  }
+
+  /**
+   * Tenant suspenso não cria pedidos, mesmo que o gateway ainda não saiba da suspensão (ou alguém
+   * chame o serviço sem passar por ele). Tenant ainda desconhecido passa: o tenant.criado pode
+   * estar a caminho. Cancelar continua permitido: desfazer um pedido não cria obrigação nova.
+   */
+  private void exigirTenantAtivo() {
+    TenantSituacao tenant = mongo.findOne(TenantQueries.scoped(), TenantSituacao.class);
+    if (tenant != null && !tenant.isAtivo()) {
+      throw new PedidosExceptions.TenantSuspenso();
+    }
   }
 
   private PedidoDocument buscar(String id, String clienteId) {

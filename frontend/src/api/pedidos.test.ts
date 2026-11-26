@@ -37,8 +37,10 @@ const pedido: Pedido = {
 
 describe('regras e utilitários', () => {
   it('podeComprar e veTodosOsPedidos seguem os papéis', () => {
-    expect(podeComprar(['comprador'])).toBe(true);
-    expect(podeComprar(['gestor-tenant'])).toBe(false);
+    expect(podeComprar(['comprador'], 'cli-bruno')).toBe(true);
+    expect(podeComprar(['comprador'], null)).toBe(false);
+    expect(podeComprar(['comprador'], '')).toBe(false);
+    expect(podeComprar(['gestor-tenant'], 'cli-bruno')).toBe(false);
     expect(veTodosOsPedidos(['gestor-tenant'])).toBe(true);
     expect(veTodosOsPedidos(['plataforma-admin'])).toBe(true);
     expect(veTodosOsPedidos(['comprador'])).toBe(false);

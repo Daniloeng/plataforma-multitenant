@@ -16,8 +16,10 @@ export interface UseCarrinho {
   itens: ItemCarrinho[];
   /** Soma das quantidades. */
   unidades: number;
-  /** Total estimado com os preços do catálogo. */
-  totalEstimado: Dinheiro;
+  /** Total estimado com os preços do catálogo; null quando os itens têm moedas diferentes. */
+  totalEstimado: Dinheiro | null;
+  /** Os itens têm mais de uma moeda: o servidor recusa o pedido (400), então não há total. */
+  moedasDiferentes: boolean;
   /** Soma a quantidade ao item (ou o cria); devolve false se o carrinho já tem 200 produtos. */
   adicionar: (produto: Produto, quantidade: number) => boolean;
   definirQuantidade: (produtoId: string, quantidade: number) => void;
@@ -135,10 +137,24 @@ export function useCarrinho(key: string): UseCarrinho {
   const esvaziar = useCallback(() => update(() => []), [update]);
 
   const unidades = itens.reduce((soma, i) => soma + i.quantidade, 0);
-  const totalEstimado: Dinheiro = {
-    centavos: itens.reduce((soma, i) => soma + i.precoUnitario.centavos * i.quantidade, 0),
-    moeda: itens[0]?.precoUnitario.moeda ?? MOEDA_PADRAO,
-  };
+  const moeda = itens[0]?.precoUnitario.moeda ?? MOEDA_PADRAO;
+  // Somar centavos de moedas diferentes daria um número sem sentido: sem total nesse caso.
+  const moedasDiferentes = itens.some((i) => i.precoUnitario.moeda !== moeda);
+  const totalEstimado: Dinheiro | null = moedasDiferentes
+    ? null
+    : {
+        centavos: itens.reduce((soma, i) => soma + i.precoUnitario.centavos * i.quantidade, 0),
+        moeda,
+      };
 
-  return { itens, unidades, totalEstimado, adicionar, definirQuantidade, remover, esvaziar };
+  return {
+    itens,
+    unidades,
+    totalEstimado,
+    moedasDiferentes,
+    adicionar,
+    definirQuantidade,
+    remover,
+    esvaziar,
+  };
 }

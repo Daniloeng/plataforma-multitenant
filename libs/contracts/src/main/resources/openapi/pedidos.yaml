@@ -31,7 +31,7 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/NovoPedido' }
       description: >-
-        Só compradores (com cliente no token). Repetir com a mesma Idempotency-Key e o mesmo corpo
+        Só compradores (com cliente no token); tenant suspenso responde 403 `tenant-suspenso`. Repetir com a mesma Idempotency-Key e o mesmo corpo
         devolve o pedido já criado (200, cabeçalho Idempotent-Replayed: true); a mesma chave com
         outro corpo responde 409 `chave-reutilizada`. Produto inexistente, inativo ou ainda sem preço na cópia
         local do catálogo responde 409 `produto-indisponivel`, com os ids na propriedade `produtos`.

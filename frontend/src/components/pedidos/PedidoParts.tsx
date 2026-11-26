@@ -1,8 +1,11 @@
 import { useState } from 'react';
+import { ApiError } from '../../api/http';
 import {
+  PROBLEMA_PEDIDO_JA_CANCELADO,
   STATUS_PEDIDO_LABEL,
   cancelarPedido,
   describePedidoError,
+  getPedido,
   type Pedido,
   type StatusPedido,
 } from '../../api/pedidos';
@@ -44,7 +47,14 @@ export function CancelarPedido({
     setEnviando(true);
     setErro(null);
     try {
-      const atualizado = await cancelarPedido(pedido.id);
+      const atualizado = await cancelarPedido(pedido.id).catch((err: unknown) => {
+        // Já estava cancelado (outra aba, o gestor, uma repetição): o contrato permite tratar o
+        // 409 como sucesso; recarrega o pedido para mostrar o status e o motivo do servidor.
+        if (err instanceof ApiError && err.problemType === PROBLEMA_PEDIDO_JA_CANCELADO) {
+          return getPedido(pedido.id);
+        }
+        throw err;
+      });
       setConfirmando(false);
       setEnviando(false);
       onCancelado(atualizado);

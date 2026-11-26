@@ -121,7 +121,7 @@ com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
   pedidos (nem duas cobranças no Dia 7), e o preço não pode vir do navegador.
 - **Como testar:** entre como `bruno`, monte o carrinho em acme e faça o pedido; entre como `ana`
   e veja os pedidos de todos os clientes. Os comandos com `curl` estão no diário.
-- **Cobertura:** `pedidos-service` 94,1%, frontend 99,87% de linhas.
+- **Cobertura:** `pedidos-service` 94%, frontend 99,9% de linhas.
 - **Claude Code:** a assinatura de eventos do PR do Dia 5 trouxe a falha do CI de volta à sessão,
   que corrigiu um conflito de transação real antes do merge; frontend feito por subagente em
   background; revisão do `arquiteto`.

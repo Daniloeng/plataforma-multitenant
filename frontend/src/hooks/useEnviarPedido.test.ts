@@ -57,6 +57,7 @@ describe('useEnviarPedido', () => {
       message: 'Não foi possível conectar ao pedidos-service.',
       problemType: null,
       rede: true,
+      produtos: null,
     });
     expect(pedidosSnapshot(FARMA)).toHaveLength(antes + 1);
 

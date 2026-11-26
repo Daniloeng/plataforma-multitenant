@@ -85,10 +85,14 @@ export const IDEMPOTENCY_KEY_MAX = 64;
 /** `type` dos Problem Details que a tela destaca. */
 export const PROBLEMA_PRODUTO_INDISPONIVEL = `${PROBLEM_BASE}produto-indisponivel`;
 export const PROBLEMA_CHAVE_REUTILIZADA = `${PROBLEM_BASE}chave-reutilizada`;
+export const PROBLEMA_PEDIDO_JA_CANCELADO = `${PROBLEM_BASE}pedido-ja-cancelado`;
 
-/** Só compradores (com cliente no token) criam pedidos. */
-export function podeComprar(papeis: readonly Papel[]): boolean {
-  return papeis.includes('comprador');
+/**
+ * Só compradores com cliente no token (claim cliente_id, que o /api/v1/me devolve em `clienteId`)
+ * criam pedidos: sem cliente, o pedidos-service responde 403.
+ */
+export function podeComprar(papeis: readonly Papel[], clienteId: string | null): boolean {
+  return papeis.includes('comprador') && clienteId !== null && clienteId !== '';
 }
 
 /** Gestor do tenant (e a administradora da plataforma) veem os pedidos de todos os clientes. */

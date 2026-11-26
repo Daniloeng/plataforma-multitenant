@@ -152,6 +152,78 @@ describe('Carrinho — montar', () => {
     ).toHaveTextContent('O carrinho aceita até 200 produtos.');
   });
 
+  it('quantidade inválida no carrinho e "Adicionar" de novo: o campo volta a valer e "Fazer pedido" também', async () => {
+    const user = await abrir();
+    await adicionar(user, 'DIP-500-CX10', 2);
+    const qtd = within(carrinho()).getByLabelText('Quantidade de DIP-500-CX10 no carrinho');
+    await user.clear(qtd);
+    expect(within(carrinho()).getByRole('button', { name: 'Fazer pedido' })).toBeDisabled();
+
+    await adicionar(user, 'DIP-500-CX10', 3);
+    expect(qtd).toHaveValue(5);
+    expect(qtd).not.toHaveAttribute('aria-invalid');
+    expect(within(item('DIP-500-CX10')).queryByRole('alert')).not.toBeInTheDocument();
+    expect(within(carrinho()).getByRole('button', { name: 'Fazer pedido' })).toBeEnabled();
+
+    // Inválido de novo na nova quantidade: volta a bloquear.
+    await user.clear(qtd);
+    expect(within(carrinho()).getByRole('button', { name: 'Fazer pedido' })).toBeDisabled();
+  });
+
+  it('produtos em moedas diferentes: sem total, com aviso, e "Fazer pedido" desabilitado', async () => {
+    const [real, dolar] = makeProdutos(2);
+    window.sessionStorage.setItem(
+      KEY,
+      JSON.stringify(
+        [real!, { ...dolar!, preco: { centavos: 990, moeda: 'USD' } }].map((p) => ({
+          produtoId: p.id,
+          sku: p.sku,
+          nome: p.nome,
+          precoUnitario: p.preco,
+          quantidade: 1,
+        })),
+      ),
+    );
+    const user = await abrir();
+    expect(within(carrinho()).getByRole('status')).toHaveTextContent(
+      'Os produtos têm moedas diferentes; faça um pedido por moeda.',
+    );
+    expect(carrinho()).not.toHaveTextContent('Total estimado');
+    expect(within(carrinho()).getByRole('button', { name: 'Fazer pedido' })).toBeDisabled();
+
+    await user.click(
+      within(carrinho()).getByRole('button', { name: `Remover ${dolar!.sku} do carrinho` }),
+    );
+    expect(within(carrinho()).queryByRole('status')).not.toBeInTheDocument();
+    expect(carrinho()).toHaveTextContent('Total estimado');
+    expect(within(carrinho()).getByRole('button', { name: 'Fazer pedido' })).toBeEnabled();
+  });
+
+  it('comprador sem cliente no token não vê o carrinho', async () => {
+    server.use(
+      http.get('*/api/v1/me', () =>
+        HttpResponse.json({
+          usuario: 'bruno',
+          nome: 'Bruno Lima',
+          papeis: ['comprador'],
+          clienteId: null,
+          tenants: [
+            {
+              id: FARMA,
+              nome: 'Farmacêutica Boa Saúde',
+              plano: 'PROFISSIONAL',
+              nivelIsolamento: 'POOL',
+              ativo: true,
+            },
+          ],
+        }),
+      ),
+    );
+    await abrir();
+    expect(screen.queryByRole('region', { name: 'Carrinho' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /ao carrinho/ })).not.toBeInTheDocument();
+  });
+
   it('gestor não vê o carrinho nem "Adicionar ao carrinho"', async () => {
     await abrir('Ana Souza', 'distribuidora-aurora');
     expect(screen.queryByRole('region', { name: 'Carrinho' })).not.toBeInTheDocument();
@@ -227,7 +299,9 @@ describe('Carrinho — fazer pedido', () => {
     const alerta = await within(carrinho()).findByRole('alert');
     expect(alerta).toHaveClass('alert--indisponivel');
     expect(alerta).toHaveTextContent('Produto indisponível.');
-    expect(alerta).toHaveTextContent('O produto DIP-500-CX10');
+    expect(alerta).toHaveTextContent(
+      'Produto indisponível (inexistente, inativo ou sem preço no catálogo): prd-farmaceutica-boa-saude-001.',
+    );
     expect(alerta).toHaveTextContent('Remova o item destacado');
     expect(item('DIP-500-CX10')).toHaveClass('carrinho__item--indisponivel');
     expect(item('DIP-500-CX10')).toHaveTextContent('indisponível');
@@ -240,6 +314,56 @@ describe('Carrinho — fazer pedido', () => {
     expect(within(carrinho()).queryByRole('alert')).not.toBeInTheDocument();
     await user.click(within(carrinho()).getByRole('button', { name: 'Fazer pedido' }));
     await waitFor(() => expect(window.location.hash).toMatch(/^#\/pedidos\/ped-n/));
+  });
+
+  it('produto-indisponivel com vários itens: destaca todos os de `produtos`', async () => {
+    const user = await abrir();
+    await adicionar(user, 'DIP-500-CX10', 1);
+    await adicionar(user, 'SOR-FIS-500', 1);
+    await adicionar(user, 'LUV-PRO-M', 1);
+    resetCatalogoStore({
+      [FARMA]: catalogoSnapshot(FARMA).map((p) =>
+        p.sku === 'DIP-500-CX10' || p.sku === 'LUV-PRO-M' ? { ...p, ativo: false } : p,
+      ),
+    });
+    await user.click(within(carrinho()).getByRole('button', { name: 'Fazer pedido' }));
+
+    const alerta = await within(carrinho()).findByRole('alert');
+    expect(alerta).toHaveTextContent('Remova os itens destacados');
+    expect(item('DIP-500-CX10')).toHaveClass('carrinho__item--indisponivel');
+    expect(item('LUV-PRO-M')).toHaveClass('carrinho__item--indisponivel');
+    expect(item('SOR-FIS-500')).not.toHaveClass('carrinho__item--indisponivel');
+  });
+
+  it('com `produtos`, compara ids exatos (o detail não conta); sem `produtos`, procura no detail', async () => {
+    const sor = catalogoSnapshot(FARMA).find((p) => p.sku === 'SOR-FIS-500')!;
+    const problema = (extras: Record<string, unknown>) =>
+      HttpResponse.json(
+        {
+          type: 'https://plataforma.dev.br/problemas/produto-indisponivel',
+          title: 'Produto indisponível',
+          status: 409,
+          detail: 'O produto DIP-500-CX10 está indisponível.',
+          ...extras,
+        },
+        { status: 409, headers: { 'Content-Type': 'application/problem+json' } },
+      );
+    server.use(
+      http.post('*/api/v1/pedidos', () => problema({ produtos: [sor.id] }), { once: true }),
+      http.post('*/api/v1/pedidos', () => problema({}), { once: true }),
+    );
+    const user = await abrir();
+    await adicionar(user, 'DIP-500-CX10', 1);
+    await adicionar(user, 'SOR-FIS-500', 1);
+
+    await user.click(within(carrinho()).getByRole('button', { name: 'Fazer pedido' }));
+    await within(carrinho()).findByRole('alert');
+    expect(item('SOR-FIS-500')).toHaveClass('carrinho__item--indisponivel');
+    expect(item('DIP-500-CX10')).not.toHaveClass('carrinho__item--indisponivel');
+
+    await user.click(within(carrinho()).getByRole('button', { name: 'Fazer pedido' }));
+    await waitFor(() => expect(item('DIP-500-CX10')).toHaveClass('carrinho__item--indisponivel'));
+    expect(item('SOR-FIS-500')).not.toHaveClass('carrinho__item--indisponivel');
   });
 
   it('mostra o título de chave reutilizada e limpa o erro ao mudar a quantidade', async () => {

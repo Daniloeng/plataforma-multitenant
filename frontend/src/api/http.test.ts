@@ -115,6 +115,29 @@ describe('Problem Details', () => {
     const vazio = await toApiError(new Response(null, { status: 502 }));
     expect(vazio.message).toBe('A API respondeu com HTTP 502.');
     expect(vazio.problemType).toBeNull();
+    expect(vazio.problem).toBeNull();
+    expect(vazio.problemStrings('produtos')).toBeNull();
+  });
+
+  it('guarda o corpo do problema com as propriedades de extensão', async () => {
+    const erro = await toApiError(
+      Response.json(
+        {
+          type: 'https://x/produto-indisponivel',
+          title: 'Produto indisponível',
+          status: 409,
+          detail: 'Produto indisponível: a, b.',
+          produtos: ['a', 'b'],
+          outros: ['a', 1],
+        },
+        { status: 409 },
+      ),
+    );
+    expect(erro.problem).toMatchObject({ status: 409, produtos: ['a', 'b'] });
+    expect(erro.problemStrings('produtos')).toEqual(['a', 'b']);
+    expect(erro.problemStrings('outros')).toBeNull();
+    expect(erro.problemStrings('detail')).toBeNull();
+    expect((await toApiError(Response.json(['x'], { status: 400 }))).problem).toBeNull();
   });
 
   it('parseRetryAfter aceita só segundos', () => {

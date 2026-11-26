@@ -101,6 +101,33 @@ describe('PedidosPage — acesso', () => {
       await screen.findByText('Pedidos exigem o papel comprador ou gestor-tenant.'),
     ).toBeVisible();
   });
+
+  it('comprador sem cliente no token vê o aviso do cliente B2B', async () => {
+    server.use(
+      http.get('*/api/v1/me', () =>
+        HttpResponse.json({
+          usuario: 'bruno',
+          nome: 'X',
+          papeis: ['comprador'],
+          clienteId: null,
+          tenants: [
+            {
+              id: FARMA,
+              nome: 'Farmacêutica Boa Saúde',
+              plano: 'PROFISSIONAL',
+              nivelIsolamento: 'POOL',
+              ativo: true,
+            },
+          ],
+        }),
+      ),
+    );
+    await abrir('Bruno Lima');
+    expect(
+      await screen.findByText('Pedidos exigem o papel comprador ou gestor-tenant.'),
+    ).toBeVisible();
+    expect(screen.getByText(/o token não traz o cliente B2B/)).toBeVisible();
+  });
 });
 
 describe('PedidosPage — comprador', () => {
@@ -168,6 +195,34 @@ describe('PedidosPage — comprador', () => {
     confirm.mockRestore();
   });
 
+  it('pedido já cancelado no servidor (409 pedido-ja-cancelado) conta como sucesso: recarrega o pedido', async () => {
+    const pedidos: string[] = [];
+    server.events.on('request:start', ({ request }) => {
+      pedidos.push(`${request.method} ${new URL(request.url).pathname}`);
+    });
+    const user = await abrir('Bruno Lima');
+    await tabela();
+    // Enquanto isso, o gestor cancelou o pedido em outra tela.
+    resetPedidosStore({
+      [FARMA]: pedidosSnapshot(FARMA).map((p) =>
+        p.id === 'ped-farmaceutica-0008'
+          ? { ...p, status: 'CANCELADO', motivoCancelamento: 'CANCELADO_PELO_TENANT' }
+          : p,
+      ),
+    });
+    const row = linha('ped-farmaceutica-0008');
+    await user.click(within(row).getByRole('button', { name: /Cancelar pedido/ }));
+    await user.click(within(row).getByRole('button', { name: 'Sim, cancelar' }));
+    expect(await within(row).findByText('Cancelado')).toHaveClass('pill--down');
+    expect(within(row).queryByRole('alert')).not.toBeInTheDocument();
+    expect(pedidos).toEqual(
+      expect.arrayContaining([
+        'POST /api/v1/pedidos/ped-farmaceutica-0008/cancelamento',
+        'GET /api/v1/pedidos/ped-farmaceutica-0008',
+      ]),
+    );
+  });
+
   it('com filtro Pendente, o pedido cancelado sai da lista', async () => {
     const user = await abrir('Bruno Lima');
     await tabela();
@@ -184,12 +239,12 @@ describe('PedidosPage — comprador', () => {
       http.post('*/api/v1/pedidos/:id/cancelamento', () =>
         HttpResponse.json(
           {
-            type: 'https://plataforma.dev.br/problemas/pedido-ja-cancelado',
-            title: 'Pedido já cancelado',
-            status: 409,
-            detail: "O pedido 'ped-farmaceutica-0008' já está cancelado.",
+            type: 'https://plataforma.dev.br/problemas/nao-encontrado',
+            title: 'Pedido não encontrado',
+            status: 404,
+            detail: "O pedido 'ped-farmaceutica-0008' não foi encontrado.",
           },
-          { status: 409, headers: { 'Content-Type': 'application/problem+json' } },
+          { status: 404, headers: { 'Content-Type': 'application/problem+json' } },
         ),
       ),
     );
@@ -199,7 +254,7 @@ describe('PedidosPage — comprador', () => {
     await user.click(within(row).getByRole('button', { name: /Cancelar pedido/ }));
     await user.click(within(row).getByRole('button', { name: 'Sim, cancelar' }));
     expect(await within(row).findByRole('alert')).toHaveTextContent(
-      "O pedido 'ped-farmaceutica-0008' já está cancelado.",
+      "O pedido 'ped-farmaceutica-0008' não foi encontrado.",
     );
     expect(within(row).getByRole('button', { name: 'Sim, cancelar' })).toBeEnabled();
   });

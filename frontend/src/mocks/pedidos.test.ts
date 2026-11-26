@@ -160,16 +160,34 @@ describe('POST /api/v1/pedidos', () => {
     expect(json.detail).toMatch(/já foi usada com outro corpo/);
   });
 
-  it.each([
-    [ALGODAO_INATIVO, /ESP-ALG-500 .* está inativo/],
-    ['prd-distribuidora-aurora-001', /não existe no catálogo deste tenant/],
-    ['prd-inexistente', /prd-inexistente não existe/],
-  ])('produto %s: 409 produto-indisponivel', async (produtoId, detail) => {
-    const { status, json } = await criar({ itens: [{ produtoId, quantidade: 1 }] });
+  it.each([ALGODAO_INATIVO, 'prd-distribuidora-aurora-001', 'prd-inexistente'])(
+    'produto %s: 409 produto-indisponivel com o id em `produtos`',
+    async (produtoId) => {
+      const { status, json } = await criar({ itens: [{ produtoId, quantidade: 1 }] });
+      expect(status).toBe(409);
+      expect(json.type).toBe('https://plataforma.dev.br/problemas/produto-indisponivel');
+      expect(json.detail).toBe(
+        `Produto indisponível (inexistente, inativo ou sem preço no catálogo): ${produtoId}.`,
+      );
+      expect(json.produtos).toEqual([produtoId]);
+    },
+  );
+
+  it('lista todos os indisponíveis (sem repetir), não só o primeiro', async () => {
+    const { status, json } = await criar({
+      itens: [
+        { produtoId: 'prd-inexistente', quantidade: 1 },
+        { produtoId: DIP, quantidade: 1 },
+        { produtoId: ALGODAO_INATIVO, quantidade: 1 },
+        { produtoId: 'prd-inexistente', quantidade: 2 },
+      ],
+    });
     expect(status).toBe(409);
-    expect(json.type).toBe('https://plataforma.dev.br/problemas/produto-indisponivel');
-    expect(json.detail).toMatch(detail);
-    expect(json.detail).toContain(produtoId);
+    expect(json.produtos).toEqual(['prd-inexistente', ALGODAO_INATIVO]);
+    expect(json.detail).toBe(
+      `Produto indisponível (inexistente, inativo ou sem preço no catálogo): prd-inexistente, ${ALGODAO_INATIVO}.`,
+    );
+    expect(pedidosSnapshot(FARMA)).toHaveLength(8);
   });
 
   it('produto desativado depois de ir ao carrinho também fica indisponível', async () => {
@@ -371,6 +389,36 @@ describe('GET /api/v1/pedidos/{id} e POST /cancelamento', () => {
     const { status, json } = await call(path, { method: 'POST', usuario: 'admin' });
     expect(status).toBe(200);
     expect(json.status).toBe('CANCELADO');
+  });
+
+  it('quem é gestor e comprador ao mesmo tempo vê todos e cancela como tenant (canManage primeiro)', async () => {
+    const bruno = findDemoUser('bruno')!;
+    bruno.papeis.push('gestor-tenant');
+    try {
+      const lista = await call('api/v1/pedidos?limite=100');
+      const clientes = new Set((lista.json.itens as Pedido[]).map((p) => p.clienteId));
+      expect(clientes.size).toBeGreaterThan(1);
+      const { status, json } = await call('api/v1/pedidos/ped-farmaceutica-0007/cancelamento', {
+        method: 'POST',
+      });
+      expect(status).toBe(200);
+      expect(json.motivoCancelamento).toBe('CANCELADO_PELO_TENANT');
+    } finally {
+      bruno.papeis.pop();
+    }
+  });
+
+  it('comprador sem cliente no token: 403 para listar e para criar', async () => {
+    const bruno = findDemoUser('bruno')!;
+    bruno.clienteId = null;
+    try {
+      const lista = await call('api/v1/pedidos');
+      expect(lista.status).toBe(403);
+      expect(lista.json.detail).toBe('Pedidos exigem o papel comprador ou gestor-tenant.');
+      expect((await criar({ itens: [{ produtoId: DIP, quantidade: 1 }] })).status).toBe(403);
+    } finally {
+      bruno.clienteId = 'cli-bruno';
+    }
   });
 
   it('pedido de outro tenant não existe neste', async () => {

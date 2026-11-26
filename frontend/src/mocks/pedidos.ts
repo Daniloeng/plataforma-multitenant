@@ -204,14 +204,15 @@ function acesso(request: Request, criar = false): Acesso {
   if (!result.tenant) return { response: invalida('O cabeçalho X-Tenant-Id é obrigatório.') };
   const { user, tenant } = result;
   const clienteId = clienteIdOf(user);
-  const comprador = podeComprar(user.papeis) && clienteId !== null;
+  const comprador = podeComprar(user.papeis, clienteId);
   if (criar) {
     return comprador
-      ? { tenant, clienteId }
+      ? { tenant, clienteId: clienteId! }
       : { response: acessoNegado('Criar pedidos exige o papel comprador (com cliente no token).') };
   }
-  if (comprador) return { tenant, clienteId };
+  // Como o canManage() do pedidos-service: quem gere o tenant vê todos, mesmo sendo comprador.
   if (veTodosOsPedidos(user.papeis)) return { tenant, clienteId: null };
+  if (comprador) return { tenant, clienteId: clienteId! };
   return { response: acessoNegado('Pedidos exigem o papel comprador ou gestor-tenant.') };
 }
 
@@ -285,23 +286,26 @@ export const pedidosHandlers = [
       });
     }
 
-    // Preço, SKU e nome vêm do catálogo do tenant; inativo ou de outro tenant = indisponível.
+    // Preço, SKU e nome vêm do catálogo do tenant; inexistente, inativo ou de outro tenant =
+    // indisponível. Como o pedidos-service, lista todos os indisponíveis (sem repetir), não só o
+    // primeiro.
     const catalogo = catalogoSnapshot(a.tenant.id);
     const itensPedido: ItemPedido[] = [];
+    const indisponiveis: string[] = [];
     for (const { produtoId, quantidade } of itens) {
       const produto = catalogo.find((p) => p.id === produtoId && p.ativo);
-      if (!produto) {
-        const inativo = catalogo.find((p) => p.id === produtoId);
-        return problemResponse(
-          409,
-          'produto-indisponivel',
-          'Produto indisponível',
-          inativo
-            ? `O produto ${inativo.sku} (${produtoId}) está inativo no catálogo.`
-            : `O produto ${produtoId} não existe no catálogo deste tenant.`,
-        );
-      }
-      itensPedido.push(itemDe(produto, quantidade));
+      if (produto) itensPedido.push(itemDe(produto, quantidade));
+      else if (!indisponiveis.includes(produtoId)) indisponiveis.push(produtoId);
+    }
+    if (indisponiveis.length > 0) {
+      return problemResponse(
+        409,
+        'produto-indisponivel',
+        'Produto indisponível',
+        `Produto indisponível (inexistente, inativo ou sem preço no catálogo): ${indisponiveis.join(', ')}.`,
+        {},
+        { produtos: indisponiveis },
+      );
     }
 
     sequence += 1;

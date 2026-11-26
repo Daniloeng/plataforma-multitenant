@@ -16,6 +16,7 @@ describe('useCarrinho', () => {
     const { result } = renderHook(() => useCarrinho(KEY_A));
     expect(result.current.itens).toEqual([]);
     expect(result.current.totalEstimado).toEqual({ centavos: 0, moeda: 'BRL' });
+    expect(result.current.moedasDiferentes).toBe(false);
 
     act(() => void result.current.adicionar(p1, 2));
     act(() => void result.current.adicionar(caro, 1));
@@ -37,6 +38,18 @@ describe('useCarrinho', () => {
     act(() => result.current.esvaziar());
     expect(result.current.itens).toEqual([]);
     expect(window.sessionStorage.getItem(KEY_A)).toBeNull();
+  });
+
+  it('itens em moedas diferentes: sem total estimado e com o aviso de moedas diferentes', () => {
+    const emDolar: Produto = { ...p2, preco: { centavos: 500, moeda: 'USD' } };
+    const { result } = renderHook(() => useCarrinho(KEY_A));
+    act(() => void result.current.adicionar(p1, 1));
+    act(() => void result.current.adicionar(emDolar, 1));
+    expect(result.current.moedasDiferentes).toBe(true);
+    expect(result.current.totalEstimado).toBeNull();
+    act(() => result.current.remover(p1.id));
+    expect(result.current.moedasDiferentes).toBe(false);
+    expect(result.current.totalEstimado).toEqual({ centavos: 500, moeda: 'USD' });
   });
 
   it('guarda no sessionStorage e cada tenant tem o próprio carrinho', () => {

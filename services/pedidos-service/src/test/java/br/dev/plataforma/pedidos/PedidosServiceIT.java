@@ -8,6 +8,9 @@ import br.dev.plataforma.contracts.catalogo.PrecoAlterado;
 import br.dev.plataforma.contracts.catalogo.ProdutoAlterado;
 import br.dev.plataforma.contracts.pedidos.PedidoCancelado;
 import br.dev.plataforma.contracts.pedidos.PedidoCriado;
+import br.dev.plataforma.contracts.tenants.NivelIsolamento;
+import br.dev.plataforma.contracts.tenants.Plano;
+import br.dev.plataforma.contracts.tenants.TenantAlterado;
 import br.dev.plataforma.spring.outbox.AvroCodec;
 import br.dev.plataforma.spring.outbox.OutboxMessage;
 import br.dev.plataforma.spring.outbox.PulsarEventPublisher;
@@ -83,6 +86,7 @@ class PedidosServiceIT {
           .tenants()
           .createTenant(
               "plataforma", TenantInfo.builder().allowedClusters(Set.of("standalone")).build());
+      admin.namespaces().createNamespace("plataforma/tenants");
       admin.namespaces().createNamespace("plataforma/catalogo");
       admin.namespaces().createNamespace("plataforma/pedidos");
     }
@@ -511,5 +515,40 @@ class PedidosServiceIT {
     assertThat(repetido.status()).isEqualTo(200);
     assertThat(comoComprador("GET", "/api/v1/pedidos", "loja-h", "cli-1").corpo().get("itens"))
         .hasSize(1);
+  }
+
+  @Test
+  void tenantSuspensoNaoCriaPedidoMasCancela() throws Exception {
+    catalogo("loja-i", "p", 100);
+    String itens = "[" + item("p", 1) + "]";
+    String antes = comprar("loja-i", "cli-1", chave(), itens).corpo().get("id").asText();
+    publicar(
+        TenantAlterado.newBuilder()
+            .setEventId(UUID.randomUUID())
+            .setTenantId("loja-i")
+            .setOccurredAt(Instant.now().truncatedTo(ChronoUnit.MILLIS))
+            .setNome("Loja I")
+            .setPlano(Plano.GRATUITO)
+            .setNivelIsolamento(NivelIsolamento.POOL)
+            .setAtivo(false)
+            .setVersao(1)
+            .build(),
+        "loja-i",
+        "loja-i");
+    await()
+        .atMost(30, TimeUnit.SECONDS)
+        .untilAsserted(
+            () -> {
+              TenantSituacao t = mongo.findById("loja-i", TenantSituacao.class);
+              assertThat(t).isNotNull();
+              assertThat(t.isAtivo()).isFalse();
+            });
+    Resposta suspenso = comprar("loja-i", "cli-1", chave(), itens);
+    assertThat(suspenso.status()).isEqualTo(403);
+    assertThat(suspenso.corpo().get("type").asText()).endsWith("/tenant-suspenso");
+    assertThat(
+            comoComprador("POST", "/api/v1/pedidos/" + antes + "/cancelamento", "loja-i", "cli-1")
+                .status())
+        .isEqualTo(200);
   }
 }

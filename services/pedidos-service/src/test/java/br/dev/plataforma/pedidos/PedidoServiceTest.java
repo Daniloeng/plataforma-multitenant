@@ -70,4 +70,16 @@ class PedidoServiceTest {
     assertThat(p.getNome()).isEqualTo("Nome");
     assertThat(p.getPrecoCentavos()).isEqualTo(100);
   }
+
+  @Test
+  void soWriteConflictViraConflito() {
+    var conflito =
+        new com.mongodb.MongoCommandException(
+            new org.bson.BsonDocument("code", new org.bson.BsonInt32(112)),
+            new com.mongodb.ServerAddress());
+    var rede = new com.mongodb.MongoSocketReadException("caiu", new com.mongodb.ServerAddress());
+    rede.addLabel(com.mongodb.MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL);
+    assertThat(ApiErrors.isWriteConflict(new RuntimeException(conflito))).isTrue();
+    assertThat(ApiErrors.isWriteConflict(new RuntimeException(rede))).isFalse();
+  }
 }

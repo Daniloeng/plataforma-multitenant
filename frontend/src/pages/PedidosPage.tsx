@@ -55,12 +55,21 @@ export function PedidosPage() {
       </p>
     );
   }
-  const comprador = podeComprar(auth.me.papeis);
+  const comprador = podeComprar(auth.me.papeis, auth.me.clienteId);
   const gestor = veTodosOsPedidos(auth.me.papeis);
   if (!comprador && !gestor) {
     return (
       <div className="section card empty">
         <strong>Pedidos exigem o papel comprador ou gestor-tenant.</strong>
+        {auth.me.papeis.includes('comprador') ? (
+          <>
+            {' '}
+            <span className="muted">
+              Seu usuário é comprador, mas o token não traz o cliente B2B (claim{' '}
+              <code>cliente_id</code>).
+            </span>
+          </>
+        ) : null}
       </div>
     );
   }

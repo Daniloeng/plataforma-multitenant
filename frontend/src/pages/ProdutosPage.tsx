@@ -69,7 +69,7 @@ export function ProdutosPage() {
       tenant={auth.selectedTenant}
       gestor={podeGerirCatalogo(auth.me.papeis)}
       usuario={auth.me.usuario}
-      comprador={podeComprar(auth.me.papeis)}
+      comprador={podeComprar(auth.me.papeis, auth.me.clienteId)}
     />
   );
 }

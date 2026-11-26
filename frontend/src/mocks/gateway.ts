@@ -18,8 +18,10 @@ export function problemResponse(
   title: string,
   detail: string,
   headers: Record<string, string> = {},
+  extensions: Record<string, unknown> = {},
 ): HttpResponse<Problema> {
-  const body: Problema = { type: `${PROBLEM_BASE}${type}`, title, status, detail };
+  // Propriedades de extensão (RFC 9457 §3.2) primeiro: não sobrescrevem os campos padrão.
+  const body: Problema = { ...extensions, type: `${PROBLEM_BASE}${type}`, title, status, detail };
   return HttpResponse.json(body, {
     status,
     headers: { 'Content-Type': 'application/problem+json', ...headers },

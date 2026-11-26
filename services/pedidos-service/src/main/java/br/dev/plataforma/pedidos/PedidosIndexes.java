@@ -53,6 +53,9 @@ public class PedidosIndexes {
                   .on("tenantId", Sort.Direction.ASC)
                   .on("produtoId", Sort.Direction.ASC)
                   .named("ix_tenant_produto"));
+      if (!mongo.collectionExists(TenantSituacao.class)) {
+        mongo.createCollection(TenantSituacao.class);
+      }
     };
   }
 }

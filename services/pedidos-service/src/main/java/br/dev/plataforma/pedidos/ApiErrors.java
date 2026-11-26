@@ -70,14 +70,9 @@ public class ApiErrors extends ResponseEntityExceptionHandler {
         "Outra requisição com a mesma Idempotency-Key está criando este pedido; repita em instantes.");
   }
 
-  /** Total acima do que cabe em centavos (long). */
-  @ExceptionHandler(ArithmeticException.class)
-  ProblemDetail totalGrandeDemais(ArithmeticException e) {
-    return problem(
-        HttpStatus.BAD_REQUEST,
-        "requisicao-invalida",
-        "Requisição inválida",
-        "O total do pedido é grande demais; divida em pedidos menores.");
+  @ExceptionHandler(PedidosExceptions.TenantSuspenso.class)
+  ProblemDetail tenantSuspenso(PedidosExceptions.TenantSuspenso e) {
+    return problem(HttpStatus.FORBIDDEN, "tenant-suspenso", "Tenant suspenso", e.getMessage());
   }
 
   @ExceptionHandler(ForbiddenException.class)
@@ -107,6 +102,10 @@ public class ApiErrors extends ResponseEntityExceptionHandler {
     DataIntegrityViolationException.class
   })
   ProblemDetail transientConflict(DataAccessException e) {
+    if (e instanceof DataIntegrityViolationException && !isWriteConflict(e)) {
+      // Violação de dado (ex.: validação do documento) não é indisponibilidade: segue como 500.
+      throw e;
+    }
     if (!isWriteConflict(e)) {
       // Timeout ou banco indisponível não é edição concorrente: 503, para o cliente tentar depois.
       logger.warn("Falha de acesso ao MongoDB", e);
@@ -124,11 +123,13 @@ public class ApiErrors extends ResponseEntityExceptionHandler {
             + " Idempotency-Key); repita a operação.");
   }
 
+  static final int WRITE_CONFLICT = 112;
+
   static boolean isWriteConflict(Throwable e) {
     for (Throwable t = e; t != null; t = t.getCause()) {
-      if (t instanceof MongoException m
-          && (m.hasErrorLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL)
-              || m.getCode() == 112)) {
+      // Só o WriteConflict (112): o rótulo TransientTransactionError também marca queda de rede e
+      // troca de primário, que são indisponibilidade (503), não edição concorrente.
+      if (t instanceof MongoException m && m.getCode() == WRITE_CONFLICT) {
         return true;
       }
     }

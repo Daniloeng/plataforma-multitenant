@@ -15,6 +15,8 @@ export interface ErroEnvio {
   problemType: string | null;
   /** A falha foi de rede: repetir reaproveita a mesma Idempotency-Key. */
   rede: boolean;
+  /** Ids da propriedade `produtos` do 409 produto-indisponivel, ou null se a resposta não trouxe. */
+  produtos: string[] | null;
 }
 
 export interface UseEnviarPedido {
@@ -61,6 +63,7 @@ export function useEnviarPedido(gerarChave: () => string = novaIdempotencyKey): 
           message: describePedidoError(err),
           problemType: err instanceof ApiError ? err.problemType : null,
           rede: isNetworkError(err),
+          produtos: err instanceof ApiError ? err.problemStrings('produtos') : null,
         });
         return null;
       } finally {
