@@ -96,6 +96,13 @@ class PulsarCheckTest {
   }
 
   @Test
+  void closeFechaOHttpClient() {
+    HttpClient http = mock(HttpClient.class);
+    new PulsarCheck("pulsar", adminUrl(), TIMEOUT, http).close();
+    org.mockito.Mockito.verify(http).close();
+  }
+
+  @Test
   @SuppressWarnings("unchecked")
   void interrupcaoDaDownEPreservaFlag() throws Exception {
     HttpClient http = mock(HttpClient.class);

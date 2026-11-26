@@ -31,7 +31,7 @@ describe('App', () => {
     expect(pulsar).toHaveTextContent('PULSAR');
     expect(pulsar).toHaveTextContent('Disponível');
     expect(pulsar).toHaveTextContent('12 ms');
-    expect(pulsar).toHaveTextContent('standalone');
+    expect(pulsar).toHaveTextContent('broker saudável');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 

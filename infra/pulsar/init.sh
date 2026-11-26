@@ -1,23 +1,25 @@
-#!/usr/bin/env bash
-# Cria a hierarquia Pulsar do plano: tenant "plataforma" e um namespace por domínio.
-# Idempotente: pode rodar várias vezes.
-set -euo pipefail
+#!/bin/sh
+# Cria a hierarquia Pulsar do plano: tenant "plataforma" e um namespace por domínio, com retenção
+# de 3 dias. Usa a API REST de admin (curl), que é bem mais rápida que abrir uma JVM do
+# pulsar-admin por comando. Idempotente: 409 (já existe) conta como sucesso.
+set -eu
 
-ADMIN="bin/pulsar-admin --admin-url ${PULSAR_ADMIN_URL:-http://localhost:8080}"
-cd /pulsar
+ADMIN="${PULSAR_ADMIN_URL:-http://localhost:8080}/admin/v2"
 
-if ! $ADMIN tenants get plataforma >/dev/null 2>&1; then
-  $ADMIN tenants create plataforma --allowed-clusters standalone
-  echo "tenant plataforma criado"
-fi
+call() { # método caminho corpo
+  code=$(curl -s -o /tmp/resp -w '%{http_code}' -X "$1" -H 'Content-Type: application/json' \
+    "$ADMIN/$2" -d "$3")
+  case "$code" in
+    2*) echo "ok   $1 $2" ;;
+    409) echo "já existe $2" ;;
+    *) echo "ERRO $code em $1 $2: $(cat /tmp/resp)" >&2; exit 1 ;;
+  esac
+}
 
+call PUT tenants/plataforma '{"allowedClusters":["standalone"],"adminRoles":[]}'
 for ns in tenants catalogo pedidos pagamentos; do
-  if ! $ADMIN namespaces policies "plataforma/$ns" >/dev/null 2>&1; then
-    $ADMIN namespaces create "plataforma/$ns"
-    # Retenção de 3 dias, como no plano (cabe no disco gratuito).
-    $ADMIN namespaces set-retention "plataforma/$ns" --time 3d --size 1G
-    echo "namespace plataforma/$ns criado"
-  fi
+  call PUT "namespaces/plataforma/$ns" '{}'
+  call POST "namespaces/plataforma/$ns/retention" '{"retentionTimeInMinutes":4320,"retentionSizeInMB":1024}'
 done
 
-$ADMIN namespaces list plataforma
+echo "namespaces: $(curl -s "$ADMIN/namespaces/plataforma")"

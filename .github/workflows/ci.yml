@@ -97,7 +97,9 @@ jobs:
           print("\nPlataforma UP com", len(s["components"]), "componentes")
           PY
       - name: Conferir namespaces Pulsar
-        run: docker compose -f infra/docker-compose.yml exec -T pulsar bin/pulsar-admin namespaces list plataforma
+        run: |
+          curl -fsS http://localhost:8080/admin/v2/namespaces/plataforma | tee ns.json
+          for ns in tenants catalogo pedidos pagamentos; do grep -q "plataforma/$ns" ns.json; done
       - name: Logs em caso de falha
         if: failure()
         run: docker compose -f infra/docker-compose.yml logs --tail 200

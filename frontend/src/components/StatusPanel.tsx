@@ -52,8 +52,8 @@ export function StatusPanel({ data, error, loading, refresh }: UsePlatformStatus
             </div>
           </div>
           <ul className="grid" aria-label="Componentes verificados">
-            {data.components.map((c) => (
-              <ComponentCard key={c.name} component={c} />
+            {data.components.map((c, i) => (
+              <ComponentCard key={`${i}-${c.name}`} component={c} />
             ))}
           </ul>
         </>

@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit;
  * produz e consome uma mensagem num tópico interno: se responde 200, o broker e o BookKeeper estão
  * funcionando.
  */
-public class PulsarCheck implements ComponentCheck {
+public class PulsarCheck implements ComponentCheck, AutoCloseable {
 
   static final String HEALTH_PATH = "admin/v2/brokers/health";
 
@@ -70,5 +70,11 @@ public class PulsarCheck implements ComponentCheck {
 
   private static long elapsed(long start) {
     return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+  }
+
+  /** Libera o seletor e o pool de conexões do {@link HttpClient}. */
+  @Override
+  public void close() {
+    http.close();
   }
 }

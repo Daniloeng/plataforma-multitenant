@@ -40,6 +40,19 @@ export function statusUrl(
   return new URL(`${base}api/status`, origin).toString();
 }
 
+function isStatusComponent(value: unknown): value is StatusComponent {
+  if (typeof value !== 'object' || value === null) return false;
+  const c = value as Record<string, unknown>;
+  return (
+    typeof c.name === 'string' &&
+    typeof c.type === 'string' &&
+    // status desconhecido é aceito e exibido como veio (compatibilidade com versões novas da API)
+    typeof c.status === 'string' &&
+    (c.latencyMs === null || typeof c.latencyMs === 'number') &&
+    (c.details === null || c.details === undefined || typeof c.details === 'string')
+  );
+}
+
 function isStatusResponse(value: unknown): value is StatusResponse {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
@@ -48,7 +61,8 @@ function isStatusResponse(value: unknown): value is StatusResponse {
     PLATFORM_STATUSES.includes(v.status) &&
     typeof v.checkedAt === 'string' &&
     typeof v.version === 'string' &&
-    Array.isArray(v.components)
+    Array.isArray(v.components) &&
+    v.components.every(isStatusComponent)
   );
 }
 

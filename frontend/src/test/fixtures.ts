@@ -34,7 +34,7 @@ export function makeStatus(overrides: Partial<StatusResponse> = {}): StatusRespo
         latencyMs: 5,
         details: 'replica set rs0',
       },
-      { name: 'pulsar', type: 'PULSAR', status: 'UP', latencyMs: 12, details: 'standalone' },
+      { name: 'pulsar', type: 'PULSAR', status: 'UP', latencyMs: 12, details: 'broker saudável' },
     ],
     ...overrides,
   };

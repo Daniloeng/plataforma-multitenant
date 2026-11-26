@@ -6,7 +6,9 @@ multi-tenant de pedidos B2B + pagamentos em microsserviços. O plano de 22 dias 
 
 ## Idioma e estilo
 - Textos para pessoas (README, docs, mensagens de commit, PRs, UI) em **português do Brasil**.
-- Código (nomes de classes, métodos, variáveis) em inglês; comentários e Javadoc em português.
+- Código de produção (classes, métodos, campos, variáveis) em inglês; comentários e Javadoc em
+  português. Nos testes, nomes de métodos e variáveis locais podem ficar em português, para o
+  teste ler como uma especificação (`rejeitaFormatosInvalidos`).
 - Commits no formato Conventional Commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `ci:`).
 
 ## Estrutura

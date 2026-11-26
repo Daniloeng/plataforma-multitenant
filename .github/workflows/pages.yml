@@ -29,6 +29,9 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      # Nunca publicar um bundle com testes quebrados, mesmo em push direto na main.
+      - run: npm run typecheck
+      - run: npm test
       - run: npm run build
         env:
           VITE_DEMO: 'true'

@@ -46,6 +46,28 @@ describe('fetchStatus', () => {
     ['nulo', null],
     ['status desconhecido', { ...makeStatus(), status: 'MAYBE' }],
     ['sem components', { status: 'UP', checkedAt: 'x', version: 'v' }],
+    ['componente nulo', { ...makeStatus(), components: [null] }],
+    [
+      'componente sem nome',
+      {
+        ...makeStatus(),
+        components: [{ type: 'MONGODB', status: 'UP', latencyMs: 1, details: null }],
+      },
+    ],
+    [
+      'latência não numérica',
+      {
+        ...makeStatus(),
+        components: [{ name: 'm', type: 'MONGODB', status: 'UP', latencyMs: '1', details: null }],
+      },
+    ],
+    [
+      'details não textual',
+      {
+        ...makeStatus(),
+        components: [{ name: 'm', type: 'MONGODB', status: 'UP', latencyMs: 1, details: 42 }],
+      },
+    ],
   ])('lança ApiError quando o corpo está fora do contrato (%s)', async (_, body) => {
     server.use(http.get('*/api/status', () => HttpResponse.json(body)));
     await expect(fetchStatus()).rejects.toThrow('fora do contrato');

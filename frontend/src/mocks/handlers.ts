@@ -20,7 +20,7 @@ export function buildDemoStatus(
     type: 'MONGODB',
     status: 'UP',
     latencyMs: jitter(base, 4, random),
-    details: 'replica set rs0',
+    details: `replica set rs-${name.replace('mongo-', '')}`,
   });
   return {
     status: 'UP',
@@ -36,7 +36,7 @@ export function buildDemoStatus(
         type: 'PULSAR',
         status: 'UP',
         latencyMs: jitter(10, 8, random),
-        details: 'standalone',
+        details: 'broker saudável',
       },
     ],
   };

@@ -12,11 +12,11 @@ import java.util.regex.Pattern;
  */
 public record TenantId(String value) {
 
-  private static final Pattern FORMATO = Pattern.compile("^[a-z][a-z0-9-]{1,38}[a-z0-9]$");
+  private static final Pattern FORMAT = Pattern.compile("^[a-z][a-z0-9-]{1,38}[a-z0-9]$");
 
   public TenantId {
     Objects.requireNonNull(value, "tenantId é obrigatório");
-    if (!FORMATO.matcher(value).matches()) {
+    if (!FORMAT.matcher(value).matches()) {
       throw new IllegalArgumentException(
           "tenantId inválido: '"
               + value

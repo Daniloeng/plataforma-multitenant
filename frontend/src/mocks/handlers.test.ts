@@ -17,8 +17,11 @@ describe('buildDemoStatus', () => {
     ]);
     expect(status.components.every((c) => c.status === 'UP')).toBe(true);
     expect(status.components.map((c) => c.latencyMs)).toEqual([2, 3, 3, 4, 10]);
-    expect(status.components[4]).toMatchObject({ type: 'PULSAR', details: 'standalone' });
-    expect(status.components[0]).toMatchObject({ type: 'MONGODB', details: 'replica set rs0' });
+    expect(status.components[4]).toMatchObject({ type: 'PULSAR', details: 'broker saudável' });
+    expect(status.components[0]).toMatchObject({
+      type: 'MONGODB',
+      details: 'replica set rs-tenants',
+    });
   });
 
   it('varia a latência dentro de uma faixa pequena', () => {

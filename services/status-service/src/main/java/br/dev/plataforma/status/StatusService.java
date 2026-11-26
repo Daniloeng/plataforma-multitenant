@@ -7,12 +7,16 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.stream.IntStream;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Executa todas as verificações em paralelo (uma virtual thread por componente) e agrega o
  * resultado. Assim o tempo de resposta é o da verificação mais lenta, não a soma de todas.
  */
 public class StatusService implements AutoCloseable {
+
+  private static final Logger LOG = LoggerFactory.getLogger(StatusService.class);
 
   private final List<ComponentCheck> checks;
   private final Clock clock;
@@ -45,18 +49,34 @@ public class StatusService implements AutoCloseable {
       Thread.currentThread().interrupt();
       return ComponentStatus.down(check.name(), check.type(), 0, "interrompido");
     } catch (Exception e) {
+      // O detalhe completo fica só no log: a resposta é pública e chega a qualquer navegador.
+      Throwable cause = e.getCause() == null ? e : e.getCause();
+      LOG.warn("Falha inesperada na verificação de {}", check.name(), cause);
       return ComponentStatus.down(
-          check.name(), check.type(), 0, "falha inesperada: " + e.getMessage());
+          check.name(), check.type(), 0, "falha inesperada: " + cause.getClass().getSimpleName());
     }
   }
 
   /** Fecha as verificações que guardam conexões (ex.: clientes MongoDB). */
   @Override
   public void close() throws Exception {
+    Exception failure = null;
     for (ComponentCheck check : checks) {
       if (check instanceof AutoCloseable closeable) {
-        closeable.close();
+        try {
+          closeable.close();
+        } catch (Exception e) {
+          // Continua fechando as demais; a primeira falha é relançada com as outras anexadas.
+          if (failure == null) {
+            failure = e;
+          } else {
+            failure.addSuppressed(e);
+          }
+        }
       }
+    }
+    if (failure != null) {
+      throw failure;
     }
   }
 }

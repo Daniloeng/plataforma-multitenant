@@ -1,6 +1,7 @@
 package br.dev.plataforma.status;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -46,7 +47,9 @@ class StatusServiceTest {
     ComponentStatus quebrado = status.components().get(1);
     assertThat(quebrado.status()).isEqualTo(HealthState.DOWN);
     assertThat(quebrado.type()).isEqualTo(ComponentType.MONGODB);
-    assertThat(quebrado.details()).contains("boom");
+    assertThat(quebrado.details())
+        .isEqualTo("falha inesperada: IllegalStateException")
+        .doesNotContain("boom");
   }
 
   @Test
@@ -102,6 +105,35 @@ class StatusServiceTest {
     service.close();
 
     assertThat(check.closed).isTrue();
+  }
+
+  @Test
+  void closeFechaTodasMesmoQuandoUmaFalha() {
+    FakeCheck depois = FakeCheck.up("depois");
+    var quebra1 =
+        new FakeCheck("q1", () -> null) {
+          @Override
+          public void close() {
+            throw new IllegalStateException("q1");
+          }
+        };
+    var quebra2 =
+        new FakeCheck("q2", () -> null) {
+          @Override
+          public void close() {
+            throw new IllegalStateException("q2");
+          }
+        };
+    var service = new StatusService(List.of(quebra1, quebra2, depois), RELOGIO, "v");
+
+    assertThatThrownBy(service::close)
+        .hasMessage("q1")
+        .satisfies(
+            e ->
+                assertThat(e.getSuppressed())
+                    .extracting(Throwable::getMessage)
+                    .containsExactly("q2"));
+    assertThat(depois.closed).isTrue();
   }
 
   private static ComponentCheck lenta(String nome, Duration espera) {
