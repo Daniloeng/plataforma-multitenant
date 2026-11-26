@@ -57,7 +57,14 @@ function itens(m: ServiceMetrics): Item[] {
   if (presente(m.outboxLagSeconds)) {
     partesOutbox.push(`atraso ${formatSeconds(m.outboxLagSeconds)}`);
   }
-  if (partesOutbox.length > 0) {
+  if (m.outboxUnreadable === true) {
+    lista.push({
+      rotulo: 'Outbox',
+      valor: 'sem leitura',
+      destaque: 'alerta',
+      motivo: 'não foi possível contar o outbox',
+    });
+  } else if (partesOutbox.length > 0) {
     const atraso = atrasoOutboxEmAlerta(m);
     lista.push({
       rotulo: 'Outbox',

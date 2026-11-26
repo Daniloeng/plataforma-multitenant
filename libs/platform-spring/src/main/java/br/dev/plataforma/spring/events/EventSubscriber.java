@@ -196,21 +196,24 @@ public class EventSubscriber implements SmartLifecycle {
             .lowCardinalityKeyValue("evento", event)
             .start();
     try (Observation.Scope scope = observation.openScope()) {
-      boolean processed = process(msg, r);
-      observation.lowCardinalityKeyValue("resultado", processed ? "processado" : "duplicado");
-      consumer.acknowledgeAsync(msg);
-    } catch (Throwable e) { // Error também: sem nack, a mensagem ficaria pendente para sempre
-      // Pulsar manda para o dead letter a falha da entrega de número maxRedeliveries.
-      boolean deadLetter = maxRedeliveries > 0 && msg.getRedeliveryCount() >= maxRedeliveries;
-      observation.lowCardinalityKeyValue("resultado", deadLetter ? "dead-letter" : "falha");
-      observation.error(e);
-      LOG.warn(
-          "Falha ao processar {} ({}), tentativa {}: {}",
-          msg.getTopicName(),
-          msg.getMessageId(),
-          msg.getRedeliveryCount() + 1,
-          e.toString());
-      consumer.negativeAcknowledge(msg);
+      try {
+        boolean processed = process(msg, r);
+        observation.lowCardinalityKeyValue("resultado", processed ? "processado" : "duplicado");
+        consumer.acknowledgeAsync(msg);
+      } catch (Throwable e) { // Error também: sem nack, a mensagem ficaria pendente para sempre
+        // Ainda dentro do escopo: o log da falha sai com o traceId do consumo.
+        // Pulsar manda para o dead letter a falha da entrega de número maxRedeliveries.
+        boolean deadLetter = maxRedeliveries > 0 && msg.getRedeliveryCount() >= maxRedeliveries;
+        observation.lowCardinalityKeyValue("resultado", deadLetter ? "dead-letter" : "falha");
+        observation.error(e);
+        LOG.warn(
+            "Falha ao processar {} ({}), tentativa {}: {}",
+            msg.getTopicName(),
+            msg.getMessageId(),
+            msg.getRedeliveryCount() + 1,
+            e.toString());
+        consumer.negativeAcknowledge(msg);
+      }
     } finally {
       observation.stop();
     }

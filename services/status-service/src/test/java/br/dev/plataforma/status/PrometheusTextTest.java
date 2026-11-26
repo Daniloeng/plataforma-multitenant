@@ -59,6 +59,7 @@ class PrometheusTextTest {
     assertThat(m.outboxLagSeconds()).isNull();
     assertThat(m.eventsConsumed()).isNull();
     assertThat(m.eventsFailed()).isNull();
+    assertThat(m.outboxUnreadable()).isFalse();
   }
 
   @Test
@@ -70,6 +71,7 @@ class PrometheusTextTest {
             .toServiceMetrics();
     assertThat(m.outboxPending()).isNull();
     assertThat(m.outboxLagSeconds()).isNull();
+    assertThat(m.outboxUnreadable()).isTrue();
   }
 
   @Test

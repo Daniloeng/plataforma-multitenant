@@ -4,7 +4,15 @@ groups:
   - name: plataforma
     rules:
       - alert: ServicoFora
-        expr: up == 0
+        # Os alvos vêm do DNS: contêiner parado some da resposta e o `up` dele deixa de existir (não
+        # vira 0). Por isso o absent por job; ele também cobre o RelaySemLider sem réplica nenhuma.
+        expr: >
+          up == 0
+          or absent(up{job="gateway"})
+          or absent(up{job="tenant-service"})
+          or absent(up{job="catalogo-service"})
+          or absent(up{job="pedidos-service"})
+          or absent(up{job="pagamentos-service"})
         for: 1m
         labels:
           severity: critica

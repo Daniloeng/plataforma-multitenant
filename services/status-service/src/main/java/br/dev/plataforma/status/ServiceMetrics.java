@@ -10,6 +10,8 @@ package br.dev.plataforma.status;
  * @param outboxLagSeconds idade do pendente mais antigo, em segundos; null se não tem outbox
  * @param eventsConsumed eventos consumidos com sucesso; null se o serviço não consumiu nenhum
  * @param eventsFailed tentativas de consumo que falharam; null se o serviço não consumiu nenhum
+ * @param outboxUnreadable o serviço tem outbox, mas não conseguiu contá-lo (MongoDB lento ou fora):
+ *     pendentes e atraso vêm null, e isso não quer dizer "sem outbox"
  */
 public record ServiceMetrics(
     long requests,
@@ -18,4 +20,5 @@ public record ServiceMetrics(
     Long outboxPending,
     Double outboxLagSeconds,
     Long eventsConsumed,
-    Long eventsFailed) {}
+    Long eventsFailed,
+    boolean outboxUnreadable) {}

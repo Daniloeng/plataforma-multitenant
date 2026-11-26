@@ -65,3 +65,4 @@ components:
         outboxLagSeconds: { type: [number, 'null'], description: Idade do pendente mais antigo; null sem outbox ou sem leitura. }
         eventsConsumed: { type: [integer, 'null'], description: Eventos consumidos com sucesso; null se ainda não consumiu nenhum. }
         eventsFailed: { type: [integer, 'null'], description: Tentativas de consumo que falharam (inclui dead letter). }
+        outboxUnreadable: { type: boolean, default: false, description: O serviço tem outbox mas não conseguiu contá-lo (MongoDB lento ou fora); pendentes e atraso vêm null. }

@@ -24,7 +24,7 @@ describe('AlertasPanel', () => {
             status: 'UP',
             latencyMs: 6,
             details: null,
-            metrics: { requests: 10, errorRate: 0.05, p99Ms: 200 },
+            metrics: { requests: 200, errorRate: 0.05, p99Ms: 200 },
           },
         ]}
       />,

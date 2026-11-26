@@ -13,6 +13,12 @@ tests:
         values: "1 0x8"
       - series: 'up{job="catalogo-service",instance="catalogo-service:8082"}'
         values: "1 0 0 1 1 1 1 1 1"
+      - series: 'up{job="gateway",instance="gateway:8001"}'
+        values: "1x8"
+      - series: 'up{job="tenant-service",instance="tenant-service:8081"}'
+        values: "1x8"
+      - series: 'up{job="pagamentos-service",instance="pagamentos-service:8084"}'
+        values: "1x8"
     alert_rule_test:
       - eval_time: 30s
         alertname: ServicoFora
@@ -20,6 +26,31 @@ tests:
         alertname: ServicoFora
         exp_alerts:
           - exp_labels: { severity: critica, job: pedidos-service, instance: "pedidos-service:8083" }
+            exp_annotations:
+              summary: "pedidos-service não responde às métricas há 1 min"
+              runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/servico-fora.md
+
+  - name: contêiner parado some do DNS e o up deixa de existir
+    interval: 15s
+    input_series:
+      - series: 'up{job="gateway",instance="gateway:8001"}'
+        values: "1x8"
+      - series: 'up{job="tenant-service",instance="tenant-service:8081"}'
+        values: "1x8"
+      - series: 'up{job="catalogo-service",instance="catalogo-service:8082"}'
+        values: "1x8"
+      - series: 'up{job="pagamentos-service",instance="pagamentos-service:8084"}'
+        values: "1x8"
+      # O alvo sai da descoberta: marcador de série obsoleta, como o Prometheus grava.
+      - series: 'up{job="pedidos-service",instance="pedidos-service:8083"}'
+        values: "1 1 stale"
+    alert_rule_test:
+      - eval_time: 45s
+        alertname: ServicoFora
+      - eval_time: 2m
+        alertname: ServicoFora
+        exp_alerts:
+          - exp_labels: { severity: critica, job: pedidos-service }
             exp_annotations:
               summary: "pedidos-service não responde às métricas há 1 min"
               runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/servico-fora.md

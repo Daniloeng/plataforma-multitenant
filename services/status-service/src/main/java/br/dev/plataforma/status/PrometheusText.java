@@ -171,6 +171,8 @@ final class PrometheusText {
         has(outbox) && pending >= 0 ? (long) pending : null,
         has(lag) && Double.isFinite(lagSeconds) ? lagSeconds : null,
         has(consumed) ? (long) sum(consumed, ok) : null,
-        has(consumed) ? (long) sum(consumed, failed) : null);
+        has(consumed) ? (long) sum(consumed, failed) : null,
+        // O PlatformMetrics publica -1 e NaN quando a contagem falha (ADR-0015).
+        (has(outbox) && pending < 0) || (has(lag) && !Double.isFinite(lagSeconds)));
   }
 }

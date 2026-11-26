@@ -8,10 +8,15 @@ import { COMPONENT_STATUS_LABEL, formatLatency } from './format';
 export const P99_ALERTA_MS = 3000;
 /** Acima de 1% de respostas 5xx. */
 export const TAXA_ERRO_ALERTA = 0.01;
+/**
+ * Mínimo de requisições para a taxa de erros valer como alerta: os números são acumulados desde a
+ * subida, e com pouco tráfego um 5xx isolado ficaria em alerta até o serviço reiniciar.
+ */
+export const MIN_REQUISICOES_ERRO = 100;
 /** Evento mais antigo do outbox esperando há mais de 60 s. */
 export const ATRASO_OUTBOX_ALERTA_S = 60;
 
-export type RegraAlerta = 'COMPONENTE_FORA' | 'P99' | 'ERROS' | 'ATRASO_OUTBOX';
+export type RegraAlerta = 'COMPONENTE_FORA' | 'P99' | 'ERROS' | 'ATRASO_OUTBOX' | 'OUTBOX_ILEGIVEL';
 
 export interface Alerta {
   componente: string;
@@ -61,7 +66,7 @@ export function p99EmAlerta(m: ServiceMetrics): boolean {
 }
 
 export function errosEmAlerta(m: ServiceMetrics): boolean {
-  return m.errorRate > TAXA_ERRO_ALERTA;
+  return m.requests >= MIN_REQUISICOES_ERRO && m.errorRate > TAXA_ERRO_ALERTA;
 }
 
 export function atrasoOutboxEmAlerta(m: ServiceMetrics): boolean {
@@ -108,6 +113,13 @@ export function avaliarAlertas(components: readonly StatusComponent[]): Alerta[]
         componente: c.name,
         regra: 'ATRASO_OUTBOX',
         mensagem: `outbox com atraso de ${formatSeconds(m.outboxLagSeconds as number)}, acima de ${ATRASO_OUTBOX_ALERTA_S} s`,
+      });
+    }
+    if (m.outboxUnreadable === true) {
+      alertas.push({
+        componente: c.name,
+        regra: 'OUTBOX_ILEGIVEL',
+        mensagem: 'não foi possível contar o outbox (MongoDB lento ou fora)',
       });
     }
   }

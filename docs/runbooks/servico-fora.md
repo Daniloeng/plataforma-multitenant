@@ -1,7 +1,8 @@
 # ServicoFora
 
 **Dispara quando:** o Prometheus não consegue raspar `/actuator/prometheus` de um serviço por 1 min
-(`up == 0`).
+(`up == 0`), ou quando o job não tem alvo nenhum (`absent(up{job=...})`): contêiner parado some do
+DNS e o alerta vem sem `instance`.
 
 **Impacto:** as APIs daquele serviço falham pelo gateway (502/503) e os eventos que ele consome se
 acumulam no Pulsar, sem perda (assinatura durável).

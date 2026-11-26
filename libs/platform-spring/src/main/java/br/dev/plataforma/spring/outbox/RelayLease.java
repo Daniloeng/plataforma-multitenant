@@ -40,7 +40,6 @@ public class RelayLease {
   private volatile Instant heldUntil;
 
   private volatile boolean closed;
-  private volatile boolean documentExists;
 
   public RelayLease(MongoCollection<Document> collection, Clock clock, Duration ttl) {
     this.collection = collection;
@@ -71,21 +70,12 @@ public class RelayLease {
     if (until != null && now.isBefore(until.minus(ttl.dividedBy(2)))) {
       return true; // renovado há pouco
     }
-    ensureDocument();
-    // Sem upsert: o MongoDB não aceita $expr no filtro de um upsert. O documento já existe.
-    Document granted =
-        collection.findOneAndUpdate(
-            Filters.and(
-                Filters.eq("_id", ID),
-                Filters.or(
-                    Filters.eq("owner", replica),
-                    Filters.expr(new Document("$lt", List.of("$expiresAt", "$$NOW"))))),
-            List.of(
-                new Document(
-                    "$set",
-                    new Document("owner", replica)
-                        .append("expiresAt", new Document("$add", List.of("$$NOW", ttl.toMillis())))
-                        .append("renewedAt", "$$NOW"))));
+    Document granted = grant();
+    if (granted == null && insertExpired()) {
+      // Ainda não havia documento (primeira subida, ou apagado à mão): criado vencido, tenta de
+      // novo.
+      granted = grant();
+    }
     if (granted == null) {
       // Outra réplica é dona e a validade dela não passou.
       if (until != null) {
@@ -105,20 +95,37 @@ public class RelayLease {
     return true;
   }
 
-  /** Cria o documento do lease, já vencido, se ainda não existe. */
-  private void ensureDocument() {
-    if (documentExists) {
-      return;
-    }
+  /**
+   * Toma ou renova o lease se esta réplica é a dona ou se ele venceu. Sem upsert: o MongoDB não
+   * aceita {@code $expr} no filtro de um upsert, por isso o documento é criado à parte.
+   */
+  private Document grant() {
+    return collection.findOneAndUpdate(
+        Filters.and(
+            Filters.eq("_id", ID),
+            Filters.or(
+                Filters.eq("owner", replica),
+                Filters.expr(new Document("$lt", List.of("$expiresAt", "$$NOW"))))),
+        List.of(
+            new Document(
+                "$set",
+                new Document("owner", replica)
+                    .append("expiresAt", new Document("$add", List.of("$$NOW", ttl.toMillis())))
+                    .append("renewedAt", "$$NOW"))));
+  }
+
+  /** Insere o documento vencido; devolve false se ele já existia. */
+  private boolean insertExpired() {
     try {
       collection.insertOne(
           new Document("_id", ID).append("owner", null).append("expiresAt", new Date(0)));
+      return true;
     } catch (MongoException e) {
       if (ErrorCategory.fromErrorCode(e.getCode()) != ErrorCategory.DUPLICATE_KEY) {
         throw e;
       }
+      return false;
     }
-    documentExists = true;
   }
 
   /** Solta o lease no desligamento, para outra réplica assumir já; depois disso, nunca assume. */

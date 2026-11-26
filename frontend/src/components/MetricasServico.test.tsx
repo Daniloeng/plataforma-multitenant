@@ -91,6 +91,18 @@ describe('MetricasServico', () => {
     expect(valor('Eventos')).toHaveTextContent(/^1 consumido$/);
   });
 
+  it('mostra o outbox sem leitura em destaque, em vez de sumir com ele', () => {
+    render(
+      <MetricasServico
+        nome="pedidos-service"
+        metrics={metricas({ outboxPending: null, outboxLagSeconds: null, outboxUnreadable: true })}
+      />,
+    );
+    const outbox = valor('Outbox');
+    expect(outbox).toHaveTextContent('sem leitura');
+    expect(outbox.parentElement).toHaveClass('metrica--alerta');
+  });
+
   it('destaca p99 acima de 3 s, erros acima de 1%, atraso acima de 60 s e falhas de consumo', () => {
     render(
       <MetricasServico

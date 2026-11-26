@@ -63,6 +63,7 @@ describe('fetchStatus', () => {
             outboxLagSeconds: 0,
             eventsConsumed: 50,
             eventsFailed: 1,
+            outboxUnreadable: false,
           },
         },
         {
@@ -120,6 +121,7 @@ describe('fetchStatus', () => {
     ['eventsConsumed textual', { requests: 1, errorRate: 0, p99Ms: 1, eventsConsumed: 'x' }],
     ['eventsFailed textual', { requests: 1, errorRate: 0, p99Ms: 1, eventsFailed: false }],
     ['outboxLagSeconds NaN serializado', { requests: 1, errorRate: 0, outboxLagSeconds: 'NaN' }],
+    ['outboxUnreadable textual', { requests: 1, errorRate: 0, outboxUnreadable: 'sim' }],
   ])(
     'descarta só as métricas fora do contrato, sem invalidar a resposta (%s)',
     async (_, metrics) => {

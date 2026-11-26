@@ -87,6 +87,27 @@ describe('limiares', () => {
     expect(errosEmAlerta(metricas({ errorRate: 0.0101 }))).toBe(true);
   });
 
+  it('com pouco tráfego acumulado, um 5xx isolado não vira alerta de erros', () => {
+    expect(errosEmAlerta(metricas({ requests: 50, errorRate: 0.02 }))).toBe(false);
+    expect(errosEmAlerta(metricas({ requests: 100, errorRate: 0.02 }))).toBe(true);
+  });
+
+  it('alerta quando o serviço não conseguiu contar o outbox', () => {
+    const alertas = avaliarAlertas([
+      componente({
+        metrics: metricas({ outboxPending: null, outboxLagSeconds: null, outboxUnreadable: true }),
+      }),
+      componente({ name: 'catalogo-service', metrics: metricas({ outboxUnreadable: false }) }),
+    ]);
+    expect(alertas).toEqual([
+      {
+        componente: 'pedidos-service',
+        regra: 'OUTBOX_ILEGIVEL',
+        mensagem: 'não foi possível contar o outbox (MongoDB lento ou fora)',
+      },
+    ]);
+  });
+
   it('atraso do outbox em alerta só acima de 60 s', () => {
     expect(atrasoOutboxEmAlerta(metricas({ outboxLagSeconds: 60 }))).toBe(false);
     expect(atrasoOutboxEmAlerta(metricas({ outboxLagSeconds: 61 }))).toBe(true);

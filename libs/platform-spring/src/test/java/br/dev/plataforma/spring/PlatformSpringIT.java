@@ -455,6 +455,14 @@ class PlatformSpringIT {
     assertThat(a.tryAcquire()).isTrue();
     a.release();
     a.release(); // sem lease: nada a fazer
+
+    // Documento apagado à mão: a próxima réplica recria e assume, sem reiniciar.
+    RelayLease c = new RelayLease(colecao, Clock.systemUTC(), ttl);
+    assertThat(c.tryAcquire()).isTrue();
+    colecao.deleteMany(new org.bson.Document());
+    Thread.sleep(ttl.toMillis() + 100);
+    assertThat(c.tryAcquire()).isTrue();
+    assertThat(colecao.countDocuments()).isEqualTo(1);
   }
 
   @Test

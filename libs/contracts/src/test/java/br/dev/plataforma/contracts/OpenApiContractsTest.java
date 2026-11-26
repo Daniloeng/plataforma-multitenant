@@ -143,7 +143,8 @@ class OpenApiContractsTest {
             "outboxPending",
             "outboxLagSeconds",
             "eventsConsumed",
-            "eventsFailed");
+            "eventsFailed",
+            "outboxUnreadable");
   }
 
   /** Junta os nomes de propriedades de um schema, seguindo $ref e schemas aninhados. */

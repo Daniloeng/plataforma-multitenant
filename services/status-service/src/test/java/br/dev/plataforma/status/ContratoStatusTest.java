@@ -40,7 +40,7 @@ class ContratoStatusTest {
 
   @Test
   void respostaTemExatamenteOsCamposDoContrato() throws Exception {
-    var metricas = new ServiceMetrics(10, 0.1, 120.0, 0L, 0.0, 5L, 0L);
+    var metricas = new ServiceMetrics(10, 0.1, 120.0, 0L, 0.0, 5L, 0L, false);
     var status =
         new PlatformStatus(
             HealthState.UP,

@@ -68,7 +68,13 @@ public class ServiceCheck extends HttpHealthCheck {
 
   /** Métricas do serviço, ou null se não respondeu (a saúde já foi decidida pela readiness). */
   ServiceMetrics metrics() {
-    HttpRequest request = HttpRequest.newBuilder(metricsUri).timeout(timeout()).GET().build();
+    HttpRequest request =
+        HttpRequest.newBuilder(metricsUri)
+            .timeout(timeout())
+            // Texto clássico do Prometheus: sem exemplars (o OpenMetrics os põe na mesma linha).
+            .header("Accept", "text/plain;version=0.0.4")
+            .GET()
+            .build();
     try {
       HttpResponse<String> response = http().send(request, HttpResponse.BodyHandlers.ofString());
       if (response.statusCode() != 200) {

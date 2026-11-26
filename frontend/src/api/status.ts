@@ -27,6 +27,8 @@ export interface ServiceMetrics {
   eventsConsumed?: number | null;
   /** Tentativas de consumo que falharam; null se o serviço não consome eventos. */
   eventsFailed?: number | null;
+  /** O serviço tem outbox, mas não conseguiu contá-lo (MongoDB lento ou fora). */
+  outboxUnreadable?: boolean;
 }
 
 export interface StatusComponent {
@@ -70,7 +72,8 @@ function isServiceMetrics(value: unknown): value is ServiceMetrics {
     isOptionalNumber(m.outboxPending) &&
     isOptionalNumber(m.outboxLagSeconds) &&
     isOptionalNumber(m.eventsConsumed) &&
-    isOptionalNumber(m.eventsFailed)
+    isOptionalNumber(m.eventsFailed) &&
+    (m.outboxUnreadable === undefined || typeof m.outboxUnreadable === 'boolean')
   );
 }
 
