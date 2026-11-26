@@ -83,7 +83,15 @@ class ExpiracaoPedidosTest {
 
   private static TenantPlacement dedicado(String tenant, TenantPlacement.Status status) {
     return new TenantPlacement(
-        tenant, IsolationLevel.BRIDGE, "pedidos_t_" + tenant, status, null, null, null, 0, 1);
+        TenantId.of(tenant),
+        IsolationLevel.BRIDGE,
+        "pedidos_t_" + tenant,
+        status,
+        null,
+        null,
+        null,
+        0,
+        1);
   }
 
   @Test

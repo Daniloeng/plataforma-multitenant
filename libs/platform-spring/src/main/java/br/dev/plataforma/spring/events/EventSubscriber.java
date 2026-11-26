@@ -63,7 +63,9 @@ public class EventSubscriber implements SmartLifecycle {
       new CopyOnWriteArrayList<>();
   private volatile boolean running;
   private volatile TenantAwaiter tenantAwaiter;
-  private final TenantLanes lanes = new TenantLanes();
+
+  /** Filas por assinatura: cada assinatura tem as suas, uma por tenant. */
+  private final List<TenantLanes> lanes = new CopyOnWriteArrayList<>();
 
   public EventSubscriber(
       PulsarClient pulsar,
@@ -131,6 +133,8 @@ public class EventSubscriber implements SmartLifecycle {
 
   private <T extends SpecificRecord> void subscribe(Registration<T> r) {
     String topic = catalog.of(r.type()).topic();
+    TenantLanes subscriptionLanes = new TenantLanes(r.name());
+    lanes.add(subscriptionLanes);
     try {
       consumers.add(
           pulsar
@@ -149,9 +153,10 @@ public class EventSubscriber implements SmartLifecycle {
                       .initialSubscriptionName(subscriptionName(r.name()) + "-reprocessar")
                       .build())
               .messageListener((consumer, msg) -> handle(consumer, msg, r))
-              // Uma fila por tenant: esperar a migração de um tenant não segura os outros, e a
-              // ordem por chave (tenantId:agregado) se mantém.
-              .messageListenerExecutor(lanes::execute)
+              // Uma fila por tenant nesta assinatura: esperar a migração de um tenant não segura
+              // os outros nem as outras assinaturas, e a ordem por chave (tenantId:agregado) se
+              // mantém.
+              .messageListenerExecutor(subscriptionLanes::execute)
               .subscribe());
       LOG.info("Consumindo {} como {}", topic, subscriptionName(r.name()));
     } catch (PulsarClientException e) {
@@ -221,7 +226,8 @@ public class EventSubscriber implements SmartLifecycle {
       }
     }
     consumers.clear();
-    lanes.close();
+    lanes.forEach(TenantLanes::close);
+    lanes.clear();
   }
 
   @Override

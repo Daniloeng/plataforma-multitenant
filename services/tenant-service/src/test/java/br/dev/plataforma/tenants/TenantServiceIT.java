@@ -237,7 +237,16 @@ class TenantServiceIT {
     }
     try (PulsarAdmin admin =
         PulsarAdmin.builder().serviceHttpUrl(PULSAR.getHttpServiceUrl()).build()) {
+      // O namespace é criado numa thread à parte, depois da resposta.
+      for (int i = 0;
+          i < 100 && !admin.namespaces().getNamespaces("plataforma").contains("plataforma/t-rho");
+          i++) {
+        Thread.sleep(200);
+      }
       assertThat(admin.namespaces().getNamespaces("plataforma")).contains("plataforma/t-rho");
+      for (int i = 0; i < 50 && retencao(admin, "plataforma/t-rho") != 7 * 24 * 60; i++) {
+        Thread.sleep(200);
+      }
       assertThat(admin.namespaces().getRetention("plataforma/t-rho").getRetentionTimeInMinutes())
           .isEqualTo(7 * 24 * 60);
       // As políticas do namespace propagam de forma assíncrona no broker.
@@ -278,6 +287,11 @@ class TenantServiceIT {
         .isEqualTo(404);
   }
 
+  private static int retencao(PulsarAdmin admin, String ns) throws Exception {
+    var r = admin.namespaces().getRetention(ns);
+    return r == null ? -1 : r.getRetentionTimeInMinutes();
+  }
+
   @Test
   void reconciliadorCriaONamespaceDeTenantDedicadoQueFicouSem() throws Exception {
     mongo.insert(
@@ -294,6 +308,15 @@ class TenantServiceIT {
     try (PulsarAdmin admin =
         PulsarAdmin.builder().serviceHttpUrl(PULSAR.getHttpServiceUrl()).build()) {
       assertThat(admin.namespaces().getNamespaces("plataforma")).contains("plataforma/t-sigma");
+      assertThat(admin.namespaces().getRetention("plataforma/t-sigma").getRetentionTimeInMinutes())
+          .isEqualTo(24 * 60);
+      // Mudado por fora: a próxima rodada conserta, mesmo já tendo aplicado o plano antes.
+      admin
+          .namespaces()
+          .setRetention(
+              "plataforma/t-sigma",
+              new org.apache.pulsar.common.policies.data.RetentionPolicies(5, 500));
+      namespaces.reconcile();
       assertThat(admin.namespaces().getRetention("plataforma/t-sigma").getRetentionTimeInMinutes())
           .isEqualTo(24 * 60);
     }

@@ -1,6 +1,7 @@
 package br.dev.plataforma.spring.isolation;
 
 import br.dev.plataforma.core.IsolationLevel;
+import br.dev.plataforma.core.TenantId;
 import java.time.Instant;
 
 /**
@@ -17,7 +18,7 @@ import java.time.Instant;
  * @param version maior versão do cadastro do tenant já vista
  */
 public record TenantPlacement(
-    String tenantId,
+    TenantId tenantId,
     IsolationLevel level,
     String database,
     Status status,

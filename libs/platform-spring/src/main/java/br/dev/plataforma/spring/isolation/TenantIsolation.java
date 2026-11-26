@@ -22,13 +22,12 @@ public class TenantIsolation implements SmartLifecycle {
 
   private static final Logger LOG = LoggerFactory.getLogger(TenantIsolation.class);
 
-  static final int ALERTA_TENTATIVAS = 3;
+  static final int ALERT_ATTEMPTS = 3;
 
   private final com.mongodb.client.MongoClient client;
   private final TenantPlacements placements;
   private final TenantMigrator migrator;
   private final Duration refresh;
-  private final Duration lease;
   private final Duration awaitTimeout;
   private ScheduledExecutorService scheduler;
   private volatile boolean running;
@@ -38,13 +37,11 @@ public class TenantIsolation implements SmartLifecycle {
       TenantPlacements placements,
       TenantMigrator migrator,
       Duration refresh,
-      Duration lease,
       Duration awaitTimeout) {
     this.client = client;
     this.placements = placements;
     this.migrator = migrator;
     this.refresh = refresh;
-    this.lease = lease;
     this.awaitTimeout = awaitTimeout;
   }
 
@@ -53,38 +50,55 @@ public class TenantIsolation implements SmartLifecycle {
     subscriber.onPlatform(
         TenantCriado.class,
         "isolamento-tenant-criado",
-        e -> observe(e.getTenantId(), e.getNivelIsolamento().name(), e.getVersao()));
+        e ->
+            observe(
+                TenantId.of(e.getTenantId()),
+                IsolationLevel.parse(e.getNivelIsolamento().name()),
+                e.getVersao()));
     subscriber.onPlatform(
         TenantAlterado.class,
         "isolamento-tenant-alterado",
-        e -> observe(e.getTenantId(), e.getNivelIsolamento().name(), e.getVersao()));
-    subscriber.setTenantAwaiter(
-        tenant -> {
-          if (!placements.awaitReady(tenant, awaitTimeout)) {
-            throw new TenantMigratingException(tenant);
-          }
-        });
+        e ->
+            observe(
+                TenantId.of(e.getTenantId()),
+                IsolationLevel.parse(e.getNivelIsolamento().name()),
+                e.getVersao()));
+    subscriber.setTenantAwaiter(this::awaitReady);
   }
 
-  public void observe(String tenantId, String level, long version) {
-    TenantId tenant = TenantId.of(tenantId);
-    placements
-        .observe(tenant, IsolationLevel.parse(level), version)
-        .ifPresent(p -> migrator.schedule(tenant));
+  /**
+   * Segura o evento do tenant até a migração acabar. Não devolve o evento ao Pulsar: cada nack
+   * contaria como tentativa e, numa migração longa, o evento iria para a dead letter sem nunca ter
+   * falhado. Só sai sem o tenant pronto se a thread for interrompida (desligamento).
+   */
+  void awaitReady(TenantId tenant) {
+    while (!placements.awaitReady(tenant, awaitTimeout)) {
+      if (Thread.currentThread().isInterrupted()) {
+        throw new TenantMigratingException(tenant);
+      }
+      LOG.warn(
+          "Eventos do tenant {} esperam a migração há mais de {}; seguem esperando",
+          tenant,
+          awaitTimeout);
+    }
+  }
+
+  public void observe(TenantId tenant, IsolationLevel level, long version) {
+    placements.observe(tenant, level, version).ifPresent(p -> migrator.schedule(tenant));
   }
 
   /** Uma rodada: relê o mapa e assume migrações paradas (dona caiu, desistiu ou falhou). */
   void tick() {
     placements.refresh();
     for (TenantPlacement p : placements.migrating()) {
-      TenantId tenant = TenantId.of(p.tenantId());
-      if (p.attempts() >= ALERTA_TENTATIVAS) {
+      TenantId tenant = p.tenantId();
+      if (p.attempts() >= ALERT_ATTEMPTS) {
         LOG.error(
             "Migração do tenant {} já falhou {} vezes; o tenant segue com 503 até alguém olhar",
             tenant,
             p.attempts());
       }
-      if (!migrator.isRunning(tenant) && placements.claimStale(p, lease)) {
+      if (!migrator.isRunning(tenant) && placements.claimStale(p)) {
         LOG.warn("Migração do tenant {} estava parada; esta réplica assume", tenant);
         migrator.schedule(tenant);
       }
@@ -139,11 +153,11 @@ public class TenantIsolation implements SmartLifecycle {
   }
 
   /**
-   * Sobe antes do EventSubscriber (fase padrão). O mapa já é lido na criação do bean, antes do
-   * servidor web; sem ele, o roteamento recusa as operações (falha fechada).
+   * Sobe antes do servidor web e do EventSubscriber: a releitura periódica já roda quando a
+   * primeira requisição chega, e o mapa não envelhece entre a criação do bean e a subida.
    */
   @Override
   public int getPhase() {
-    return DEFAULT_PHASE - 1000;
+    return DEFAULT_PHASE - 4096;
   }
 }

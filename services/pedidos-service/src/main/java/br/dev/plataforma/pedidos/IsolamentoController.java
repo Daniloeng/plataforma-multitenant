@@ -21,7 +21,7 @@ public class IsolamentoController {
 
     static Isolamento of(TenantPlacement p) {
       return new Isolamento(
-          p.tenantId(),
+          p.tenantId().value(),
           p.level().name(),
           p.database(),
           p.migrating() ? "MIGRANDO" : "PRONTO",

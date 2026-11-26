@@ -36,11 +36,12 @@ public record PlatformProperties(
    * @param enabled liga o roteamento por tenant e a migração (padrão: false)
    * @param collections coleções de negócio que mudam de database com o tenant
    * @param refresh intervalo de releitura do mapa de isolamento (padrão: 1 s)
-   * @param grace espera antes de copiar, para as outras réplicas pararem de gravar (padrão: 3 s);
+   * @param grace espera antes de copiar, para as outras réplicas pararem de gravar (padrão: 6 s);
    *     precisa ser maior que duas vezes o {@code refresh}: uma réplica que passa de {@code grace -
    *     refresh} sem reler o mapa recusa as operações dos tenants
    * @param lease sem batimento por esse tempo, outra réplica assume a migração (padrão: 1 min)
-   * @param awaitTimeout quanto um consumidor espera a migração antes do nack (padrão: 2 min)
+   * @param awaitTimeout de quanto em quanto tempo um consumidor que espera a migração registra no
+   *     log (padrão: 2 min); ele segue esperando, sem nack
    */
   public record Isolation(
       boolean enabled,
@@ -52,7 +53,7 @@ public record PlatformProperties(
     public Isolation {
       collections = collections == null ? List.of() : List.copyOf(collections);
       refresh = refresh == null ? Duration.ofSeconds(1) : refresh;
-      grace = grace == null ? Duration.ofSeconds(3) : grace;
+      grace = grace == null ? Duration.ofSeconds(6) : grace;
       lease = lease == null ? Duration.ofMinutes(1) : lease;
       awaitTimeout = awaitTimeout == null ? Duration.ofMinutes(2) : awaitTimeout;
       if (grace.compareTo(refresh.multipliedBy(2)) <= 0) {

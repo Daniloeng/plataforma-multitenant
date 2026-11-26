@@ -89,11 +89,11 @@ public class TenantMigrator implements AutoCloseable {
                 LOG.info("Migração do tenant {} interrompida pelo desligamento", tenant);
                 return;
               }
-              int tentativas = placements.of(tenant).attempts() + 1;
+              int attempts = placements.of(tenant).attempts() + 1;
               LOG.error(
                   "Migração do tenant {} falhou (tentativa {}); outra tentativa na próxima rodada",
                   tenant,
-                  tentativas,
+                  attempts,
                   e);
               placements.release(tenant, true);
             } finally {
@@ -139,15 +139,15 @@ public class TenantMigrator implements AutoCloseable {
    */
   public void syncCollections(MongoDatabase target) {
     MongoDatabase source = client.getDatabase(placements.defaultDatabase());
-    Set<String> origem = new HashSet<>();
-    source.listCollectionNames().into(origem);
-    Set<String> destino = new HashSet<>();
-    target.listCollectionNames().into(destino);
+    Set<String> existingInSource = new HashSet<>();
+    source.listCollectionNames().into(existingInSource);
+    Set<String> existingInTarget = new HashSet<>();
+    target.listCollectionNames().into(existingInTarget);
     for (String name : collections) {
-      if (!destino.contains(name)) {
+      if (!existingInTarget.contains(name)) {
         target.createCollection(name);
       }
-      if (origem.contains(name)) {
+      if (existingInSource.contains(name)) {
         copyIndexes(source.getCollection(name), target, name);
       }
     }
@@ -155,11 +155,11 @@ public class TenantMigrator implements AutoCloseable {
 
   private long moveUntilEmpty(
       TenantId tenant, MongoCollection<Document> from, MongoCollection<Document> to) {
-    Bson doTenant = Filters.eq("tenantId", tenant.value());
+    Bson ofTenant = Filters.eq("tenantId", tenant.value());
     long moved = 0;
-    for (int passada = 0; passada < MAX_PASSES; passada++) {
+    for (int pass = 0; pass < MAX_PASSES; pass++) {
       moved += movePass(tenant, from, to);
-      if (from.countDocuments(doTenant) == 0) {
+      if (from.countDocuments(ofTenant) == 0) {
         return moved;
       }
     }
@@ -176,41 +176,41 @@ public class TenantMigrator implements AutoCloseable {
   private long movePass(
       TenantId tenant, MongoCollection<Document> from, MongoCollection<Document> to) {
     long moved = 0;
-    List<Document> lote = new ArrayList<>(BATCH);
+    List<Document> batch = new ArrayList<>(BATCH);
     for (Document d : from.find(Filters.eq("tenantId", tenant.value()))) {
-      lote.add(d);
-      if (lote.size() == BATCH) {
-        moved += moveBatch(tenant, lote, from, to);
-        lote.clear();
+      batch.add(d);
+      if (batch.size() == BATCH) {
+        moved += moveBatch(tenant, batch, from, to);
+        batch.clear();
       }
     }
-    if (!lote.isEmpty()) {
-      moved += moveBatch(tenant, lote, from, to);
+    if (!batch.isEmpty()) {
+      moved += moveBatch(tenant, batch, from, to);
     }
     return moved;
   }
 
   private long moveBatch(
       TenantId tenant,
-      List<Document> lote,
+      List<Document> batch,
       MongoCollection<Document> from,
       MongoCollection<Document> to) {
     if (!placements.heartbeat(tenant)) {
       throw new LostLease(tenant);
     }
-    List<WriteModel<Document>> copias = new ArrayList<>(lote.size());
-    List<DeleteOneModel<Document>> remocoes = new ArrayList<>(lote.size());
-    for (Document d : lote) {
-      copias.add(
+    List<WriteModel<Document>> copies = new ArrayList<>(batch.size());
+    List<DeleteOneModel<Document>> deletes = new ArrayList<>(batch.size());
+    for (Document d : batch) {
+      copies.add(
           new ReplaceOneModel<>(
               Filters.eq("_id", d.get("_id")), d, new ReplaceOptions().upsert(true)));
-      remocoes.add(new DeleteOneModel<>(sameAs(d)));
+      deletes.add(new DeleteOneModel<>(sameAs(d)));
     }
-    to.bulkWrite(copias, new BulkWriteOptions().ordered(false));
+    to.bulkWrite(copies, new BulkWriteOptions().ordered(false));
     // Só apaga o documento que continua igual ao copiado: gravação nova fica para a próxima
     // passada.
-    from.bulkWrite(remocoes, new BulkWriteOptions().ordered(false));
-    return lote.size();
+    from.bulkWrite(deletes, new BulkWriteOptions().ordered(false));
+    return batch.size();
   }
 
   /**
@@ -242,9 +242,9 @@ public class TenantMigrator implements AutoCloseable {
 
   /** Filtro que só casa com o documento se todos os campos continuam iguais. */
   private static Bson sameAs(Document d) {
-    List<Bson> campos = new ArrayList<>();
-    d.forEach((k, v) -> campos.add(Filters.eq(k, v)));
-    return Filters.and(campos);
+    List<Bson> fields = new ArrayList<>();
+    d.forEach((k, v) -> fields.add(Filters.eq(k, v)));
+    return Filters.and(fields);
   }
 
   /** Copia as definições dos índices como estão (únicos, parciais, TTL), menos o do _id. */

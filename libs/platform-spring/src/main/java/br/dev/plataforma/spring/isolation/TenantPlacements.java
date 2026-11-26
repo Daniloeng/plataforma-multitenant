@@ -13,13 +13,13 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
-import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.slf4j.Logger;
@@ -33,7 +33,8 @@ import org.slf4j.LoggerFactory;
  *
  * <p>Toda gravação é condicional (compare-and-set pela versão ou pelo dono da migração): duas
  * réplicas processando tenant.criado e tenant.alterado ao mesmo tempo não se sobrescrevem. As
- * gravações usam o driver direto, sem sessão, fora da transação do evento que as causou.
+ * gravações usam o driver direto, sem sessão, fora da transação do evento que as causou. Uma
+ * releitura que começou antes de uma gravação local não a desfaz no cache.
  *
  * <p>Falha fechada: se a réplica não consegue reler o mapa por mais que {@code staleAfter}, ela
  * pode não ter visto uma migração começar, então recusa as operações dos tenants (503) até reler.
@@ -44,25 +45,36 @@ public class TenantPlacements {
 
   public static final String COLLECTION = "tenant_niveis";
   private static final int MAX_CAS = 5;
+  private static final Duration MAX_BACKOFF = Duration.ofMinutes(5);
+
+  private record Entry(TenantPlacement placement, long writtenAt) {}
 
   private final MongoCollection<Document> collection;
   private final String defaultDatabase;
   private final Clock clock;
   private final Duration staleAfter;
+  private final Duration lease;
   private final String replica = UUID.randomUUID().toString();
-  private final Map<String, TenantPlacement> cache = new ConcurrentHashMap<>();
+  private final Map<String, Entry> cache = new ConcurrentHashMap<>();
+
+  /** Relógio lógico local: ordena releituras e gravações desta réplica. */
+  private final AtomicLong tick = new AtomicLong();
+
   private volatile Instant lastRefresh;
 
   /**
    * @param defaultDatabase database padrão do serviço (POOL); a dedicada é {@code
    *     <padrão>_t_<tenant>}
    * @param staleAfter idade máxima do mapa antes de o roteamento recusar operações
+   * @param lease sem batimento por esse tempo, outra réplica assume a migração
    */
-  public TenantPlacements(MongoDatabase defaultDatabase, Clock clock, Duration staleAfter) {
+  public TenantPlacements(
+      MongoDatabase defaultDatabase, Clock clock, Duration staleAfter, Duration lease) {
     this.collection = defaultDatabase.getCollection(COLLECTION);
     this.defaultDatabase = defaultDatabase.getName();
     this.clock = clock;
     this.staleAfter = staleAfter;
+    this.lease = lease;
   }
 
   public String defaultDatabase() {
@@ -74,20 +86,37 @@ public class TenantPlacements {
     return replica;
   }
 
+  public Duration lease() {
+    return lease;
+  }
+
   /** Database dedicada de um tenant (BRIDGE e SILO). */
   public String dedicatedDatabase(TenantId tenant) {
     return defaultDatabase + "_t_" + tenant.value();
   }
 
-  /** Relê o mapa inteiro (poucos documentos: um por tenant). */
+  /**
+   * Relê o mapa inteiro (poucos documentos: um por tenant). Entradas gravadas por esta réplica
+   * depois do começo da leitura ficam como estão: são mais novas que o retrato lido.
+   */
   public void refresh() {
-    Set<String> vistos = new TreeSet<>();
+    long startedAt = tick.incrementAndGet();
+    Map<String, TenantPlacement> snapshot = new HashMap<>();
     for (Document d : collection.find()) {
       TenantPlacement p = fromDocument(d);
-      cache.put(p.tenantId(), p);
-      vistos.add(p.tenantId());
+      snapshot.put(p.tenantId().value(), p);
     }
-    cache.keySet().retainAll(vistos);
+    snapshot.forEach(
+        (id, p) ->
+            cache.compute(
+                id,
+                (k, current) ->
+                    current != null && current.writtenAt() > startedAt
+                        ? current
+                        : new Entry(p, startedAt)));
+    cache
+        .entrySet()
+        .removeIf(e -> !snapshot.containsKey(e.getKey()) && e.getValue().writtenAt() <= startedAt);
     lastRefresh = clock.instant();
   }
 
@@ -99,13 +128,13 @@ public class TenantPlacements {
 
   /** Posição do tenant; quem nunca apareceu está no POOL, na database padrão. */
   public TenantPlacement of(TenantId tenant) {
-    TenantPlacement p = cache.get(tenant.value());
-    return p != null ? p : pool(tenant);
+    Entry e = cache.get(tenant.value());
+    return e != null ? e.placement() : pool(tenant);
   }
 
   private TenantPlacement pool(TenantId tenant) {
     return new TenantPlacement(
-        tenant.value(),
+        tenant,
         IsolationLevel.POOL,
         defaultDatabase,
         TenantPlacement.Status.READY,
@@ -135,12 +164,18 @@ public class TenantPlacements {
 
   /** Tenants com database dedicada (pronta ou migrando). */
   public List<TenantPlacement> dedicated() {
-    return cache.values().stream().filter(p -> !p.database().equals(defaultDatabase)).toList();
+    return cache.values().stream()
+        .map(Entry::placement)
+        .filter(p -> !p.database().equals(defaultDatabase))
+        .toList();
   }
 
   /** Migrações em andamento. */
   public List<TenantPlacement> migrating() {
-    return cache.values().stream().filter(TenantPlacement::migrating).toList();
+    return cache.values().stream()
+        .map(Entry::placement)
+        .filter(TenantPlacement::migrating)
+        .toList();
   }
 
   /**
@@ -151,21 +186,21 @@ public class TenantPlacements {
    * @return a posição nova, quando os dados precisam migrar (esta réplica fica dona da migração)
    */
   public Optional<TenantPlacement> observe(TenantId tenant, IsolationLevel level, long version) {
-    for (int tentativa = 0; tentativa < MAX_CAS; tentativa++) {
-      Document salvo = collection.find(Filters.eq("_id", tenant.value())).first();
-      TenantPlacement current = salvo == null ? pool(tenant) : fromDocument(salvo);
+    for (int attempt = 0; attempt < MAX_CAS; attempt++) {
+      Document stored = collection.find(Filters.eq("_id", tenant.value())).first();
+      TenantPlacement current = stored == null ? pool(tenant) : fromDocument(stored);
       if (version <= current.version()) {
-        if (salvo != null) {
-          cache.put(current.tenantId(), current);
+        if (stored != null) {
+          put(current);
         }
         return Optional.empty();
       }
-      boolean sobe = level.hasDedicatedNamespace() && current.database().equals(defaultDatabase);
+      boolean moves = level.hasDedicatedNamespace() && current.database().equals(defaultDatabase);
       TenantPlacement next;
-      if (sobe) {
+      if (moves) {
         next =
             new TenantPlacement(
-                tenant.value(),
+                tenant,
                 level,
                 dedicatedDatabase(tenant),
                 TenantPlacement.Status.MIGRATING,
@@ -182,7 +217,7 @@ public class TenantPlacements {
         }
         next =
             new TenantPlacement(
-                tenant.value(),
+                tenant,
                 level,
                 current.database(),
                 current.status(),
@@ -192,13 +227,13 @@ public class TenantPlacements {
                 current.attempts(),
                 version);
       }
-      Bson anterior =
-          salvo == null
+      Bson expected =
+          stored == null
               ? null
               : Filters.and(
                   Filters.eq("_id", tenant.value()), Filters.eq("version", current.version()));
-      if (compareAndSet(anterior, next)) {
-        return sobe ? Optional.of(next) : Optional.empty();
+      if (compareAndSet(expected, next)) {
+        return moves ? Optional.of(next) : Optional.empty();
       }
     }
     throw new IllegalStateException(
@@ -220,7 +255,7 @@ public class TenantPlacements {
    * Assume uma migração parada (a réplica dona caiu ou desistiu): só uma réplica consegue trocar o
    * {@code migrationStartedAt} antigo pelo novo.
    */
-  public boolean claimStale(TenantPlacement p, Duration lease) {
+  public boolean claimStale(TenantPlacement p) {
     if (!p.migrating()
         || p.migrationStartedAt() == null
         || p.migrationStartedAt().plus(lease).isAfter(clock.instant())) {
@@ -229,28 +264,41 @@ public class TenantPlacements {
     var result =
         collection.updateOne(
             Filters.and(
-                Filters.eq("_id", p.tenantId()),
+                Filters.eq("_id", p.tenantId().value()),
                 Filters.eq("status", TenantPlacement.Status.MIGRATING.name()),
                 Filters.eq("migrationStartedAt", Date.from(p.migrationStartedAt()))),
             Updates.combine(
                 Updates.set("migrationStartedAt", Date.from(clock.instant())),
                 Updates.set("owner", replica)));
+    reload(p.tenantId());
     return result.getModifiedCount() == 1;
   }
 
   /**
-   * Solta o lease (desligamento ou falha): outra réplica, ou esta mesma na próxima rodada, pode
-   * assumir já.
+   * Solta o lease. No desligamento, outra réplica assume já. Depois de uma falha, a próxima
+   * tentativa espera um tempo que dobra a cada falha (10 s, 20 s, 40 s... até 5 min), para um erro
+   * que se repete não virar um laço.
    *
    * @param failed se a tentativa falhou (conta em {@code attempts}, para o alerta)
    */
   public void release(TenantId tenant, boolean failed) {
+    Instant leaseStart = Instant.EPOCH;
+    if (failed) {
+      int attempts = of(tenant).attempts();
+      leaseStart = clock.instant().minus(lease).plus(backoff(attempts + 1));
+    }
     collection.updateOne(
         ownedMigration(tenant),
         Updates.combine(
-            Updates.set("migrationStartedAt", new Date(0)),
+            Updates.set("migrationStartedAt", Date.from(leaseStart)),
             Updates.inc("attempts", failed ? 1 : 0)));
     reload(tenant);
+  }
+
+  /** Espera antes da próxima tentativa, depois de {@code attempts} falhas. */
+  static Duration backoff(int attempts) {
+    Duration d = Duration.ofSeconds(5).multipliedBy(1L << Math.min(Math.max(attempts, 1), 10));
+    return d.compareTo(MAX_BACKOFF) > 0 ? MAX_BACKOFF : d;
   }
 
   /**
@@ -273,12 +321,12 @@ public class TenantPlacements {
 
   /**
    * Espera o tenant sair da migração (consumidores de eventos), relendo o mapa. Devolve false se o
-   * prazo acabou.
+   * prazo acabou ou a thread foi interrompida.
    */
   public boolean awaitReady(TenantId tenant, Duration timeout) {
-    Instant limite = clock.instant().plus(timeout);
+    Instant deadline = clock.instant().plus(timeout);
     while (!fresh() || of(tenant).migrating()) {
-      if (!clock.instant().isBefore(limite)) {
+      if (!clock.instant().isBefore(deadline)) {
         return false;
       }
       try {
@@ -295,8 +343,12 @@ public class TenantPlacements {
   private void reload(TenantId tenant) {
     Document d = collection.find(Filters.eq("_id", tenant.value())).first();
     if (d != null) {
-      cache.put(tenant.value(), fromDocument(d));
+      put(fromDocument(d));
     }
+  }
+
+  private void put(TenantPlacement p) {
+    cache.put(p.tenantId().value(), new Entry(p, tick.incrementAndGet()));
   }
 
   private Bson ownedMigration(TenantId tenant) {
@@ -306,13 +358,13 @@ public class TenantPlacements {
         Filters.eq("owner", replica));
   }
 
-  /** Grava {@code p} se o documento ainda é o lido ({@code anterior}; null = não existia). */
-  private boolean compareAndSet(Bson anterior, TenantPlacement p) {
+  /** Grava {@code p} se o documento ainda é o lido ({@code expected}; null = não existia). */
+  private boolean compareAndSet(Bson expected, TenantPlacement p) {
     Document d = toDocument(p);
     try {
-      if (anterior == null) {
+      if (expected == null) {
         collection.insertOne(d);
-      } else if (collection.replaceOne(anterior, d, new ReplaceOptions()).getMatchedCount() == 0) {
+      } else if (collection.replaceOne(expected, d, new ReplaceOptions()).getMatchedCount() == 0) {
         return false;
       }
     } catch (MongoWriteException e) {
@@ -321,12 +373,12 @@ public class TenantPlacements {
       }
       throw e;
     }
-    cache.put(p.tenantId(), p);
+    put(p);
     return true;
   }
 
   private static Document toDocument(TenantPlacement p) {
-    return new Document("_id", p.tenantId())
+    return new Document("_id", p.tenantId().value())
         .append("level", p.level().name())
         .append("database", p.database())
         .append("status", p.status().name())
@@ -345,7 +397,7 @@ public class TenantPlacements {
     Number version = d.get("version", Number.class);
     Number attempts = d.get("attempts", Number.class);
     return new TenantPlacement(
-        d.getString("_id"),
+        TenantId.of(d.getString("_id")),
         IsolationLevel.valueOf(d.getString("level")),
         d.getString("database"),
         TenantPlacement.Status.valueOf(d.getString("status")),

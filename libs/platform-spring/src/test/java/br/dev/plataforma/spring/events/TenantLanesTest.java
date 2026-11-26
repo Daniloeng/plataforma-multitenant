@@ -29,7 +29,7 @@ class TenantLanesTest {
 
   @Test
   void umTenantParadoNaoSeguraOutroEAOrdemDoTenantSeMantem() throws Exception {
-    TenantLanes lanes = new TenantLanes();
+    TenantLanes lanes = new TenantLanes("teste");
     CountDownLatch solta = new CountDownLatch(1);
     CountDownLatch vizinho = new CountDownLatch(1);
     List<String> ordem = new CopyOnWriteArrayList<>();

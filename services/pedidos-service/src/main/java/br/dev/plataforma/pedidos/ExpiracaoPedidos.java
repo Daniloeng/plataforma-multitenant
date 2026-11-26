@@ -82,7 +82,7 @@ public class ExpiracaoPedidos {
     if (!dedicados.isEmpty()) {
       daPadrao.addCriteria(
           Criteria.where("tenantId")
-              .nin(dedicados.stream().map(TenantPlacement::tenantId).toList()));
+              .nin(dedicados.stream().map(p -> p.tenantId().value()).toList()));
     }
     List<PedidoDocument> lote = new ArrayList<>(mongo.find(daPadrao, PedidoDocument.class));
     for (TenantPlacement p : dedicados) {
@@ -92,7 +92,7 @@ public class ExpiracaoPedidos {
       try {
         lote.addAll(
             TenantContext.callAsUnchecked(
-                TenantId.of(p.tenantId()), () -> mongo.find(vencidos(), PedidoDocument.class)));
+                p.tenantId(), () -> mongo.find(vencidos(), PedidoDocument.class)));
       } catch (RuntimeException e) {
         LOG.debug(
             "Expiração do tenant {} fica para a próxima rodada: {}", p.tenantId(), e.toString());

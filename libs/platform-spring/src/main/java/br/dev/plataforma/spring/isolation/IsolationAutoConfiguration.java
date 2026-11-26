@@ -45,7 +45,8 @@ public class IsolationAutoConfiguration {
         new TenantPlacements(
             client.getDatabase(database),
             clock.getIfAvailable(Clock::systemUTC),
-            cfg.grace().minus(cfg.refresh()));
+            cfg.grace().minus(cfg.refresh()),
+            cfg.lease());
     try {
       placements.refresh(); // antes do servidor web aceitar requisições
     } catch (RuntimeException e) {
@@ -76,8 +77,7 @@ public class IsolationAutoConfiguration {
       TenantMigrator migrator,
       PlatformProperties props) {
     var cfg = props.isolation();
-    return new TenantIsolation(
-        client, placements, migrator, cfg.refresh(), cfg.lease(), cfg.awaitTimeout());
+    return new TenantIsolation(client, placements, migrator, cfg.refresh(), cfg.awaitTimeout());
   }
 
   /** Consumidores de tenant.* da migração, se o serviço consome eventos. */

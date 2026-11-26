@@ -27,11 +27,13 @@ réplicas. O custo continua zero: nada de instância MongoDB nova por tenant at�
   `tenant.alterado` (maior versão vence) e grava a posição do tenant em `tenant_niveis`, fora da
   transação do evento, sempre por compare-and-set (versão lida ou dono da migração): duas réplicas
   não se sobrescrevem. Toda réplica relê o mapa a cada 1 s e o carrega antes de o servidor web
-  subir. **Falha fechada:** uma réplica que passa de `grace - refresh` (2 s) sem reler recusa as
-  operações dos tenants com 503, porque pode não ter visto uma migração começar.
+  subir (a releitura periódica também começa antes do servidor web). Uma releitura não desfaz no
+  cache uma gravação local feita depois de ela começar. **Falha fechada:** uma réplica que passa
+  de `grace - refresh` (5 s) sem reler recusa as operações dos tenants com 503, porque pode não ter
+  visto uma migração começar.
 - **Migração online com carência.** Ao subir de nível, o tenant fica `MIGRANDO`: o roteamento
   recusa as operações dele (APIs respondem 503 `tenant-em-migracao` com `Retry-After: 1`).
-  Depois de 3 s de carência (as outras réplicas relêem o mapa e param de gravar), o job:
+  Depois de 6 s de carência (as outras réplicas relêem o mapa e param de gravar), o job:
   1. garante coleções e índices na database nova;
   2. copia os documentos do tenant em lotes (substituindo pelo `_id`) e **apaga da origem só o
      documento que continua igual ao copiado**; repete até a origem ficar vazia (no máximo 5
@@ -42,19 +44,23 @@ réplicas. O custo continua zero: nada de instância MongoDB nova por tenant at�
 - **Lease com dono e batimento.** A réplica dona renova o lease a cada lote; sem batimento por
   1 min, outra réplica assume, e a antiga, ao perceber, para sem apagar nem marcar nada. No
   desligamento o lease é solto na hora. Cada migração roda na sua thread virtual: promover dois
-  tenants não deixa um esperando o outro. Falhas contam em `attempts`; a partir de 3 o log acusa
-  erro a cada rodada (alerta de verdade com métricas no Dia 10).
-- **Consumo sem travar vizinhos.** O `EventSubscriber` executa cada mensagem na fila serial do
-  tenant dela (thread virtual, ordem por chave preservada). Durante a migração, o consumidor de
-  negócio espera o tenant ficar pronto (até 2 min) antes do efeito, sem gastar tentativas do dead
-  letter; os outros tenants seguem.
+  tenants não deixa um esperando o outro. Falhas contam em `attempts` e a próxima tentativa espera
+  um tempo que dobra a cada falha (10 s, 20 s, 40 s... até 5 min); a partir de 3 o log acusa erro a
+  cada rodada (alerta de verdade com métricas no Dia 10).
+- **Consumo sem travar vizinhos.** O `EventSubscriber` executa cada mensagem numa fila serial por
+  assinatura e por tenant (thread virtual, ordem por chave preservada): um consumidor que espera
+  não segura os outros tenants nem as outras assinaturas do mesmo tenant. Durante a migração, o
+  consumidor de negócio segura o evento até o tenant ficar pronto, sem nack (cada nack gastaria uma
+  tentativa do dead letter), registrando no log a cada 2 min de espera.
 - **Índices evoluem nas databases dedicadas.** Na subida, o serviço recria nas dedicadas as
   coleções e os índices da padrão (criar o que existe não faz nada).
 - **Jobs e tempo real passam por todas as databases.** A expiração de pedidos e o change stream da
   linha do tempo (ADR-0013) cobrem a padrão e cada dedicada.
 - **Namespace Pulsar próprio.** O tenant-service cria `plataforma/t-<id>` para BRIDGE e SILO, com
   retenção e cota de backlog pelo plano, logo depois da promoção e por um reconciliador a cada
-  30 s. Os tópicos de negócio continuam compartilhados por enquanto.
+  30 s que reaplica tudo (conserta namespace apagado ou alterado por fora). A criação logo depois da
+  promoção roda numa thread virtual, sem segurar a resposta da API. Os tópicos de negócio
+  continuam compartilhados por enquanto.
 - `GET /api/v1/isolamento/pedidos` (gestor e admin) mostra nível, database e situação.
 
 ## Consequências
@@ -71,6 +77,10 @@ réplicas. O custo continua zero: nada de instância MongoDB nova por tenant at�
 - Um change stream por database na linha do tempo: uma conexão por tenant dedicado. Na escala de
   dezenas de tenants serve; com centenas, um único `watch` no cluster filtrando o nome da coleção.
 - Rebaixar não move dados: se um dia for preciso, é outro job.
+- As filas por tenant do consumidor não têm limite próprio: o que se acumula nelas é limitado pela
+  `receiverQueueSize` do consumidor Pulsar (1000 mensagens). Um tenant que espera migração por
+  muito tempo ocupa essa fila e atrasa os vizinhos da mesma assinatura (dívida: limitar por tenant
+  e pausar o consumidor se virar problema).
 - O namespace dedicado ainda não recebe tópicos; ele já existe para as cotas e para a migração dos
   tópicos por tenant num dia futuro.
 

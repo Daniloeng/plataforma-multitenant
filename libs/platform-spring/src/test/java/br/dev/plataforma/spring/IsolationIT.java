@@ -200,10 +200,25 @@ class IsolationIT {
 
     // Ninguém migra esse tenant nesta réplica: depois do lease, outra réplica assume (uma só).
     TenantPlacement parado = placements.of(lento);
-    assertThat(placements.claimStale(parado, Duration.ofHours(1))).isFalse();
-    assertThat(placements.claimStale(parado, Duration.ZERO)).isTrue();
-    assertThat(placements.claimStale(parado, Duration.ZERO)).isFalse();
-    placements.markReady(lento);
+    var leaseLongo =
+        new TenantPlacements(
+            client.getDatabase("plataforma"),
+            java.time.Clock.systemUTC(),
+            Duration.ofMinutes(1),
+            Duration.ofHours(1));
+    var leaseVencido =
+        new TenantPlacements(
+            client.getDatabase("plataforma"),
+            java.time.Clock.systemUTC(),
+            Duration.ofMinutes(1),
+            Duration.ZERO);
+    assertThat(leaseLongo.claimStale(parado)).isFalse();
+    assertThat(leaseVencido.claimStale(parado)).isTrue();
+    assertThat(leaseVencido.claimStale(parado)).isFalse();
+    // A dona agora é a outra réplica: só ela marca como pronto.
+    assertThat(placements.markReady(lento)).isFalse();
+    assertThat(leaseVencido.markReady(lento)).isTrue();
+    placements.refresh();
     assertThat(placements.awaitReady(lento, Duration.ofSeconds(1))).isTrue();
     assertThat(placements.databaseFor(lento)).isEqualTo("plataforma_t_lento");
 
