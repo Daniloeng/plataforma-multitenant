@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { ApiError } from '../api/http';
 import { acompanharPedido, pedidoFinal, type Pedido } from '../api/pedidos';
 
 /**
@@ -86,9 +87,11 @@ export function usePedidoAoVivo(
               onPedidoRef.current(pedido);
             },
           });
-        } catch {
+        } catch (erro) {
           if (signal.aborted) return;
-          if (!abriu) {
+          // Antes de abrir, desiste (e a tela volta ao poll) só quando o SSE não existe ou não é
+          // permitido; 429, 503 (réplica subindo ou desligando) e falha de rede tentam de novo.
+          if (!abriu && !valeTentarDeNovo(erro)) {
             setModo('indisponivel');
             return;
           }
@@ -105,4 +108,11 @@ export function usePedidoAoVivo(
   }, [id, ativo]);
 
   return ativo ? modo : 'desligado';
+}
+
+/** Erro passageiro: rede, limite (429) ou servidor indisponível (5xx, menos 501). */
+export function valeTentarDeNovo(erro: unknown): boolean {
+  if (!(erro instanceof ApiError) || erro.httpStatus === null) return true;
+  const status = erro.httpStatus;
+  return status === 429 || (status >= 500 && status !== 501);
 }

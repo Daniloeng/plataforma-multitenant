@@ -669,8 +669,8 @@ describe('PedidosPage — pagamento e linha do tempo no detalhe', () => {
     expect(gets()).toBe(2);
   });
 
-  it('sem SSE (rede fora): para depois de 10 consultas sem resposta; "Consultar de novo" recomeça; falha de rede conta como tentativa', async () => {
-    semSse(() => HttpResponse.error());
+  it('sem SSE (endpoint ausente): para depois de 10 consultas sem resposta; "Consultar de novo" recomeça; falha de rede conta como tentativa', async () => {
+    semSse(() => new HttpResponse(null, { status: 404 }));
     const gets = contaGets('ped-farmaceutica-0008');
     await abrir('Bruno Lima', undefined, '#/pedidos/ped-farmaceutica-0008');
     await screen.findByRole('heading', { name: 'Pedido ped-farmaceutica-0008' });

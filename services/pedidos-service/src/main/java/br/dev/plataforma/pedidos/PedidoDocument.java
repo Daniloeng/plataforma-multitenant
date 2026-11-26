@@ -115,7 +115,18 @@ public class PedidoDocument implements TenantOwned {
     if (status == StatusPedido.CONFIRMADO) {
       derivado.add(new Marco(TipoMarco.PAGO, atualizadoEm, pagamentoId));
     } else if (status == StatusPedido.CANCELADO && motivoCancelamento != null) {
-      derivado.add(new Marco(TipoMarco.CANCELADO, atualizadoEm, motivoCancelamento.name()));
+      Marco cancelado = new Marco(TipoMarco.CANCELADO, atualizadoEm, motivoCancelamento.name());
+      if (motivoCancelamento == MotivoCancelamento.PAGAMENTO_RECUSADO) {
+        derivado.add(new Marco(TipoMarco.RECUSADO, atualizadoEm, null));
+        derivado.add(cancelado);
+      } else if (pagamentoId != null) {
+        // Pago e cancelado antes do Dia 8: o pagamentos-service já estornou (Dia 7).
+        derivado.add(new Marco(TipoMarco.PAGO, atualizadoEm, pagamentoId));
+        derivado.add(cancelado);
+        derivado.add(new Marco(TipoMarco.ESTORNADO, atualizadoEm, pagamentoId));
+      } else {
+        derivado.add(cancelado);
+      }
     }
     return List.copyOf(derivado);
   }

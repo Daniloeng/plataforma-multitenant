@@ -30,8 +30,18 @@ class PedidoDocumentTest {
     assertThat(legado(StatusPedido.CONFIRMADO, null).marcos())
         .extracting(PedidoDocument.Marco::tipo)
         .containsExactly(TipoMarco.CRIADO, TipoMarco.PAGO);
-    assertThat(legado(StatusPedido.CANCELADO, MotivoCancelamento.EXPIRADO).marcos().get(1))
+    PedidoDocument expirado = legado(StatusPedido.CANCELADO, MotivoCancelamento.EXPIRADO);
+    ReflectionTestUtils.setField(expirado, "pagamentoId", null);
+    assertThat(expirado.marcos().get(1))
         .isEqualTo(new PedidoDocument.Marco(TipoMarco.CANCELADO, MUDOU, "EXPIRADO"));
+    // Pago e cancelado antes do Dia 8: já foi estornado.
+    assertThat(legado(StatusPedido.CANCELADO, MotivoCancelamento.SOLICITADO_PELO_CLIENTE).marcos())
+        .extracting(PedidoDocument.Marco::tipo)
+        .containsExactly(
+            TipoMarco.CRIADO, TipoMarco.PAGO, TipoMarco.CANCELADO, TipoMarco.ESTORNADO);
+    assertThat(legado(StatusPedido.CANCELADO, MotivoCancelamento.PAGAMENTO_RECUSADO).marcos())
+        .extracting(PedidoDocument.Marco::tipo)
+        .containsExactly(TipoMarco.CRIADO, TipoMarco.RECUSADO, TipoMarco.CANCELADO);
   }
 
   @Test

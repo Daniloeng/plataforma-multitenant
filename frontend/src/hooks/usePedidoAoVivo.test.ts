@@ -1,4 +1,5 @@
 import { act, renderHook } from '@testing-library/react';
+import { ApiError } from '../api/http';
 import type { Pedido } from '../api/pedidos';
 import {
   RECONEXAO_BASE_MS,
@@ -6,6 +7,7 @@ import {
   RECONEXAO_MAX_MS,
   atrasoReconexao,
   usePedidoAoVivo,
+  valeTentarDeNovo,
 } from './usePedidoAoVivo';
 
 const pedido: Pedido = {
@@ -232,7 +234,7 @@ describe('usePedidoAoVivo', () => {
 
   it.each([
     ['404 (backend sem a linha do tempo)', new Response(null, { status: 404 })],
-    ['rede fora', new TypeError('Failed to fetch')],
+    ['403 (sem permissão)', new Response(null, { status: 403 })],
   ])(
     'a primeira conexão nem abre (%s): "indisponivel", sem novas tentativas',
     async (_, resposta) => {
@@ -244,6 +246,26 @@ describe('usePedidoAoVivo', () => {
       expect(spy).toHaveBeenCalledTimes(1);
     },
   );
+
+  it.each([
+    ['rede fora', () => new TypeError('Failed to fetch')],
+    ['503 (réplica desligando)', () => new Response(null, { status: 503 })],
+    ['429 (muitas conexões)', () => new Response(null, { status: 429 })],
+  ])('a primeira conexão falha por um erro passageiro (%s): tenta de novo', async (_, falha) => {
+    const { spy } = fetchFalso(falha());
+    const { result } = renderHook(() => usePedidoAoVivo('ped-1', true, () => undefined));
+    await flush();
+    expect(result.current).toBe('reconectando');
+    await avancar(RECONEXAO_BASE_MS * 2);
+    expect(spy.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('valeTentarDeNovo separa erro passageiro de endpoint ausente', () => {
+    expect(valeTentarDeNovo(new TypeError('x'))).toBe(true);
+    expect(valeTentarDeNovo(new ApiError('x', 503))).toBe(true);
+    expect(valeTentarDeNovo(new ApiError('x', 501))).toBe(false);
+    expect(valeTentarDeNovo(new ApiError('x', 404))).toBe(false);
+  });
 
   it('desmontar durante a espera da reconexão cancela a próxima tentativa', async () => {
     const sse = fluxoSse();

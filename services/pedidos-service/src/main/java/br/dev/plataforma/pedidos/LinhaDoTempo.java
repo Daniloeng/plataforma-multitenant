@@ -135,6 +135,12 @@ public class LinhaDoTempo implements SmartLifecycle, HealthIndicator {
         // Cliente foi embora: sai da lista agora (o Spring ignora complete depois de falha de
         // envio).
         encerrar();
+      } catch (RuntimeException e) {
+        // Ex.: falha ao serializar o pedido. Encerra para não ocupar a vaga do tenant até o
+        // timeout.
+        LOG.warn("Envio da linha do tempo do pedido {} falhou", pedidoId, e);
+        encerrar();
+        emitter.completeWithError(e);
       } finally {
         escrita.unlock();
         drenando.set(false);
@@ -219,9 +225,19 @@ public class LinhaDoTempo implements SmartLifecycle, HealthIndicator {
       total.decrementAndGet();
       throw new MuitasConexoes("Muitas linhas do tempo abertas nesta instância; tente de novo.");
     }
-    AtomicInteger doTenant = porTenant.computeIfAbsent(tenantId, k -> new AtomicInteger());
-    if (doTenant.incrementAndGet() > maxPorTenant) {
-      doTenant.decrementAndGet();
+    boolean[] cheio = {false};
+    // Checagem e incremento atômicos com a remoção (que tira o contador do mapa ao chegar a zero).
+    porTenant.compute(
+        tenantId,
+        (k, n) -> {
+          int atual = n == null ? 0 : n.get();
+          if (atual >= maxPorTenant) {
+            cheio[0] = true;
+            return n;
+          }
+          return new AtomicInteger(atual + 1);
+        });
+    if (cheio[0]) {
       total.decrementAndGet();
       throw new MuitasConexoes(
           "O tenant já tem " + maxPorTenant + " linhas do tempo abertas; feche alguma.");
@@ -288,7 +304,8 @@ public class LinhaDoTempo implements SmartLifecycle, HealthIndicator {
         });
     if (removida[0]) {
       total.decrementAndGet();
-      porTenant.computeIfPresent(a.tenantId, (k, n) -> n.decrementAndGet() <= 0 ? null : n);
+      porTenant.computeIfPresent(
+          a.tenantId, (k, n) -> n.get() <= 1 ? null : new AtomicInteger(n.get() - 1));
     }
   }
 

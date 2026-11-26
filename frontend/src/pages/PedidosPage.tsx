@@ -302,7 +302,12 @@ function maisNovo(atual: Pedido, recebido: Pedido): Pedido {
   const marcos = (p: Pedido) => p.historico?.length ?? 0;
   if (marcos(recebido) !== marcos(atual))
     return marcos(recebido) > marcos(atual) ? recebido : atual;
-  if (atual.atualizadoEm && recebido.atualizadoEm && recebido.atualizadoEm < atual.atualizadoEm) {
+  // Date.parse: o texto ISO pode vir com ou sem fração de segundo ("…:01Z" e "…:01.500Z").
+  if (
+    atual.atualizadoEm &&
+    recebido.atualizadoEm &&
+    Date.parse(recebido.atualizadoEm) < Date.parse(atual.atualizadoEm)
+  ) {
     return atual;
   }
   return recebido;
