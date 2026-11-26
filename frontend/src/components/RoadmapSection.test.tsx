@@ -3,10 +3,10 @@ import { ROADMAP } from '../data/roadmap';
 import { RoadmapSection } from './RoadmapSection';
 
 describe('RoadmapSection', () => {
-  it('lista status-service e Tenants ativos e os três serviços planejados', () => {
+  it('lista status-service, Tenants e Gateway ativos e os três serviços planejados', () => {
     render(<RoadmapSection />);
     const items = screen.getAllByRole('listitem');
-    expect(items).toHaveLength(5);
+    expect(items).toHaveLength(6);
 
     const status = screen.getByRole('listitem', { name: 'status-service' });
     expect(status).toHaveTextContent('Dia 1');
@@ -19,6 +19,11 @@ describe('RoadmapSection', () => {
     expect(tenants).toHaveTextContent(
       'Cadastra tenants, plano e nível de isolamento; publica tenant.criado e tenant.alterado pelo outbox.',
     );
+
+    const gateway = screen.getByRole('listitem', { name: 'Gateway + Keycloak' });
+    expect(gateway).toHaveTextContent('Dia 4');
+    expect(within(gateway).getByText('Ativo')).toHaveClass('pill--up');
+    expect(gateway).toHaveTextContent('X-Tenant-Id');
 
     for (const [name, day] of [
       ['Catálogo', 5],

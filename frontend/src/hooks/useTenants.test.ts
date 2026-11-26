@@ -3,6 +3,10 @@ import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import { makeTenants } from '../test/fixtures';
 import { useTenants } from './useTenants';
+import { signInAs } from '../test/session';
+
+// Desde o Dia 4 a API de tenants exige token com o papel plataforma-admin.
+beforeEach(() => signInAs('admin'));
 
 describe('useTenants', () => {
   it('ignora a resposta de uma busca substituída por outra (sucesso ou erro)', async () => {

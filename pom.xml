@@ -24,6 +24,7 @@
     <module>libs/platform-spring</module>
     <module>services/status-service</module>
     <module>services/tenant-service</module>
+    <module>services/gateway</module>
   </modules>
 
   <properties>
@@ -34,10 +35,18 @@
     <jacoco.version>0.8.13</jacoco.version>
     <spotless.version>2.46.1</spotless.version>
     <google-java-format.version>1.28.0</google-java-format.version>
+    <spring-cloud.version>2025.0.3</spring-cloud.version>
   </properties>
 
   <dependencyManagement>
     <dependencies>
+      <dependency>
+        <groupId>org.springframework.cloud</groupId>
+        <artifactId>spring-cloud-dependencies</artifactId>
+        <version>${spring-cloud.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
       <dependency>
         <groupId>br.dev.plataforma</groupId>
         <artifactId>platform-core</artifactId>

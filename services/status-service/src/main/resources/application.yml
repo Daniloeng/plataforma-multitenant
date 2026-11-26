@@ -39,5 +39,10 @@ plataforma:
       name: pulsar
       admin-url: ${PULSAR_ADMIN_URL:http://localhost:8080}
     services:
+      - name: gateway
+        url: ${GATEWAY_URL:http://localhost:8000}
+      - name: keycloak
+        url: ${KEYCLOAK_MANAGEMENT_URL:http://localhost:9000}
+        health-path: health/ready
       - name: tenant-service
         url: ${TENANT_SERVICE_URL:http://localhost:8081}

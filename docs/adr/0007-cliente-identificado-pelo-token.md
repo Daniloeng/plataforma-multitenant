@@ -1,6 +1,6 @@
 # ADR-0007: Cliente comprador identificado pelo token, não pelo corpo
 
-- **Status:** Aceito
+- **Status:** Aceito; claim do tenant alterada pelo ADR-0009
 - **Data:** 2026-11-26
 
 ## Contexto

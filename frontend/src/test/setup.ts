@@ -1,7 +1,9 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, vi } from 'vitest';
+import { setSessionProvider } from '../api/http';
 import { server } from '../mocks/server';
+import { resetRateLimits } from '../mocks/gateway';
 import { resetTenantStore } from '../mocks/tenants';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
@@ -10,6 +12,10 @@ afterEach(() => {
   server.resetHandlers();
   // Cada teste começa com os tenants iniciais do modo demo.
   resetTenantStore();
+  // Sessão (token de demo, tenant escolhido) e baldes do rate limit também recomeçam.
+  resetRateLimits();
+  window.sessionStorage.clear();
+  setSessionProvider(null);
 });
 afterAll(() => server.close());
 

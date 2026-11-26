@@ -21,10 +21,9 @@ export default defineConfig({
       allow: [repositoryRoot],
     },
     proxy: {
-      // Em desenvolvimento, cada API vai para o seu serviço local. A ordem importa: a primeira
-      // regra que casar vence, então as rotas específicas vêm antes do '/api' genérico.
-      '/api/v1/tenants': 'http://localhost:8081', // tenant-service
-      '/api': 'http://localhost:8090', // status-service
+      // Desde o Dia 4 toda API passa pelo gateway, que roteia /api/status para o status-service e
+      // /api/v1/tenants para o tenant-service (e valida token, tenant e limite por plano).
+      '/api': 'http://localhost:8000', // gateway
     },
   },
   test: {

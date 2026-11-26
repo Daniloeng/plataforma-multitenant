@@ -13,10 +13,18 @@ public class ServiceCheck extends HttpHealthCheck {
   static final String HEALTH_PATH = "actuator/health/readiness";
 
   public ServiceCheck(String name, URI baseUrl, Duration timeout) {
-    this(name, baseUrl, timeout, newClient(timeout));
+    this(name, baseUrl, HEALTH_PATH, timeout, newClient(timeout));
+  }
+
+  public ServiceCheck(String name, URI baseUrl, String healthPath, Duration timeout) {
+    this(name, baseUrl, healthPath, timeout, newClient(timeout));
   }
 
   ServiceCheck(String name, URI baseUrl, Duration timeout, HttpClient http) {
-    super(name, ComponentType.SERVICE, baseUrl, HEALTH_PATH, "readiness UP", timeout, http);
+    this(name, baseUrl, HEALTH_PATH, timeout, http);
+  }
+
+  ServiceCheck(String name, URI baseUrl, String healthPath, Duration timeout, HttpClient http) {
+    super(name, ComponentType.SERVICE, baseUrl, healthPath, "readiness UP", timeout, http);
   }
 }

@@ -10,19 +10,19 @@ ferramentas gratuitas.
 
 **Demo:** <https://daniloeng.github.io/plataforma-multitenant/> (frontend em modo demo, API simulada)
 
-## Estado atual: Dia 3 de 22
+## Estado atual: Dia 4 de 22
 
 | Componente | Situação |
 |---|---|
 | `status-service` | ✅ Ativo: saúde de MongoDB x4, Pulsar e serviços em `GET /api/status` |
-| Tenants | ✅ Ativo: cadastro em `/api/v1/tenants` (porta 8081), publica `tenant.criado` e `tenant.alterado` |
+| Gateway + Keycloak | ✅ Ativo: única entrada (porta 8000), login OIDC, troca de tenant, rate limit por plano |
+| Tenants | ✅ Ativo: cadastro em `/api/v1/tenants` (só `plataforma-admin`), publica `tenant.criado` e `tenant.alterado` |
 | Biblioteca comum | ✅ `platform-spring`: contexto de tenant, outbox transacional, consumo idempotente |
 | Catálogo | Dia 5 |
 | Pedidos | Dia 6 |
 | Pagamentos | Dia 7 |
-| Gateway + Keycloak | Dia 4 |
-| Contratos | 10 eventos Avro, 4 APIs OpenAPI, 8 ADRs ([arquitetura](docs/arquitetura/event-storming.md)) |
-| Cobertura (linhas) | `platform-core` 100% · `contracts` 100% · `platform-spring` 91,0% · `tenant-service` 97,3% · `status-service` 98,6% · frontend 99,9% (mínimo exigido: 80%) |
+| Contratos | 10 eventos Avro, 5 APIs OpenAPI, 9 ADRs ([arquitetura](docs/arquitetura/event-storming.md)) |
+| Cobertura (linhas) | `platform-core` 100% · `contracts` 100% · `platform-spring` 91,7% · `gateway` 92,0% · `tenant-service` 97,4% · `status-service` 98,7% · frontend 99,9% (mínimo exigido: 80%) |
 
 ## Arquitetura (visão alvo)
 
@@ -46,11 +46,15 @@ ferramentas gratuitas.
 Pré-requisitos: Java 21, Maven 3.9, Node 22, Docker.
 
 ```bash
-# Infraestrutura + serviços (4 MongoDB, Pulsar standalone, tenant-service, status-service)
+# Infraestrutura + serviços (4 MongoDB, Pulsar, Keycloak, gateway, tenant-service, status-service)
 docker compose -f infra/docker-compose.yml up -d --build --wait
-curl -s localhost:8090/api/status
-curl -s -X POST localhost:8081/api/v1/tenants -H 'Content-Type: application/json' \
-  -d '{"id":"acme","nome":"ACME Ltda","plano":"PROFISSIONAL"}'
+infra/seed.sh                      # cria os tenants acme, globex e initech pelo gateway
+curl -s localhost:8000/api/status  # público
+
+# Token de um usuário de demonstração (senha123: admin, ana, bruno) e chamada pelo gateway
+TOKEN=$(curl -s localhost:8180/realms/plataforma/protocol/openid-connect/token \
+  -d grant_type=password -d client_id=plataforma-cli -d username=ana -d password=senha123 | jq -r .access_token)
+curl -s localhost:8000/api/v1/me -H "Authorization: Bearer $TOKEN" -H 'X-Tenant-Id: acme'
 
 # Frontend contra a API real (http://localhost:5173)
 cd frontend && npm ci && npm run dev
@@ -63,8 +67,8 @@ cd frontend && VITE_DEMO=true npm run dev
 |---|---|
 | 27017 a 27020 | MongoDB de tenants, catálogo, pedidos e pagamentos |
 | 6650 / 8080 | Pulsar (binário / admin HTTP) |
-| 8081 | tenant-service |
-| 8090 | status-service |
+| 8000 | gateway (única entrada das APIs; os serviços não ficam expostos) |
+| 8180 | Keycloak (console `admin`/`admin`) |
 | 5173 | frontend (Vite) |
 
 Memória: o Compose do Dia 1 usava cerca de 1,3 GB (medido com `docker stats`: Pulsar ~660 MB, cada MongoDB ~115 MB, status-service ~170 MB).
@@ -77,8 +81,8 @@ cd frontend && npm run test:coverage   # Vitest, falha abaixo de 80%
 ```
 
 O CI (GitHub Actions) roda backend, frontend e um teste do **Compose inteiro**: sobe todos os
-containers, exige `UP` em `/api/status`, cria um tenant e confere que o evento
-`tenant.criado` chegou ao Pulsar. Nada entra na `main` com CI vermelho.
+containers, exige `UP` em `/api/status` pelo gateway, cria tenants com token do Keycloak, confere
+o `tenant.criado` no Pulsar, o `/api/v1/me`, os 403 de papel e de tenant e o limite do plano. Nada entra na `main` com CI vermelho.
 
 ## Estrutura
 
@@ -86,10 +90,11 @@ containers, exige `UP` em `/api/status`, cria um tenant e confere que o evento
 libs/platform-core/       tipos compartilhados (TenantId, IsolationLevel)
 libs/contracts/           eventos Avro, APIs OpenAPI e catálogo de eventos
 libs/platform-spring/     base Spring comum: tenant por requisição, outbox, idempotência
-services/tenant-service/  cadastro de tenants (porta 8081)
+services/gateway/         porta de entrada: JWT, tenant, rate limit e rotas (porta 8000)
+services/tenant-service/  cadastro de tenants (porta 8081, só na rede interna)
 services/status-service/  saúde da plataforma (porta 8090)
 frontend/                 React + Vite + TypeScript, publicado no GitHub Pages
-infra/                    Docker Compose e scripts do Pulsar
+infra/                    Docker Compose, realm do Keycloak, scripts do Pulsar e seed
 docs/dias/                diário detalhado de cada dia
 docs/adr/                 decisões de arquitetura
 docs/arquitetura/         event storming e diagramas
@@ -101,6 +106,22 @@ CLAUDE.md                 regras e comandos para o Claude Code
 
 Cada dia equivale a ~10 h de trabalho executado pelo Claude Code e revisado pelo Danilo, e termina
 com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
+
+### Dia 4: gateway, Keycloak e rate limit por tenant · [detalhes](docs/dias/04.md)
+
+- **Feito:** Keycloak com o realm `plataforma` (papéis, tenants como grupos, usuários de demo);
+  `services/gateway` com Spring Cloud Gateway validando o JWT, conferindo o tenant escolhido em
+  `X-Tenant-Id`, aplicando o limite do plano (429 + `Retry-After`) e repassando a identidade
+  verificada; `GET /api/v1/me`; catálogo de tenants no gateway por eventos; serviços fechados atrás
+  do gateway; ADR-0009. No frontend: login (OIDC + PKCE), seletor de tenant, aba **Minha conta**
+  com teste do limite e aba Tenants só para admin.
+- **Por quê:** o tenant passa a vir do token, não do cliente (ADR-0005 e ADR-0007), e os próximos
+  serviços já nascem protegidos sem lidar com JWT.
+- **Como testar:** `docker compose ... up`, `infra/seed.sh` e `cd frontend && npm run dev`; entre
+  como `ana`/`senha123` e troque entre acme e globex. No Pages, escolha um usuário de demonstração.
+- **Claude Code:** subagente `arquiteto` revisando contrato e fronteiras, frontend em subagente de
+  background, skill `adr` para o ADR-0009.
+- **Cobertura:** `gateway` 92,0%, `platform-spring` 91,7%, frontend 99,9% de linhas.
 
 ### Dia 3: tenant-service, outbox e isolamento por tenant · [detalhes](docs/dias/03.md)
 
@@ -151,8 +172,8 @@ com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
 |---|---|---|
 | 1 ✅ | Monorepo, CLAUDE.md, Docker Compose, CI, GitHub Pages | Status da plataforma |
 | 2 ✅ | Event storming, contratos Avro e OpenAPI, ADRs | Arquitetura e catálogo de eventos |
-| 3 | Biblioteca comum (tenant context, outbox, idempotência) e Tenant Service | Criar e listar tenants |
-| 4 | Keycloak, Spring Cloud Gateway, rate limit por tenant | Login e troca de tenant |
+| 3 ✅ | Biblioteca comum (tenant context, outbox, idempotência) e Tenant Service | Criar e listar tenants |
+| 4 ✅ | Keycloak, Spring Cloud Gateway, rate limit por tenant | Login e troca de tenant |
 | 5 | Catálogo | Produtos por tenant |
 | 6 | Pedidos com outbox | Carrinho e pedido |
 | 7 | Pagamentos: autorização, captura, ledger | Pagamento e extrato |

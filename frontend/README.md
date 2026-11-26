@@ -1,16 +1,20 @@
-# Frontend — Status, Tenants e Arquitetura da plataforma
+# Frontend — Status, Tenants, Arquitetura e Minha conta
 
-Frontend da plataforma multi-tenant (pedidos B2B + pagamentos), com três páginas em abas:
+Frontend da plataforma multi-tenant (pedidos B2B + pagamentos), com quatro páginas em abas e, no
+cabeçalho, login (Keycloak) e troca de tenant:
 
 - **Status** (`#/`): status do `status-service` (`GET /api/status`, atualizado a cada 10 s), o
   roadmap dos microsserviços e o progresso do estudo.
 - **Tenants** (`#/tenants`): administração do catálogo de tenants — cria, lista, suspende e
-  reativa tenants pelo Tenant Service (`/api/v1/tenants`).
+  reativa tenants pelo Tenant Service (`/api/v1/tenants`). Só para o papel `plataforma-admin`.
 - **Arquitetura** (`#/arquitetura`): diagramas do event storming, catálogo de eventos, matriz
   produtor × consumidor e lista de ADRs — tudo lido **em build time** do próprio repositório.
 
-O roteamento é por hash (`#/`, `#/tenants` e `#/arquitetura`), sem biblioteca de rotas, para funcionar no
-GitHub Pages (que não reescreve rotas para o `index.html`).
+- **Minha conta** (`#/conta`): o que o gateway sabe do usuário (`GET /api/v1/me`) — papéis,
+  tenants, plano e limite de cada um — e o botão "Testar limite".
+
+O roteamento é por hash (`#/`, `#/tenants`, `#/arquitetura` e `#/conta`), sem biblioteca de rotas,
+para funcionar no GitHub Pages (que não reescreve rotas para o `index.html`).
 
 Stack: React 19 + Vite 7 + TypeScript, testes com Vitest + Testing Library + MSW. Requer Node 22+.
 
@@ -21,13 +25,9 @@ npm install
 npm run dev          # http://localhost:5173
 ```
 
-O proxy do Vite (`vite.config.ts`) encaminha cada API para o seu serviço; a primeira regra que
-casar vence, por isso a específica vem antes da genérica:
-
-| Caminho           | Destino                 | Serviço          |
-| ----------------- | ----------------------- | ---------------- |
-| `/api/v1/tenants` | `http://localhost:8081` | `tenant-service` |
-| `/api`            | `http://localhost:8090` | `status-service` |
+Desde o Dia 4 toda API passa pelo **gateway**: o proxy do Vite (`vite.config.ts`) tem uma regra
+só, `/api` → `http://localhost:8000`. O gateway roteia `/api/status` para o `status-service` e
+`/api/v1/tenants` para o `tenant-service`, valida o token, confere o tenant e aplica o limite.
 
 Para dados reais, suba antes o ambiente na raiz do repositório:
 
@@ -35,19 +35,57 @@ Para dados reais, suba antes o ambiente na raiz do repositório:
 docker compose -f infra/docker-compose.yml up -d --build --wait
 ```
 
+## Login e troca de tenant
+
+- **Login** pelo Keycloak (`http://localhost:8180`, realm `plataforma`, client público
+  `plataforma-frontend`), com Authorization Code + PKCE (S256) pela biblioteca
+  [oidc-client-ts](https://github.com/authts/oidc-client-ts) (`src/auth/oidc.ts`). "Entrar" redireciona
+  ao Keycloak guardando a rota atual; na volta (`?code=…&state=…`) o app troca o code por token,
+  limpa a URL e volta para a mesma aba. O token fica no `sessionStorage` (vale para a aba). Outra
+  URL do Keycloak: `VITE_KEYCLOAK_URL=http://… npm run dev`.
+- Logado, o cabeçalho mostra o nome, os papéis (`plataforma-admin`, `gestor-tenant`, `comprador`)
+  e "Sair" (logout também no Keycloak). A página **Status continua pública**.
+- **Seletor de tenant**: lista os `tenants` de `GET /api/v1/me`; o escolhido fica no
+  `sessionStorage` e vai no `X-Tenant-Id`. Tenant suspenso aparece desabilitado ("— Suspenso"); se
+  o usuário só tem um tenant, ele é selecionado sozinho. Abaixo, o plano e o limite do gateway:
+  Gratuito 5 req/s, Profissional 20 req/s, Empresarial 50 req/s (rajada = 2x).
+- **Cabeçalhos**: `src/api/http.ts` (`apiFetch`) injeta `Authorization: Bearer <token>` e
+  `X-Tenant-Id` a partir do _session provider_ que o `AuthProvider` registra. `GET /api/status`
+  não leva token; `/api/v1/me` (que define os tenants) e `/api/v1/tenants` (administrativa) não
+  levam `X-Tenant-Id`.
+- **Erros do gateway** (Problem Details): 401 encerra a sessão e pede login de novo ("Sua sessão
+  expirou"); 403 e 429 mostram o `detail` (ex.: "Esta operação exige o papel plataforma-admin.").
+- **Testar limite** (Minha conta): dispara a rajada do plano + 20 requisições simultâneas (mínimo 30) a `GET /api/v1/me` com o `X-Tenant-Id` selecionado e mostra quantas deram 200 e quantas 429
+  (e o `Retry-After`).
+
 ## Modo demo (sem backend)
 
 Com `VITE_DEMO=true`, o [MSW](https://mswjs.io) intercepta as APIs no navegador e devolve dados
 simulados. A página exibe o selo "Modo demo (API simulada)".
 
-- `/api/status` (`src/mocks/handlers.ts`): MongoDB x4, Pulsar e `tenant-service` (type `SERVICE`,
-  "readiness UP") no ar, latências variando.
+- **Login sem Keycloak**: "Entrar" abre um seletor de usuários de demonstração
+  (`src/auth/demoUsers.ts`); o token é `demo-<usuario>`.
+
+  | Usuário | Nome                         | Papel              | Tenants                                                 |
+  | ------- | ---------------------------- | ------------------ | ------------------------------------------------------- |
+  | `admin` | Administradora da plataforma | `plataforma-admin` | todos (inclusive o suspenso `ceramica-paraiba`)         |
+  | `ana`   | Ana Souza                    | `gestor-tenant`    | `distribuidora-aurora` e `atacado-vale-verde`           |
+  | `bruno` | Bruno Lima                   | `comprador`        | `farmaceutica-boa-saude` (cliente `cli-bruno`), sozinho |
+
+- **Gateway simulado** (`src/mocks/gateway.ts`): 401 sem `Authorization: Bearer demo-<usuario>`;
+  `/api/v1/me` montado a partir do usuário e do store de tenants; 403 (`acesso-negado`) em
+  `/api/v1/tenants` para quem não é `plataforma-admin` e para `X-Tenant-Id` de outro tenant; 403
+  (`tenant-suspenso`) para tenant suspenso; rate limit por tenant em `/api/v1/me` (token bucket em
+  memória, conforme o plano) com 429 + `Retry-After`.
+- `/api/status` (`src/mocks/handlers.ts`), público: MongoDB x4, Pulsar, `tenant-service`, `gateway`
+  e `keycloak` (type `SERVICE`) no ar, latências variando.
 - `/api/v1/tenants` e `/api/v1/tenants/:id` (`src/mocks/tenants.ts`): store em memória
   pré-populado com 5 tenants fictícios (Pool, Bridge e Silo), com as mesmas regras do contrato —
   400 em Problem Details (`application/problem+json`) para dados inválidos, 409 para id repetido,
   404 para tenant inexistente e paginação por cursor real (ordem: mais recentes primeiro; cursor =
   id do último item da página). O store vive só na aba do navegador: recarregar a página volta ao
-  estado inicial. Nos testes, `resetTenantStore()` roda depois de cada teste (`src/test/setup.ts`).
+  estado inicial. Nos testes, `resetTenantStore()`, `resetRateLimits()` e a limpeza do
+  `sessionStorage` rodam depois de cada teste (`src/test/setup.ts`).
 
 ```bash
 VITE_DEMO=true npm run dev
@@ -111,6 +149,10 @@ npm run format:check   # ou npm run format para corrigir
 ```
 
 Relatórios de cobertura ficam em `coverage/` (HTML, lcov e `coverage-summary.json`).
+
+O login é testado sem Keycloak: `src/auth/oidc.test.ts` usa um dublê do `UserManager`; os testes de
+tela usam o cliente de demo (`<App authClient={createDemoAuthClient()} />`), e os que chamam a API
+direto registram uma sessão com `signInAs('admin')` (`src/test/session.ts`).
 
 Nos testes o módulo `mermaid` é sempre mockado (em `src/test/setup.ts`), porque o jsdom não faz
 layout de SVG; cada teste pode forçar um erro com `vi.mocked(mermaid.render).mockRejectedValueOnce`.

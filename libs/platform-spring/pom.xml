@@ -27,14 +27,20 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-web</artifactId>
+      <!-- Opcional: cada serviço declara o que usa (o gateway é reativo e não tem MongoDB). -->
+      <optional>true</optional>
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-data-mongodb</artifactId>
+      <!-- Opcional: cada serviço declara o que usa (o gateway é reativo e não tem MongoDB). -->
+      <optional>true</optional>
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-pulsar</artifactId>
+      <!-- Opcional: cada serviço declara o que usa (o gateway é reativo e não tem MongoDB). -->
+      <optional>true</optional>
     </dependency>
 
     <dependency>

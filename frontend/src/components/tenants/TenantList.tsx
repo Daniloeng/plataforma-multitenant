@@ -50,7 +50,7 @@ export function TenantList({
           <p>
             Para dados reais, suba o tenant-service com <code>{COMPOSE_COMMAND}</code> na raiz do
             repositório e rode o frontend com <code>npm run dev</code> (o proxy envia{' '}
-            <code>/api/v1/tenants</code> para <code>localhost:8081</code>). Sem Docker, use o modo
+            <code>/api</code> para o gateway em <code>localhost:8000</code>). Sem Docker, use o modo
             demo: <code>VITE_DEMO=true npm run dev</code>.
           </p>
         </div>

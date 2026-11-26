@@ -41,7 +41,14 @@ class OpenApiContractsTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"tenants.yaml", "catalogo.yaml", "pedidos.yaml", "pagamentos.yaml"})
+  @ValueSource(
+      strings = {
+        "tenants.yaml",
+        "catalogo.yaml",
+        "pedidos.yaml",
+        "pagamentos.yaml",
+        "gateway.yaml"
+      })
   void apiValidaVersionadaEComOperationIdUnico(String arquivo) {
     OpenAPI api = parse(arquivo);
 
@@ -100,7 +107,14 @@ class OpenApiContractsTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"tenants.yaml", "catalogo.yaml", "pedidos.yaml", "pagamentos.yaml"})
+  @ValueSource(
+      strings = {
+        "tenants.yaml",
+        "catalogo.yaml",
+        "pedidos.yaml",
+        "pagamentos.yaml",
+        "gateway.yaml"
+      })
   void todaApiExigeJwtEDescreveAutorizacao(String arquivo) {
     OpenAPI api = parse(arquivo);
 

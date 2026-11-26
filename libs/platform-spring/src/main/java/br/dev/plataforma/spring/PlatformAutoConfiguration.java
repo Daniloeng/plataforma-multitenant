@@ -1,6 +1,8 @@
 package br.dev.plataforma.spring;
 
 import br.dev.plataforma.contracts.EventCatalog;
+import br.dev.plataforma.spring.events.EventDecoder;
+import br.dev.plataforma.spring.events.WriterSchemaResolver;
 import br.dev.plataforma.spring.idempotency.IdempotencyIndexes;
 import br.dev.plataforma.spring.idempotency.IdempotentConsumer;
 import br.dev.plataforma.spring.outbox.EventPublisher;
@@ -11,6 +13,7 @@ import br.dev.plataforma.spring.tenancy.TenantContextFilter;
 import br.dev.plataforma.spring.tenancy.TenantGuard;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Clock;
+import org.apache.pulsar.client.admin.PulsarAdmin;
 import org.apache.pulsar.client.api.PulsarClient;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -28,6 +31,7 @@ import org.springframework.core.Ordered;
 import org.springframework.data.mongodb.MongoDatabaseFactory;
 import org.springframework.data.mongodb.MongoTransactionManager;
 import org.springframework.data.mongodb.core.MongoOperations;
+import org.springframework.pulsar.core.PulsarAdministration;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.concurrent.SimpleAsyncTaskScheduler;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -50,6 +54,30 @@ public class PlatformAutoConfiguration {
   @ConditionalOnMissingBean
   EventCatalog eventCatalog() {
     return EventCatalog.defaultCatalog();
+  }
+
+  /** Leitura de eventos com o schema do escritor (consumidores e o gateway). */
+  @Configuration(proxyBeanMethods = false)
+  @ConditionalOnClass({PulsarAdmin.class, PulsarAdministration.class})
+  static class Events {
+
+    /**
+     * O admin do Pulsar é aberto só quando um schema novo aparece (o resultado fica em cache), e
+     * fechado em seguida: um consumidor vê poucas versões de schema na vida toda.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    EventDecoder eventDecoder(PulsarAdministration administration) {
+      return new EventDecoder(
+          new WriterSchemaResolver(
+              (topic, version) -> {
+                try (PulsarAdmin admin = administration.createAdminClient()) {
+                  return new String(
+                      admin.schemas().getSchemaInfo(topic, version).getSchema(),
+                      java.nio.charset.StandardCharsets.UTF_8);
+                }
+              }));
+    }
   }
 
   /** Filtro de tenant, logo no começo da cadeia. */

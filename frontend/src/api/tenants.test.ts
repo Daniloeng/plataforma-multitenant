@@ -13,6 +13,10 @@ import {
   validateTenantId,
   type Tenant,
 } from './tenants';
+import { signInAs } from '../test/session';
+
+// Desde o Dia 4 a API de tenants exige token com o papel plataforma-admin.
+beforeEach(() => signInAs('admin'));
 
 const tenant: Tenant = {
   id: 'acme',

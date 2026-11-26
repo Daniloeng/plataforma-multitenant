@@ -10,6 +10,7 @@ import {
   type Problema,
   type Tenant,
 } from '../api/tenants';
+import { guard } from './gateway';
 
 /** Tenants iniciais: empresas fictícias, com os três níveis de isolamento. */
 export const SEED_TENANTS: readonly Tenant[] = [
@@ -124,8 +125,16 @@ function validateOptionalFields(body: Record<string, unknown>): string | null {
   return null;
 }
 
+/** Desde o Dia 4 a API de tenants passa pelo gateway e exige o papel plataforma-admin. */
+function adminOnly(request: Request) {
+  const result = guard(request, { role: 'plataforma-admin' });
+  return 'response' in result ? result.response : null;
+}
+
 export const tenantHandlers = [
   http.get('*/api/v1/tenants', ({ request }) => {
+    const denied = adminOnly(request);
+    if (denied) return denied;
     const params = new URL(request.url).searchParams;
     const limiteRaw = params.get('limite');
     const limite = limiteRaw === null ? LIMITE_PADRAO : Number(limiteRaw);
@@ -150,6 +159,8 @@ export const tenantHandlers = [
   }),
 
   http.post('*/api/v1/tenants', async ({ request }) => {
+    const denied = adminOnly(request);
+    if (denied) return denied;
     const body = await readBody(request);
     if (!body) return problem(400, 'O corpo da requisição deve ser um objeto JSON.');
     if (typeof body.id !== 'string') return problem(400, 'id é obrigatório.');
@@ -177,7 +188,9 @@ export const tenantHandlers = [
     });
   }),
 
-  http.get('*/api/v1/tenants/:id', ({ params }) => {
+  http.get('*/api/v1/tenants/:id', ({ request, params }) => {
+    const denied = adminOnly(request);
+    if (denied) return denied;
     const id = String(params.id);
     const tenant = store.find((t) => t.id === id);
     if (!tenant) return problem(404, `Tenant '${id}' não encontrado.`, `/api/v1/tenants/${id}`);
@@ -185,6 +198,8 @@ export const tenantHandlers = [
   }),
 
   http.patch('*/api/v1/tenants/:id', async ({ request, params }) => {
+    const denied = adminOnly(request);
+    if (denied) return denied;
     const id = String(params.id);
     const tenant = store.find((t) => t.id === id);
     if (!tenant) return problem(404, `Tenant '${id}' não encontrado.`, `/api/v1/tenants/${id}`);
