@@ -1,0 +1,63 @@
+{
+  "type": "record",
+  "name": "PrecoAlterado",
+  "namespace": "br.dev.plataforma.contracts.catalogo",
+  "doc": "O preço de um produto mudou.",
+  "x-evento": "preco.alterado",
+  "x-topico": "persistent://plataforma/catalogo/preco.alterado.v1",
+  "x-produtor": "catalogo",
+  "x-consumidores": [
+    "pedidos"
+  ],
+  "fields": [
+    {
+      "name": "eventId",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      },
+      "doc": "Identificador único do evento; chave da deduplicação nos consumidores."
+    },
+    {
+      "name": "tenantId",
+      "type": "string",
+      "doc": "Tenant dono do agregado. Também compõe a chave da mensagem (tenantId:aggregateId)."
+    },
+    {
+      "name": "occurredAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      },
+      "doc": "Instante em que o fato aconteceu no serviço de origem (UTC)."
+    },
+    {
+      "name": "traceparent",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null,
+      "doc": "Contexto W3C Trace Context, para o trace atravessar o Pulsar."
+    },
+    {
+      "name": "produtoId",
+      "type": "string"
+    },
+    {
+      "name": "sku",
+      "type": "string"
+    },
+    {
+      "name": "precoCentavos",
+      "type": "long",
+      "doc": "Novo preço unitário. Em centavos, para evitar erro de ponto flutuante."
+    },
+    {
+      "name": "moeda",
+      "type": "string",
+      "default": "BRL",
+      "doc": "Código ISO 4217."
+    }
+  ]
+}

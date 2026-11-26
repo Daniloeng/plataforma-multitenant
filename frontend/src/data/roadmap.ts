@@ -43,6 +43,6 @@ export const ROADMAP: readonly RoadmapService[] = [
   },
 ];
 
-export const CURRENT_DAY = 1;
+export const CURRENT_DAY = 2;
 export const TOTAL_DAYS = 22;
 export const REPOSITORY_URL = 'https://github.com/Daniloeng/plataforma-multitenant';

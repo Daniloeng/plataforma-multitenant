@@ -1,7 +1,7 @@
 import { http, HttpResponse } from 'msw';
 import type { StatusComponent, StatusResponse } from '../api/status';
 
-export const DEMO_VERSION = '0.1.0-dia01';
+export const DEMO_VERSION = '0.1.0-dia02';
 
 type Random = () => number;
 

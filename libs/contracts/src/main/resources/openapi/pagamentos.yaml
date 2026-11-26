@@ -1,0 +1,115 @@
+openapi: 3.1.0
+info:
+  title: Pagamentos
+  version: 1.0.0
+  description: >-
+    Consulta de pagamentos e do ledger (partidas dobradas) do tenant. A autorização e a captura
+    acontecem de forma assíncrona, a partir de pedido.criado; não há POST de pagamento na API.
+servers:
+  - url: http://localhost:8084
+security:
+  - jwt: []
+x-autorizacao: "Papel gestor-tenant."
+tags:
+  - name: pagamentos
+  - name: ledger
+paths:
+  /api/v1/pagamentos:
+    parameters:
+      - $ref: '_comum.yaml#/components/parameters/TenantId'
+    get:
+      tags: [pagamentos]
+      operationId: listarPagamentos
+      parameters:
+        - $ref: '_comum.yaml#/components/parameters/Cursor'
+        - $ref: '_comum.yaml#/components/parameters/Limite'
+        - name: pedidoId
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Página de pagamentos.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [itens]
+                properties:
+                  itens:
+                    type: array
+                    items: { $ref: '#/components/schemas/Pagamento' }
+                  proximoCursor: { type: [string, 'null'] }
+  /api/v1/pagamentos/{pagamentoId}:
+    parameters:
+      - $ref: '_comum.yaml#/components/parameters/TenantId'
+      - name: pagamentoId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [pagamentos]
+      operationId: obterPagamento
+      responses:
+        '200':
+          description: Pagamento.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Pagamento' }
+        '404': { $ref: '_comum.yaml#/components/responses/NaoEncontrado' }
+  /api/v1/ledger/lancamentos:
+    parameters:
+      - $ref: '_comum.yaml#/components/parameters/TenantId'
+    get:
+      tags: [ledger]
+      operationId: listarLancamentos
+      summary: Extrato do ledger do tenant (lançamentos imutáveis)
+      parameters:
+        - $ref: '_comum.yaml#/components/parameters/Cursor'
+        - $ref: '_comum.yaml#/components/parameters/Limite'
+      responses:
+        '200':
+          description: Página de lançamentos e saldo derivado.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [itens, saldo]
+                properties:
+                  itens:
+                    type: array
+                    items: { $ref: '#/components/schemas/Lancamento' }
+                  saldo: { $ref: '_comum.yaml#/components/schemas/Dinheiro' }
+                  proximoCursor: { type: [string, 'null'] }
+components:
+  securitySchemes:
+    jwt:
+      $ref: '_comum.yaml#/components/securitySchemes/jwt'
+  schemas:
+    StatusPagamento:
+      type: string
+      enum: [AUTORIZANDO, APROVADO, RECUSADO, ESTORNADO]
+    Pagamento:
+      type: object
+      required: [id, pedidoId, status, valor, criadoEm]
+      properties:
+        id: { type: string }
+        pedidoId: { type: string }
+        status: { $ref: '#/components/schemas/StatusPagamento' }
+        valor: { $ref: '_comum.yaml#/components/schemas/Dinheiro' }
+        motivoRecusa: { type: [string, 'null'] }
+        criadoEm: { type: string, format: date-time }
+    Lancamento:
+      type: object
+      description: Uma partida do ledger. Todo movimento gera um débito e um crédito de mesmo valor.
+      required: [id, pagamentoId, conta, natureza, valor, ocorridoEm]
+      properties:
+        id: { type: string }
+        pagamentoId: { type: string }
+        conta:
+          type: string
+          enum: [CAIXA_GATEWAY, RECEITA_TENANT, ESTORNOS]
+        natureza:
+          type: string
+          enum: [DEBITO, CREDITO]
+        valor: { $ref: '_comum.yaml#/components/schemas/Dinheiro' }
+        ocorridoEm: { type: string, format: date-time }

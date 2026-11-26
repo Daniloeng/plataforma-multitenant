@@ -1,0 +1,57 @@
+{
+  "type": "record",
+  "name": "PagamentoRecusado",
+  "namespace": "br.dev.plataforma.contracts.pagamentos",
+  "doc": "O gateway recusou o pagamento.",
+  "x-evento": "pagamento.recusado",
+  "x-topico": "persistent://plataforma/pagamentos/pagamento.recusado.v1",
+  "x-produtor": "pagamentos",
+  "x-consumidores": [
+    "pedidos"
+  ],
+  "fields": [
+    {
+      "name": "eventId",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      },
+      "doc": "Identificador único do evento; chave da deduplicação nos consumidores."
+    },
+    {
+      "name": "tenantId",
+      "type": "string",
+      "doc": "Tenant dono do agregado. Também compõe a chave da mensagem (tenantId:aggregateId)."
+    },
+    {
+      "name": "occurredAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      },
+      "doc": "Instante em que o fato aconteceu no serviço de origem (UTC)."
+    },
+    {
+      "name": "traceparent",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null,
+      "doc": "Contexto W3C Trace Context, para o trace atravessar o Pulsar."
+    },
+    {
+      "name": "pagamentoId",
+      "type": "string"
+    },
+    {
+      "name": "pedidoId",
+      "type": "string"
+    },
+    {
+      "name": "motivo",
+      "type": "string",
+      "doc": "Código de recusa do gateway simulado."
+    }
+  ]
+}

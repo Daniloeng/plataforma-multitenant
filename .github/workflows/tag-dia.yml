@@ -1,0 +1,60 @@
+name: Tag do dia
+
+# Cria a tag dia-NN quando o PR de um dia ("Dia N: ...") é mergeado na main.
+# Também pode ser disparado à mão para marcar um commit já existente.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dia:
+        description: Número do dia (ex.: 1)
+        required: true
+      sha:
+        description: Commit a marcar (padrão: o último da main)
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Descobrir o dia
+        id: dia
+        env:
+          INPUT_DIA: ${{ inputs.dia }}
+          INPUT_SHA: ${{ inputs.sha }}
+          MENSAGEM: ${{ github.event.head_commit.message }}
+        run: |
+          if [ -n "$INPUT_DIA" ]; then
+            dia="$INPUT_DIA"
+            sha="${INPUT_SHA:-$GITHUB_SHA}"
+          else
+            dia=$(printf '%s' "$MENSAGEM" | head -1 | sed -nE 's/^Dia ([0-9]+):.*/\1/p')
+            sha="$GITHUB_SHA"
+          fi
+          if [ -z "$dia" ]; then
+            echo "Commit não é de um dia; nada a marcar."
+            exit 0
+          fi
+          printf 'tag=dia-%02d\nsha=%s\n' "$dia" "$sha" >> "$GITHUB_OUTPUT"
+      - name: Criar a tag
+        if: steps.dia.outputs.tag != ''
+        env:
+          TAG: ${{ steps.dia.outputs.tag }}
+          SHA: ${{ steps.dia.outputs.sha }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "Tag $TAG já existe; nada a fazer."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "$TAG" "$SHA"
+          git push origin "$TAG"
+          echo "Tag $TAG criada em $SHA" >> "$GITHUB_STEP_SUMMARY"

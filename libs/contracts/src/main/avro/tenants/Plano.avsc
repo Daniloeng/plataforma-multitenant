@@ -1,0 +1,12 @@
+{
+  "type": "enum",
+  "name": "Plano",
+  "symbols": [
+    "GRATUITO",
+    "PROFISSIONAL",
+    "EMPRESARIAL"
+  ],
+  "namespace": "br.dev.plataforma.contracts.tenants",
+  "doc": "Plano contratado; define limites de uso.",
+  "default": "GRATUITO"
+}

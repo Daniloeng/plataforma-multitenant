@@ -17,6 +17,7 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
+    "mermaid": "11.17.2",
     "react": "19.1.10",
     "react-dom": "19.1.10"
   },

@@ -20,6 +20,7 @@
 
   <modules>
     <module>libs/platform-core</module>
+    <module>libs/contracts</module>
     <module>services/status-service</module>
   </modules>
 
@@ -52,6 +53,10 @@
           <configuration>
             <!-- Testcontainers + JaCoCo: o agente vem do argLine preparado pelo JaCoCo -->
             <argLine>@{argLine} -XX:+EnableDynamicAgentLoading</argLine>
+            <systemPropertyVariables>
+              <!-- Avro 1.12 só desserializa classes confiáveis: as geradas em libs/contracts -->
+              <org.apache.avro.SERIALIZABLE_PACKAGES>br.dev.plataforma.contracts</org.apache.avro.SERIALIZABLE_PACKAGES>
+            </systemPropertyVariables>
             <!-- Testes de integração (*IT) rodam junto, para entrarem na cobertura -->
             <includes>
               <include>**/*Test.java</include>

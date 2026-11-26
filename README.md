@@ -10,7 +10,7 @@ ferramentas gratuitas.
 
 **Demo:** <https://daniloeng.github.io/plataforma-multitenant/> (frontend em modo demo, API simulada)
 
-## Estado atual: Dia 1 de 22
+## Estado atual: Dia 2 de 22
 
 | Componente | Situação |
 |---|---|
@@ -20,7 +20,8 @@ ferramentas gratuitas.
 | Pedidos | Dia 6 |
 | Pagamentos | Dia 7 |
 | Gateway + Keycloak | Dia 4 |
-| Cobertura (linhas) | `platform-core` 100% · `status-service` 98,3% · frontend 100% (mínimo exigido: 80%) |
+| Contratos | 10 eventos Avro, 4 APIs OpenAPI, 7 ADRs ([arquitetura](docs/arquitetura/event-storming.md)) |
+| Cobertura (linhas) | `platform-core` 100% · `contracts` 100% · `status-service` 98,3% · frontend 99,9% (mínimo exigido: 80%) |
 
 ## Arquitetura (visão alvo)
 
@@ -78,18 +79,34 @@ containers e exige `UP` em `/api/status`. Nada entra na `main` com CI vermelho.
 
 ```
 libs/platform-core/       tipos compartilhados (TenantId, IsolationLevel)
+libs/contracts/           eventos Avro, APIs OpenAPI e catálogo de eventos
 services/status-service/  saúde da infraestrutura (Spring Boot)
 frontend/                 React + Vite + TypeScript, publicado no GitHub Pages
 infra/                    Docker Compose e scripts do Pulsar
 docs/dias/                diário detalhado de cada dia
+docs/adr/                 decisões de arquitetura
+docs/arquitetura/         event storming e diagramas
 CLAUDE.md                 regras e comandos para o Claude Code
-.claude/                  hooks do Claude Code (formatação automática)
+.claude/                  hooks, subagente arquiteto e skill de ADR do Claude Code
 ```
 
 ## Diário de bordo
 
 Cada dia equivale a ~10 h de trabalho executado pelo Claude Code e revisado pelo Danilo, e termina
 com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
+
+### Dia 2: event storming, contratos e ADRs · [detalhes](docs/dias/02.md)
+
+- **Feito:** event storming do fluxo de pedido e pagamento; 10 eventos em Avro (com tópico, produtor
+  e consumidores no próprio schema) e as classes Java geradas; 4 APIs em OpenAPI 3.1; 7 ADRs; página
+  **Arquitetura** no frontend com diagramas, catálogo de eventos, matriz publica/consome e ADRs.
+- **Por quê:** fixar os contratos antes dos serviços. Com compatibilidade FULL verificada no PR,
+  uma mudança que quebraria um consumidor aparece como teste vermelho.
+- **Como testar:** abra a aba Arquitetura (no Pages ou com `npm run dev`); para ver a proteção,
+  adicione um campo sem default em um `.avsc` e rode `mvn -B verify -pl libs/contracts -am`.
+- **Cobertura:** `contracts` 100%, frontend 99,9% de linhas.
+- **Claude Code:** subagente de projeto `arquiteto` (achou 10 problemas, incluindo uma corrida
+  entre tópicos que cobraria pedidos cancelados) e skill `adr`.
 
 ### Dia 1: fundação do monorepo · [detalhes](docs/dias/01.md)
 
@@ -112,7 +129,7 @@ com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
 | Dia | Entrega | Frontend |
 |---|---|---|
 | 1 ✅ | Monorepo, CLAUDE.md, Docker Compose, CI, GitHub Pages | Status da plataforma |
-| 2 | Event storming, contratos Avro e OpenAPI, ADRs | Arquitetura e catálogo de eventos |
+| 2 ✅ | Event storming, contratos Avro e OpenAPI, ADRs | Arquitetura e catálogo de eventos |
 | 3 | Biblioteca comum (tenant context, outbox, idempotência) e Tenant Service | Criar e listar tenants |
 | 4 | Keycloak, Spring Cloud Gateway, rate limit por tenant | Login e troca de tenant |
 | 5 | Catálogo | Produtos por tenant |

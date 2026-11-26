@@ -1,0 +1,108 @@
+# Componentes compartilhados pelas APIs. Cada API referencia este arquivo com $ref.
+openapi: 3.1.0
+info:
+  title: Componentes comuns
+  version: 1.0.0
+paths: {}
+components:
+  parameters:
+    TenantId:
+      name: X-Tenant-Id
+      in: header
+      required: true
+      description: >-
+        Tenant da requisição. Injetado pelo gateway a partir do JWT (claim tenant_id);
+        nenhum serviço aceita o tenant vindo do corpo.
+      schema:
+        type: string
+        pattern: '^[a-z][a-z0-9-]{1,38}[a-z0-9]$'
+    ClienteId:
+      name: X-Cliente-Id
+      in: header
+      required: true
+      description: >-
+        Empresa compradora em nome de quem o usuário age. Injetado pelo gateway a partir da claim
+        cliente_id do JWT; nunca vem do corpo (ADR-0007).
+      schema:
+        type: string
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Chave única por operação; repetir a chamada com a mesma chave devolve o mesmo resultado.
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 64
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Cursor opaco devolvido em `proximoCursor` da página anterior.
+      schema:
+        type: string
+    Limite:
+      name: limite
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+  securitySchemes:
+    jwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        Token do Keycloak validado pelo gateway. Claims usadas: tenant_id, cliente_id (compradores)
+        e realm_access.roles (ex.: plataforma-admin, gestor-tenant, comprador).
+  schemas:
+    Problema:
+      type: object
+      description: Erro no formato Problem Details (RFC 9457).
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+    Dinheiro:
+      type: object
+      required: [centavos, moeda]
+      properties:
+        centavos:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Valor em centavos.
+        moeda:
+          type: string
+          default: BRL
+          pattern: '^[A-Z]{3}$'
+  responses:
+    RequisicaoInvalida:
+      description: Dados inválidos.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problema' }
+    NaoEncontrado:
+      description: Recurso não existe neste tenant.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problema' }
+    Conflito:
+      description: Conflito de estado ou de chave de idempotência.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problema' }
+    LimiteExcedido:
+      description: Rate limit do tenant excedido.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problema' }

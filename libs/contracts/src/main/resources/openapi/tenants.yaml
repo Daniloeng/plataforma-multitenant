@@ -1,0 +1,130 @@
+openapi: 3.1.0
+info:
+  title: Tenants
+  version: 1.0.0
+  description: >-
+    Cadastro de tenants da plataforma. Endpoints administrativos (papel plataforma-admin);
+    não recebem X-Tenant-Id porque operam sobre o catálogo de tenants.
+servers:
+  - url: http://localhost:8081
+security:
+  - jwt: []
+x-autorizacao: "Somente o papel plataforma-admin (plano administrativo, ADR-0005)."
+tags:
+  - name: tenants
+paths:
+  /api/v1/tenants:
+    post:
+      tags: [tenants]
+      operationId: criarTenant
+      summary: Cadastra um tenant e publica tenant.criado
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NovoTenant' }
+      responses:
+        '201':
+          description: Tenant criado.
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+        '400': { $ref: '_comum.yaml#/components/responses/RequisicaoInvalida' }
+        '409': { $ref: '_comum.yaml#/components/responses/Conflito' }
+    get:
+      tags: [tenants]
+      operationId: listarTenants
+      summary: Lista tenants com paginação por cursor
+      parameters:
+        - $ref: '_comum.yaml#/components/parameters/Cursor'
+        - $ref: '_comum.yaml#/components/parameters/Limite'
+      responses:
+        '200':
+          description: Página de tenants.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [itens]
+                properties:
+                  itens:
+                    type: array
+                    items: { $ref: '#/components/schemas/Tenant' }
+                  proximoCursor: { type: [string, 'null'] }
+  /api/v1/tenants/{tenantId}:
+    parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [tenants]
+      operationId: obterTenant
+      responses:
+        '200':
+          description: Tenant.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+        '404': { $ref: '_comum.yaml#/components/responses/NaoEncontrado' }
+    patch:
+      tags: [tenants]
+      operationId: alterarTenant
+      summary: Altera plano, nível ou situação e publica tenant.alterado
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AlteracaoTenant' }
+      responses:
+        '200':
+          description: Tenant alterado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+        '400': { $ref: '_comum.yaml#/components/responses/RequisicaoInvalida' }
+        '404': { $ref: '_comum.yaml#/components/responses/NaoEncontrado' }
+components:
+  securitySchemes:
+    jwt:
+      $ref: '_comum.yaml#/components/securitySchemes/jwt'
+  schemas:
+    Plano:
+      type: string
+      enum: [GRATUITO, PROFISSIONAL, EMPRESARIAL]
+    NivelIsolamento:
+      type: string
+      enum: [POOL, BRIDGE, SILO]
+    NovoTenant:
+      type: object
+      required: [id, nome, plano]
+      properties:
+        id:
+          type: string
+          pattern: '^[a-z][a-z0-9-]{1,38}[a-z0-9]$'
+        nome: { type: string, minLength: 2, maxLength: 120 }
+        plano: { $ref: '#/components/schemas/Plano' }
+        nivelIsolamento:
+          $ref: '#/components/schemas/NivelIsolamento'
+          default: POOL
+    AlteracaoTenant:
+      type: object
+      minProperties: 1
+      properties:
+        nome: { type: string, minLength: 2, maxLength: 120 }
+        plano: { $ref: '#/components/schemas/Plano' }
+        nivelIsolamento: { $ref: '#/components/schemas/NivelIsolamento' }
+        ativo: { type: boolean }
+    Tenant:
+      type: object
+      required: [id, nome, plano, nivelIsolamento, ativo, criadoEm]
+      properties:
+        id: { type: string }
+        nome: { type: string }
+        plano: { $ref: '#/components/schemas/Plano' }
+        nivelIsolamento: { $ref: '#/components/schemas/NivelIsolamento' }
+        ativo: { type: boolean }
+        criadoEm: { type: string, format: date-time }
