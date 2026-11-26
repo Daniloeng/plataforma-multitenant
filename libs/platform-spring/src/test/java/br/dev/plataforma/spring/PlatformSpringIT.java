@@ -191,7 +191,7 @@ class PlatformSpringIT {
           throw new java.io.IOException("broker fora do ar");
         };
 
-    int publicadas = new OutboxRelay(mongo, quebrado, Clock.systemUTC(), 10).publishPending();
+    int publicadas = new OutboxRelay(mongo, quebrado, Clock.systemUTC(), 10, null).publishPending();
 
     assertThat(publicadas).isZero();
     assertThat(chamadas).hasValue(1); // não pula para a próxima: preserva a ordem
@@ -213,7 +213,7 @@ class PlatformSpringIT {
   @Test
   void runCycleNuncaPropagaExcecao() {
     OutboxRelay relayQuebrado =
-        new OutboxRelay(null, m -> {}, Clock.systemUTC(), 10); // mongo nulo: NPE no ciclo
+        new OutboxRelay(null, m -> {}, Clock.systemUTC(), 10, null); // mongo nulo: NPE no ciclo
     relayQuebrado.runCycle();
   }
 
@@ -411,6 +411,10 @@ class PlatformSpringIT {
 
     assertThat(mongo.findById(semTrace.getEventId().toString(), OutboxMessage.class).traceparent())
         .isEqualTo(trace);
+    // O payload leva o mesmo trace que a propriedade da mensagem.
+    OutboxMessage gravada = mongo.findById(semTrace.getEventId().toString(), OutboxMessage.class);
+    assertThat(AvroCodec.decode(gravada.payload(), TenantCriado.class).getTraceparent().toString())
+        .isEqualTo(trace);
     assertThat(
             mongo.findById(comProprio.getEventId().toString(), OutboxMessage.class).traceparent())
         .isEqualTo(comProprio.getTraceparent().toString());
@@ -444,8 +448,10 @@ class PlatformSpringIT {
     assertThat(a.tryAcquire()).isFalse();
     assertThat(a.isLeader()).isFalse();
 
-    // Desligamento de b solta o lease na hora.
+    // Desligamento de b solta o lease na hora, e b nunca mais assume.
     relayB.close();
+    assertThat(b.tryAcquire()).isFalse();
+    assertThat(relayB.isLeader()).isFalse();
     assertThat(a.tryAcquire()).isTrue();
     a.release();
     a.release(); // sem lease: nada a fazer
@@ -469,7 +475,8 @@ class PlatformSpringIT {
               }
             },
             Clock.systemUTC(),
-            10);
+            10,
+            null);
     new br.dev.plataforma.spring.observability.PlatformMetrics(
             mongo, relayLocal, null, null, Clock.systemUTC())
         .bindTo(registro);

@@ -34,11 +34,10 @@ public class OutboxRelay {
   private final AtomicLong published = new AtomicLong();
   private final AtomicLong failures = new AtomicLong();
 
-  /** Relay sem lease: para uma réplica só (e testes). */
-  public OutboxRelay(MongoOperations mongo, EventPublisher publisher, Clock clock, int batchSize) {
-    this(mongo, publisher, clock, batchSize, null);
-  }
-
+  /**
+   * @param lease quem pode publicar entre as réplicas; {@code null} só em teste (sem lease, toda
+   *     réplica se acha líder e publica)
+   */
   public OutboxRelay(
       MongoOperations mongo,
       EventPublisher publisher,

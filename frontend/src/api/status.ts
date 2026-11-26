@@ -83,8 +83,7 @@ function isStatusComponent(value: unknown): value is StatusComponent {
     // status desconhecido é aceito e exibido como veio (compatibilidade com versões novas da API)
     typeof c.status === 'string' &&
     (c.latencyMs === null || typeof c.latencyMs === 'number') &&
-    (c.details === null || c.details === undefined || typeof c.details === 'string') &&
-    (c.metrics === null || c.metrics === undefined || isServiceMetrics(c.metrics))
+    (c.details === null || c.details === undefined || typeof c.details === 'string')
   );
 }
 
@@ -119,7 +118,16 @@ export async function fetchStatus(signal?: AbortSignal): Promise<StatusResponse>
   if (!isStatusResponse(body)) {
     throw new ApiError('A resposta da API está fora do contrato esperado.', response.status);
   }
-  return body;
+  // Métrica malformada (ex.: NaN de um serviço com o MongoDB lento) some só daquele card: a saúde
+  // dos outros componentes continua visível.
+  return {
+    ...body,
+    components: body.components.map((c) =>
+      c.metrics === null || c.metrics === undefined || isServiceMetrics(c.metrics)
+        ? c
+        : { ...c, metrics: null },
+    ),
+  };
 }
 
 /** Converte qualquer falha em uma mensagem legível em pt-BR. */

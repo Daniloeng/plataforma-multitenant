@@ -8,10 +8,14 @@ import br.dev.plataforma.spring.outbox.CurrentTrace;
 import br.dev.plataforma.spring.outbox.Outbox;
 import br.dev.plataforma.spring.outbox.OutboxRelay;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationPredicate;
 import io.micrometer.tracing.Span;
-import io.micrometer.tracing.TraceContext;
 import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.propagation.Propagator;
 import java.time.Clock;
+import java.util.HashMap;
+import java.util.Map;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -20,6 +24,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplicat
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.mongodb.core.MongoOperations;
+import org.springframework.http.server.observation.ServerRequestObservationContext;
 import org.springframework.http.server.observation.ServerRequestObservationConvention;
 
 /**
@@ -70,25 +75,47 @@ public class ObservabilityAutoConfiguration {
   static class Tracing {
     @Bean
     @ConditionalOnMissingBean
-    CurrentTrace currentTrace(ObjectProvider<Tracer> tracer) {
-      return () -> traceparent(tracer.getIfAvailable());
+    CurrentTrace currentTrace(
+        ObjectProvider<Tracer> tracer, ObjectProvider<Propagator> propagator) {
+      return () -> traceparent(tracer.getIfAvailable(), propagator.getIfAvailable());
     }
   }
 
-  static String traceparent(Tracer tracer) {
+  /**
+   * O {@code traceparent} que o propagador do tracing escreveria num cabeçalho, para o span atual.
+   */
+  static String traceparent(Tracer tracer, Propagator propagator) {
     Span span = tracer == null ? null : tracer.currentSpan();
-    if (span == null) {
+    if (span == null || propagator == null) {
       return null;
     }
-    TraceContext c = span.context();
-    if (c.traceId() == null || c.traceId().isBlank()) {
-      return null;
+    Map<String, String> carrier = new HashMap<>();
+    propagator.inject(span.context(), carrier, Map::put);
+    return carrier.get("traceparent");
+  }
+
+  /**
+   * Não mede streams SSE (a linha do tempo fica aberta por minutos): entrariam no histograma de
+   * {@code http_server_requests} e o p99 deixaria de dizer algo sobre as requisições.
+   */
+  @Configuration(proxyBeanMethods = false)
+  @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
+  @ConditionalOnClass(ServerRequestObservationContext.class)
+  static class Streams {
+    @Bean
+    ObservationPredicate ignoreEventStreams() {
+      return (name, context) -> !isEventStream(context);
     }
-    return "00-"
-        + c.traceId()
-        + "-"
-        + c.spanId()
-        + "-"
-        + (Boolean.TRUE.equals(c.sampled()) ? "01" : "00");
+  }
+
+  static boolean isEventStream(Observation.Context context) {
+    if (!(context instanceof ServerRequestObservationContext http)) {
+      return false;
+    }
+    String accept = http.getCarrier().getHeader("Accept");
+    String uri = http.getCarrier().getRequestURI();
+    // O cabeçalho cobre qualquer stream; o caminho cobre quem pede a linha do tempo sem ele (curl).
+    return (accept != null && accept.contains("text/event-stream"))
+        || (uri != null && uri.endsWith("/linha-do-tempo"));
   }
 }

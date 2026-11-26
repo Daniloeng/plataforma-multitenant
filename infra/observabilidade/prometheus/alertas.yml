@@ -26,11 +26,15 @@ groups:
           runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/latencia-p99-alta.md
 
       - alert: TaxaDeErrosAlta
+        # Com pouco tráfego, um 5xx isolado não é taxa: exige mais de 1 req a cada 10 s.
         expr: >
-          sum by (job) (rate(http_server_requests_seconds_count{status=~"5..",uri!~"/actuator.*"}[5m]))
-          /
-          sum by (job) (rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[5m]))
-          > 0.01
+          (
+            sum by (job) (rate(http_server_requests_seconds_count{status=~"5..",uri!~"/actuator.*"}[5m]))
+            /
+            sum by (job) (rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[5m]))
+            > 0.01
+          )
+          and sum by (job) (rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[5m])) > 0.1
         for: 5m
         labels:
           severity: alta
@@ -46,6 +50,17 @@ groups:
           severity: alta
         annotations:
           summary: "Outbox de {{ $labels.job }} com evento pendente há mais de 1 min"
+          runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/outbox-atrasado.md
+
+      - alert: OutboxIlegivel
+        # O serviço publica -1 quando não consegue contar o outbox (MongoDB fora ou lento); aí o
+        # OutboxAtrasado não teria como disparar.
+        expr: max by (job) (plataforma_outbox_pendentes) < 0
+        for: 2m
+        labels:
+          severity: alta
+        annotations:
+          summary: "{{ $labels.job }} não consegue ler o próprio outbox há 2 min"
           runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/outbox-atrasado.md
 
       - alert: RelaySemLider
@@ -67,9 +82,18 @@ groups:
           runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/relay-sem-lider.md
 
       - alert: EventoNoDeadLetter
+        # A série do dead letter só nasce no primeiro, já valendo 1, e o increase() dela dá 0: a
+        # segunda parte pega a série que não existia 10 min atrás. Efeito colateral: um Prometheus
+        # recém-subido vê toda série de dead letter como nova e avisa uma vez.
         expr: >
           sum by (job, assinatura) (
-            increase(plataforma_eventos_consumo_seconds_count{resultado="dead-letter"}[10m])
+            increase(plataforma_eventos_consumo_seconds_count{resultado="dead-letter"}[10m]) > 0
+            or
+            (
+              plataforma_eventos_consumo_seconds_count{resultado="dead-letter"}
+              unless
+              plataforma_eventos_consumo_seconds_count{resultado="dead-letter"} offset 10m
+            )
           ) > 0
         labels:
           severity: alta

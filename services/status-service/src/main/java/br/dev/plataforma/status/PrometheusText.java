@@ -163,12 +163,13 @@ final class PrometheusText {
     Predicate<Map<String, String>> failed =
         l -> List.of("falha", "dead-letter").contains(l.getOrDefault("resultado", ""));
     double pending = sum(outbox, l -> true);
+    double lagSeconds = sum(lag, l -> true);
     return new ServiceMetrics(
         (long) requests,
-        requests == 0 ? 0 : errors / requests,
-        p99 == null ? null : p99 * 1000,
+        requests == 0 || !Double.isFinite(errors / requests) ? 0 : errors / requests,
+        p99 == null || !Double.isFinite(p99) ? null : p99 * 1000,
         has(outbox) && pending >= 0 ? (long) pending : null,
-        has(lag) ? sum(lag, l -> true) : null,
+        has(lag) && Double.isFinite(lagSeconds) ? lagSeconds : null,
         has(consumed) ? (long) sum(consumed, ok) : null,
         has(consumed) ? (long) sum(consumed, failed) : null);
   }

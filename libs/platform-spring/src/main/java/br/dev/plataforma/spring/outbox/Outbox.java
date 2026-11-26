@@ -69,6 +69,11 @@ public class Outbox {
     Object traceparent = field(event, "traceparent");
     if (traceparent == null) {
       traceparent = currentTrace.traceparent();
+      if (traceparent != null) {
+        // Payload e propriedade da mensagem levam o mesmo trace (ADR-0003, ADR-0015): quem lê o
+        // evento depois (dead letter, reprocessamento) não o perde.
+        event.put(event.getSchema().getField("traceparent").pos(), traceparent);
+      }
     }
     Instant occurredAt = (Instant) field(event, "occurredAt");
     OutboxMessage message =

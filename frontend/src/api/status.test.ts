@@ -119,16 +119,22 @@ describe('fetchStatus', () => {
     ['outboxLagSeconds textual', { requests: 1, errorRate: 0, p99Ms: 1, outboxLagSeconds: 'x' }],
     ['eventsConsumed textual', { requests: 1, errorRate: 0, p99Ms: 1, eventsConsumed: 'x' }],
     ['eventsFailed textual', { requests: 1, errorRate: 0, p99Ms: 1, eventsFailed: false }],
-  ])('lança ApiError quando as métricas estão fora do contrato (%s)', async (_, metrics) => {
-    const body = {
-      ...makeStatus(),
-      components: [
-        { name: 's', type: 'SERVICE', status: 'UP', latencyMs: 1, details: null, metrics },
-      ],
-    };
-    server.use(http.get('*/api/status', () => HttpResponse.json(body)));
-    await expect(fetchStatus()).rejects.toThrow('fora do contrato');
-  });
+    ['outboxLagSeconds NaN serializado', { requests: 1, errorRate: 0, outboxLagSeconds: 'NaN' }],
+  ])(
+    'descarta só as métricas fora do contrato, sem invalidar a resposta (%s)',
+    async (_, metrics) => {
+      const body = {
+        ...makeStatus(),
+        components: [
+          { name: 's', type: 'SERVICE', status: 'UP', latencyMs: 1, details: null, metrics },
+        ],
+      };
+      server.use(http.get('*/api/status', () => HttpResponse.json(body)));
+      const status = await fetchStatus();
+      expect(status.components[0]?.status).toBe('UP');
+      expect(status.components[0]?.metrics).toBeNull();
+    },
+  );
 
   it('propaga falhas de rede', async () => {
     server.use(http.get('*/api/status', () => HttpResponse.error()));

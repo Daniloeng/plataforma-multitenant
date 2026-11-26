@@ -10,19 +10,20 @@ ferramentas gratuitas.
 
 **Demo:** <https://daniloeng.github.io/plataforma-multitenant/> (frontend em modo demo, API simulada)
 
-## Estado atual: Dia 9 de 22
+## Estado atual: Dia 10 de 22
 
 | Componente | Situação |
 |---|---|
-| `status-service` | ✅ Ativo: saúde de MongoDB x4, Pulsar e serviços em `GET /api/status` |
+| `status-service` | ✅ Ativo: saúde de MongoDB x4, Pulsar e serviços em `GET /api/status`, com métricas por serviço (requisições, p99, erros, outbox e eventos) |
+| Observabilidade | ✅ Métricas Prometheus em todo serviço, traces OpenTelemetry que atravessam o Pulsar, Grafana e Tempo no perfil `observabilidade` do Compose, 10 alertas testados com `promtool` e runbooks (ADR-0015) |
 | Gateway + Keycloak | ✅ Ativo: única entrada (porta 8000), login OIDC, troca de tenant, rate limit por plano |
 | Tenants | ✅ Ativo: cadastro em `/api/v1/tenants` (só `plataforma-admin`), publica `tenant.criado` e `tenant.alterado`; promoção de nível (`POST /api/v1/tenants/{id}/promocao`) com namespace Pulsar próprio para Bridge e Silo |
-| Biblioteca comum | ✅ `platform-spring`: contexto de tenant, outbox transacional, consumidor padrão de eventos (`EventSubscriber`), identidade do gateway (`Caller`), database por tenant com migração online (ADR-0014) |
+| Biblioteca comum | ✅ `platform-spring`: contexto de tenant, outbox transacional com lease do relay entre réplicas, consumidor padrão de eventos (`EventSubscriber`), identidade do gateway (`Caller`), database por tenant com migração online (ADR-0014) |
 | Catálogo | ✅ Ativo: produtos e preços por tenant em `/api/v1/produtos`, limite de produtos por plano, publica `produto.alterado` e `preco.alterado` |
 | Pedidos | ✅ Ativo: `/api/v1/pedidos` com preço da cópia local do catálogo, `Idempotency-Key`, cancelamento e histórico da saga; linha do tempo ao vivo (SSE) em `/api/v1/pedidos/{id}/linha-do-tempo`; tenants Bridge e Silo em database própria (`pedidos_t_<tenant>`), visível em `/api/v1/isolamento/pedidos` |
 | Pagamentos | ✅ Ativo: cobra cada `pedido.criado` num gateway simulado (aprova até R$ 10.000,00), estorna pedidos cancelados, ledger de partida dobrada em `/api/v1/ledger/lancamentos`; Pedidos confirma, cancela recusados e expira PENDENTE após 15 min |
-| Contratos | 10 eventos Avro, 5 APIs OpenAPI, 14 ADRs ([arquitetura](docs/arquitetura/event-storming.md)) |
-| Cobertura (linhas) | `platform-core` 100% · `contracts` 100% · `platform-spring` 87,3% · `gateway` 91,3% · `catalogo-service` 94,2% · `pedidos-service` 94,2% · `pagamentos-service` 99,1% · `tenant-service` 96,1% · `status-service` 98,7% · frontend 99,7% (mínimo exigido: 80%) |
+| Contratos | 10 eventos Avro, 6 APIs OpenAPI, 15 ADRs ([arquitetura](docs/arquitetura/event-storming.md)) |
+| Cobertura (linhas) | `platform-core` 100% · `contracts` 100% · `platform-spring` 88,1% · `gateway` 91,6% · `catalogo-service` 94,2% · `pedidos-service` 94,0% · `pagamentos-service` 99,1% · `tenant-service` 95,4% · `status-service` 99,0% · frontend 99,7% (mínimo exigido: 80%) |
 
 ## Arquitetura (visão alvo)
 
@@ -56,6 +57,9 @@ TOKEN=$(curl -s localhost:8180/realms/plataforma/protocol/openid-connect/token \
   -d grant_type=password -d client_id=plataforma-cli -d username=ana -d password=senha123 | jq -r .access_token)
 curl -s localhost:8000/api/v1/me -H "Authorization: Bearer $TOKEN" -H 'X-Tenant-Id: acme'
 
+# Observabilidade: Prometheus (localhost:9090), Grafana (localhost:3000) e Tempo, com traces ligados
+TRACING_EXPORT=true docker compose -f infra/docker-compose.yml --profile observabilidade up -d --build --wait
+
 # Frontend contra a API real (http://localhost:5173)
 cd frontend && npm ci && npm run dev
 
@@ -69,6 +73,7 @@ cd frontend && VITE_DEMO=true npm run dev
 | 6650 / 8080 | Pulsar (binário / admin HTTP) |
 | 8000 | gateway (única entrada das APIs; os serviços não ficam expostos) |
 | 8180 | Keycloak (console `admin`/`admin`) |
+| 9090 / 3000 / 3200 | Prometheus / Grafana / Tempo (só com `--profile observabilidade`) |
 | 5173 | frontend (Vite) |
 
 Memória: o Compose do Dia 1 usava cerca de 1,3 GB (medido com `docker stats`: Pulsar ~660 MB, cada MongoDB ~115 MB, status-service ~170 MB).
@@ -84,7 +89,10 @@ O CI (GitHub Actions) roda backend, frontend e um teste do **Compose inteiro**: 
 containers, exige `UP` em `/api/status` pelo gateway, cria tenants com token do Keycloak, confere
 o `tenant.criado` no Pulsar, o `/api/v1/me`, os 403 de papel e de tenant, o limite do plano e
 uma compra com repetição pela mesma `Idempotency-Key` e a saga de pagamento (aprovação, recusa acima
-do limite e estorno), com a linha do tempo do pedido chegando pelo SSE. Nada entra na `main` com CI vermelho.
+do limite e estorno), com a linha do tempo do pedido chegando pelo SSE, a promoção de nível e a
+observabilidade: alertas testados com `promtool`, métricas na página de saúde, um líder do relay
+por serviço, o painel do Grafana e um trace que vai do gateway ao pagamentos-service passando pelo
+Pulsar. Nada entra na `main` com CI vermelho.
 
 ## Estrutura
 
@@ -99,18 +107,36 @@ services/pedidos-service/ pedidos B2B com idempotência (porta 8083, só na rede
 services/pagamentos-service/ cobrança simulada, estorno e ledger (porta 8084, só na rede interna)
 services/status-service/  saúde da plataforma (porta 8090)
 frontend/                 React + Vite + TypeScript, publicado no GitHub Pages
-infra/                    Docker Compose, realm do Keycloak, scripts do Pulsar e seed
+infra/                    Docker Compose, realm do Keycloak, scripts do Pulsar, seed e observabilidade (Prometheus, alertas, Grafana, Tempo)
+docs/runbooks/            o que fazer quando cada alerta dispara
 docs/dias/                diário detalhado de cada dia
 docs/adr/                 decisões de arquitetura
 docs/arquitetura/         event storming e diagramas
 CLAUDE.md                 regras e comandos para o Claude Code
-.claude/                  hooks, subagentes (arquiteto, testador) e skill de ADR do Claude Code
+.claude/                  hooks, subagentes (arquiteto, testador) e skills (adr, runbook) do Claude Code
 ```
 
 ## Diário de bordo
 
 Cada dia equivale a ~10 h de trabalho executado pelo Claude Code e revisado pelo Danilo, e termina
 com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
+
+### Dia 10: observabilidade · [detalhes](docs/dias/10.md)
+
+- **Feito:** métricas Prometheus em todos os serviços (latência com histograma e tag de tenant,
+  outbox, relay, consumo de eventos, migração de nível); traces OpenTelemetry que passam pelo
+  outbox e pelo Pulsar; lease do relay para várias réplicas; Prometheus, Grafana e Tempo num perfil
+  do Compose; 10 alertas com testes `promtool` e um runbook para cada; skill `runbook`; ADR-0015. A
+  página de saúde mostra as métricas de cada serviço e um bloco de alertas.
+- **Por quê:** a meta é p99 < 3 s e a fase seguinte é QA; sem medir não há o que certificar, e um
+  alerta sem teste é palpite.
+- **Como testar:** suba com `--profile observabilidade`, faça um pedido e abra o Grafana
+  (localhost:3000) e o trace dele no Tempo; na página de saúde, veja requisições, p99 e eventos de
+  cada serviço.
+- **Claude Code:** frontend por subagente em paralelo a partir do contrato de `metrics`; revisão do
+  `arquiteto`; skill nova `runbook` para investigar alertas.
+- **Cobertura:** `platform-spring` 88,1%, `status-service` 99,0%, `gateway` 91,6%, frontend 99,7% de
+  linhas.
 
 ### Dia 9: níveis Pool, Bridge e Silo · [detalhes](docs/dias/09.md)
 
@@ -256,7 +282,7 @@ com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
 | 7 ✅ | Pagamentos: autorização, captura, ledger | Pagamento e extrato |
 | 8 ✅ | Saga completa | Linha do tempo do pedido (SSE) |
 | 9 ✅ | Níveis Pool, Bridge e Silo | Selo e promoção de nível |
-| 10 | Observabilidade (OpenTelemetry, Prometheus, Grafana) | Saúde por serviço |
+| 10 ✅ | Observabilidade (OpenTelemetry, Prometheus, Grafana) | Saúde por serviço |
 | 11 | Helm, kind, KEDA, Argo CD; **MVP1** | MVP1 completo |
 | 12 a 17 | Estratégia de QA, mutação, contratos, isolamento, E2E, consistência de eventos | Painéis de qualidade |
 | 18 a 22 | Performance (k6), caos, segurança, pipeline de certificação, **go/no-go v1.0.0** | Painel go/no-go |

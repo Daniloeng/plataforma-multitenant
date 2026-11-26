@@ -1,0 +1,67 @@
+openapi: 3.1.0
+info:
+  title: Status da plataforma
+  version: 1.0.0
+  description: >-
+    Saúde agregada da plataforma, servida pelo status-service e publicada pelo gateway sem
+    autenticação (é a página inicial do frontend). Desde o Dia 10 (ADR-0015), cada serviço da
+    plataforma que respondeu traz também as métricas lidas do /actuator/prometheus dele,
+    acumuladas desde a subida e sem nomes de tenants. Fica fora de /api/v1 por ser a primeira API
+    do projeto (Dia 1) e não ter dado de tenant.
+servers:
+  - url: http://localhost:8000
+security: []
+x-autorizacao: "Pública: não expõe dado de tenant, só a saúde e métricas agregadas por serviço."
+paths:
+  /api/status:
+    get:
+      operationId: obterStatusDaPlataforma
+      summary: Saúde de MongoDB, Pulsar, Keycloak e serviços, com métricas por serviço
+      responses:
+        '200':
+          description: Estado atual (verificado na hora, em paralelo).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformStatus' }
+components:
+  schemas:
+    PlatformStatus:
+      type: object
+      required: [status, checkedAt, version, components]
+      properties:
+        status: { $ref: '#/components/schemas/HealthState' }
+        checkedAt: { type: string, format: date-time }
+        version: { type: string }
+        components:
+          type: array
+          items: { $ref: '#/components/schemas/ComponentStatus' }
+    HealthState:
+      type: string
+      description: Todos UP = UP, nenhum UP = DOWN, senão DEGRADED.
+      enum: [UP, DEGRADED, DOWN]
+    ComponentStatus:
+      type: object
+      required: [name, type, status, latencyMs]
+      properties:
+        name: { type: string, examples: [mongo-pedidos, pedidos-service] }
+        type: { type: string, enum: [MONGODB, PULSAR, SERVICE] }
+        status: { $ref: '#/components/schemas/HealthState' }
+        latencyMs: { type: integer, format: int64 }
+        details: { type: [string, 'null'] }
+        metrics:
+          description: Só para serviços da plataforma prontos que responderam às métricas.
+          oneOf:
+            - $ref: '#/components/schemas/ServiceMetrics'
+            - type: 'null'
+    ServiceMetrics:
+      type: object
+      description: Acumuladas desde a subida do serviço; a análise por janela fica no Prometheus.
+      required: [requests, errorRate]
+      properties:
+        requests: { type: integer, format: int64, description: Requisições HTTP atendidas, sem as do Actuator e sem streams SSE. }
+        errorRate: { type: number, minimum: 0, maximum: 1, description: Fração de respostas 5xx. }
+        p99Ms: { type: [number, 'null'], description: p99 de latência em ms; null sem requisições. }
+        outboxPending: { type: [integer, 'null'], description: Eventos esperando publicação; null sem outbox ou sem leitura. }
+        outboxLagSeconds: { type: [number, 'null'], description: Idade do pendente mais antigo; null sem outbox ou sem leitura. }
+        eventsConsumed: { type: [integer, 'null'], description: Eventos consumidos com sucesso; null se ainda não consumiu nenhum. }
+        eventsFailed: { type: [integer, 'null'], description: Tentativas de consumo que falharam (inclui dead letter). }

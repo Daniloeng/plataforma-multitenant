@@ -61,6 +61,11 @@ tests:
         values: "0+1000x20"
       - series: 'http_server_requests_seconds_count{job="pedidos-service",status="500",uri="/api/v1/pedidos"}'
         values: "0+1x20"
+      # Pouco tráfego (1 req a cada 2 min, metade 5xx): não é taxa, não dispara.
+      - series: 'http_server_requests_seconds_count{job="tenant-service",status="200",uri="/api/v1/tenants"}'
+        values: "0 0 1 1 2 2 3 3 4 4 5 5 6 6 7 7 8 8 9 9 10"
+      - series: 'http_server_requests_seconds_count{job="tenant-service",status="500",uri="/api/v1/tenants"}'
+        values: "0 0 1 1 2 2 3 3 4 4 5 5 6 6 7 7 8 8 9 9 10"
     alert_rule_test:
       - eval_time: 12m
         alertname: TaxaDeErrosAlta
@@ -86,6 +91,24 @@ tests:
           - exp_labels: { severity: alta, job: catalogo-service }
             exp_annotations:
               summary: "Outbox de catalogo-service com evento pendente há mais de 1 min"
+              runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/outbox-atrasado.md
+
+  - name: outbox ilegível
+    interval: 1m
+    input_series:
+      - series: 'plataforma_outbox_pendentes{job="pagamentos-service"}'
+        values: "0 -1 -1 -1 -1"
+      - series: 'plataforma_outbox_pendentes{job="pedidos-service"}'
+        values: "3 3 3 3 3"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: OutboxIlegivel
+      - eval_time: 4m
+        alertname: OutboxIlegivel
+        exp_alerts:
+          - exp_labels: { severity: alta, job: pagamentos-service }
+            exp_annotations:
+              summary: "pagamentos-service não consegue ler o próprio outbox há 2 min"
               runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/outbox-atrasado.md
 
   - name: relay sem líder e com dois líderes
@@ -122,8 +145,9 @@ tests:
   - name: evento no dead letter
     interval: 1m
     input_series:
+      # Como na vida real: a série nasce no primeiro dead letter, já valendo 1.
       - series: 'plataforma_eventos_consumo_seconds_count{job="pedidos-service",assinatura="pagamentos",resultado="dead-letter"}'
-        values: "0 0 1 1 1"
+        values: "_ _ 1 1 1 1 1 1 1 1 1 1 1 1 1 1"
       - series: 'plataforma_eventos_consumo_seconds_count{job="pedidos-service",assinatura="pagamentos",resultado="falha"}'
         values: "0 5 10 15 20"
     alert_rule_test:
@@ -136,6 +160,9 @@ tests:
             exp_annotations:
               summary: "Evento foi para o dead letter da assinatura pagamentos em pedidos-service"
               runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/evento-no-dead-letter.md
+      # Dez minutos depois, sem dead letter novo, o alerta apaga.
+      - eval_time: 14m
+        alertname: EventoNoDeadLetter
 
   - name: migração de nível
     interval: 1m

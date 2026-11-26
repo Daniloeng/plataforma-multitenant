@@ -221,6 +221,8 @@ public class PlatformAutoConfiguration {
       SimpleAsyncTaskScheduler scheduler = new SimpleAsyncTaskScheduler();
       scheduler.setThreadNamePrefix("outbox-relay-");
       scheduler.setVirtualThreads(true);
+      // O desligamento espera o ciclo em andamento antes de o relay soltar o lease.
+      scheduler.setTaskTerminationTimeout(10_000);
       ((TaskScheduler) scheduler)
           .scheduleWithFixedDelay(relay::runCycle, props.outbox().interval());
       return scheduler;

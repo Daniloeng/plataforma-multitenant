@@ -123,6 +123,29 @@ class OpenApiContractsTest {
     assertThat(api.getExtensions()).containsKey("x-autorizacao");
   }
 
+  @org.junit.jupiter.api.Test
+  @SuppressWarnings("rawtypes")
+  void statusEPublicoEMetricasSaoOpcionais() {
+    OpenAPI api = parse("status.yaml");
+
+    assertThat(api.getOpenapi()).startsWith("3.1");
+    assertThat(api.getPaths()).containsOnlyKeys("/api/status");
+    assertThat(api.getSecurity()).isNullOrEmpty();
+    Map<String, Schema> schemas = api.getComponents().getSchemas();
+    assertThat(schemas.get("ComponentStatus").getRequired()).doesNotContain("metrics", "details");
+    Schema metricas = schemas.get("ServiceMetrics");
+    assertThat(metricas.getRequired()).containsExactlyInAnyOrder("requests", "errorRate");
+    assertThat(metricas.getProperties())
+        .containsOnlyKeys(
+            "requests",
+            "errorRate",
+            "p99Ms",
+            "outboxPending",
+            "outboxLagSeconds",
+            "eventsConsumed",
+            "eventsFailed");
+  }
+
   /** Junta os nomes de propriedades de um schema, seguindo $ref e schemas aninhados. */
   @SuppressWarnings("rawtypes")
   private static void coletarPropriedades(

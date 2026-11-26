@@ -8,7 +8,7 @@ aponta para o seu pela anotação `runbook_url`. No Claude Code, a skill `runboo
 | `ServicoFora` | crítica | [servico-fora.md](servico-fora.md) |
 | `LatenciaP99Alta` | crítica | [latencia-p99-alta.md](latencia-p99-alta.md) |
 | `TaxaDeErrosAlta` | alta | [taxa-de-erros-alta.md](taxa-de-erros-alta.md) |
-| `OutboxAtrasado` | alta | [outbox-atrasado.md](outbox-atrasado.md) |
+| `OutboxAtrasado`, `OutboxIlegivel` | alta | [outbox-atrasado.md](outbox-atrasado.md) |
 | `RelaySemLider`, `RelayComDoisLideres` | alta | [relay-sem-lider.md](relay-sem-lider.md) |
 | `EventoNoDeadLetter` | alta | [evento-no-dead-letter.md](evento-no-dead-letter.md) |
 | `MigracaoDeNivelFalhando`, `MigracaoDeNivelDemorada` | crítica / alta | [migracao-de-nivel.md](migracao-de-nivel.md) |

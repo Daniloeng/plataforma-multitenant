@@ -63,11 +63,13 @@ class PrometheusTextTest {
 
   @Test
   void outboxIndisponivelNoServicoFicaNulo() {
-    assertThat(
-            PrometheusText.parse("plataforma_outbox_pendentes -1\n")
-                .toServiceMetrics()
-                .outboxPending())
-        .isNull();
+    // Com o MongoDB fora, o serviço publica -1 e NaN; NaN não pode chegar ao JSON.
+    ServiceMetrics m =
+        PrometheusText.parse(
+                "plataforma_outbox_pendentes -1\nplataforma_outbox_atraso_seconds NaN\n")
+            .toServiceMetrics();
+    assertThat(m.outboxPending()).isNull();
+    assertThat(m.outboxLagSeconds()).isNull();
   }
 
   @Test

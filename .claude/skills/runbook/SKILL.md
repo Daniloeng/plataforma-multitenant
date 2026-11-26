@@ -6,7 +6,7 @@ description: Investiga um alerta ou incidente da plataforma seguindo os runbooks
 # Investigar um alerta
 
 1. **Identifique o alerta.** Pelo nome (`ServicoFora`, `LatenciaP99Alta`, `TaxaDeErrosAlta`,
-   `OutboxAtrasado`, `RelaySemLider`, `RelayComDoisLideres`, `EventoNoDeadLetter`,
+   `OutboxAtrasado`, `OutboxIlegivel`, `RelaySemLider`, `RelayComDoisLideres`, `EventoNoDeadLetter`,
    `MigracaoDeNivelFalhando`, `MigracaoDeNivelDemorada`) ou pelo sintoma. Se o ambiente estiver no
    ar, liste os ativos: `curl -s localhost:9090/api/v1/alerts | jq '.data.alerts[] | {nome: .labels.alertname, job: .labels.job, estado: .state}'`.
 2. **Abra o runbook** correspondente em `docs/runbooks/` (o índice está em `docs/runbooks/README.md`)

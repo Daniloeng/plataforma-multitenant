@@ -41,6 +41,7 @@ public class PlatformMetrics implements MeterBinder {
 
   private static final Logger LOG = LoggerFactory.getLogger(PlatformMetrics.class);
   static final long CACHE_SECONDS = 5;
+  static final Duration MAX_QUERY_TIME = Duration.ofSeconds(2);
 
   private final MongoOperations mongo;
   private final OutboxRelay relay;
@@ -127,7 +128,9 @@ public class PlatformMetrics implements MeterBinder {
   }
 
   private OutboxSnapshot read(Instant now) {
-    Query pending = Query.query(Criteria.where("publishedAt").isNull());
+    // Limite curto: com o MongoDB lento, a raspagem responde (com -1) em vez de travar até o
+    // timeout do Prometheus e virar um falso ServicoFora.
+    Query pending = Query.query(Criteria.where("publishedAt").isNull()).maxTime(MAX_QUERY_TIME);
     long count = mongo.count(pending, OutboxMessage.class);
     if (count == 0) {
       return new OutboxSnapshot(0, 0, now);
@@ -136,7 +139,8 @@ public class PlatformMetrics implements MeterBinder {
         mongo.findOne(
             Query.query(Criteria.where("publishedAt").isNull())
                 .with(Sort.by("occurredAt", "sequence"))
-                .limit(1),
+                .limit(1)
+                .maxTime(MAX_QUERY_TIME),
             OutboxMessage.class);
     double lag =
         oldest == null

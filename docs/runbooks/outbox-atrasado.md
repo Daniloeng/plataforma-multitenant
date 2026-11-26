@@ -1,7 +1,11 @@
-# OutboxAtrasado
+# OutboxAtrasado / OutboxIlegivel
 
 **Dispara quando:** o evento pendente mais antigo do outbox de um serviço tem mais de 60 s
 (`plataforma_outbox_atraso_seconds`), por 2 min. Normal é abaixo de 1 s (ciclo de 200 ms, ADR-0008).
+
+`OutboxIlegivel` dispara quando o serviço não consegue nem contar o outbox há 2 min
+(`plataforma_outbox_pendentes` vale -1): o MongoDB dele está fora ou lento demais (a contagem tem
+limite de 2 s). Comece pelo MongoDB do serviço no `/api/status`.
 
 **Impacto:** a saga para (pedido não é cobrado, preço não chega ao pedidos-service). Nada se perde:
 o evento está gravado e sai quando o relay voltar.

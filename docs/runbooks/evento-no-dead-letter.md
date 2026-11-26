@@ -6,6 +6,9 @@ dead letter da assinatura: `persistent://plataforma/<serviço>/dlq.<assinatura>`
 **Impacto:** o efeito daquele evento não aconteceu (ex.: pedido sem cobrança). Os eventos seguintes
 continuam sendo processados.
 
+Um Prometheus recém-reiniciado vê toda série de dead letter como nova e dispara uma vez por
+assinatura que já teve dead letter: confira no Diagnóstico se o evento é de agora.
+
 ## Diagnóstico
 1. Por que falhou: `docker compose -f infra/docker-compose.yml logs <serviço> | grep "Falha ao processar"` mostra a exceção de cada
    tentativa. `WriteConflict` isolado é transitório e não chega ao dead letter.

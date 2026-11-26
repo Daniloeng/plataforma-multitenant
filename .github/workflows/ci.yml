@@ -396,7 +396,7 @@ jobs:
           assert all(v == 1 for v in r.values()), r
           print("Líder do relay por serviço:", r)'
           q 'count(http_server_requests_seconds_count{tenant="acme"})' | python3 -c 'import json,sys; assert json.load(sys.stdin)["data"]["result"], "sem tag de tenant"'
-          curl -fsS http://localhost:9090/api/v1/rules | python3 -c 'import json,sys; n=sum(len(g["rules"]) for g in json.load(sys.stdin)["data"]["groups"]); assert n == 9, n'
+          curl -fsS http://localhost:9090/api/v1/rules | python3 -c 'import json,sys; n=sum(len(g["rules"]) for g in json.load(sys.stdin)["data"]["groups"]); assert n == 10, n'
           # Grafana com o Prometheus e o painel provisionados.
           curl -fsS http://localhost:3000/api/health
           curl -fsS http://localhost:3000/api/dashboards/uid/plataforma | python3 -c 'import json,sys; d=json.load(sys.stdin)["dashboard"]; assert len(d["panels"]) >= 10; print("\nPainel:", d["title"])'

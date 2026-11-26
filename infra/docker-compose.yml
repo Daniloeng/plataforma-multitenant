@@ -270,7 +270,8 @@ services:
         limits:
           memory: 384m
 
-  # Perfil "observabilidade" (ADR-0015): só sobe com --profile observabilidade.
+  # Perfil "observabilidade" (ADR-0015): só sobe com --profile observabilidade. As portas ficam só
+  # em 127.0.0.1: as métricas têm nomes de tenants.
   prometheus:
     image: prom/prometheus:v3.4.2
     profiles: [observabilidade]
@@ -280,7 +281,7 @@ services:
       - --web.enable-lifecycle
     volumes:
       - ./observabilidade/prometheus:/etc/prometheus:ro
-    ports: ["9090:9090"]
+    ports: ["127.0.0.1:9090:9090"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/ready"]
       interval: 5s
@@ -298,7 +299,7 @@ services:
     user: "0"
     volumes:
       - ./observabilidade/tempo/tempo.yaml:/etc/tempo.yaml:ro
-    ports: ["3200:3200"]
+    ports: ["127.0.0.1:3200:3200"]
     deploy:
       resources:
         limits:
@@ -316,7 +317,7 @@ services:
     volumes:
       - ./observabilidade/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./observabilidade/grafana/dashboards:/var/lib/grafana/dashboards:ro
-    ports: ["3000:3000"]
+    ports: ["127.0.0.1:3000:3000"]
     depends_on:
       prometheus: { condition: service_healthy }
     healthcheck:

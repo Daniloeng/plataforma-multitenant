@@ -1,5 +1,6 @@
 # Prometheus do perfil "observabilidade" do Compose (ADR-0015). Raspa o /actuator/prometheus de cada
-# serviço pela rede interna e avalia os alertas de alertas.yml.
+# serviço pela rede interna e avalia os alertas de alertas.yml. A descoberta por DNS (registro A)
+# acha todas as réplicas de um serviço, não uma por raspagem: os alertas do relay somam por réplica.
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -10,21 +11,31 @@ rule_files:
 scrape_configs:
   - job_name: gateway
     metrics_path: /actuator/prometheus
-    static_configs:
-      - targets: ["gateway:8001"]
+    dns_sd_configs:
+      - names: ["gateway"]
+        type: A
+        port: 8001
   - job_name: tenant-service
     metrics_path: /actuator/prometheus
-    static_configs:
-      - targets: ["tenant-service:8081"]
+    dns_sd_configs:
+      - names: ["tenant-service"]
+        type: A
+        port: 8081
   - job_name: catalogo-service
     metrics_path: /actuator/prometheus
-    static_configs:
-      - targets: ["catalogo-service:8082"]
+    dns_sd_configs:
+      - names: ["catalogo-service"]
+        type: A
+        port: 8082
   - job_name: pedidos-service
     metrics_path: /actuator/prometheus
-    static_configs:
-      - targets: ["pedidos-service:8083"]
+    dns_sd_configs:
+      - names: ["pedidos-service"]
+        type: A
+        port: 8083
   - job_name: pagamentos-service
     metrics_path: /actuator/prometheus
-    static_configs:
-      - targets: ["pagamentos-service:8084"]
+    dns_sd_configs:
+      - names: ["pagamentos-service"]
+        type: A
+        port: 8084
