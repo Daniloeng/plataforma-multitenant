@@ -6,6 +6,7 @@ import br.dev.plataforma.contracts.tenants.Plano;
 import br.dev.plataforma.contracts.tenants.TenantAlterado;
 import br.dev.plataforma.contracts.tenants.TenantCriado;
 import br.dev.plataforma.spring.events.EventDecoder;
+import br.dev.plataforma.spring.events.SchemaLookupException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
@@ -122,11 +123,15 @@ public class TenantCatalogLoader implements SmartLifecycle {
 
   /**
    * Uma mensagem ilegível é descartada com log: sem isso ela voltaria para sempre e travaria todos
-   * os eventos de tenant que vieram depois dela.
+   * os eventos de tenant que vieram depois dela. Falha temporária ao buscar o schema não descarta:
+   * a exceção sobe, a mensagem fica sem ack e o consumidor reconecta e relê (a {@code versao} torna
+   * a releitura inofensiva).
    */
   void handleSafely(Message<byte[]> msg, String criadoTopic) {
     try {
       handle(msg, criadoTopic);
+    } catch (SchemaLookupException e) {
+      throw e;
     } catch (RuntimeException e) {
       discarded.incrementAndGet();
       LOG.error(
@@ -202,14 +207,22 @@ public class TenantCatalogLoader implements SmartLifecycle {
       }
       JsonNode page = json.readTree(resp.body());
       for (JsonNode t : page.path("itens")) {
-        directory.apply(
-            new TenantInfo(
-                t.path("id").asText(),
-                t.path("nome").asText(),
-                Plano.valueOf(t.path("plano").asText()),
-                NivelIsolamento.valueOf(t.path("nivelIsolamento").asText()),
-                t.path("ativo").asBoolean(),
-                t.path("versao").asLong()));
+        // Um registro que esta versão do gateway não entende (ex.: plano novo) não pode impedir
+        // a carga dos outros: fica de fora, com log, até o gateway ser atualizado.
+        try {
+          directory.apply(
+              new TenantInfo(
+                  t.path("id").asText(),
+                  t.path("nome").asText(),
+                  Plano.valueOf(t.path("plano").asText()),
+                  NivelIsolamento.valueOf(t.path("nivelIsolamento").asText()),
+                  t.path("ativo").asBoolean(),
+                  t.path("versao").asLong()));
+        } catch (IllegalArgumentException e) {
+          discarded.incrementAndGet();
+          LOG.error(
+              "Tenant ignorado na carga inicial ({}): {}", t.path("id").asText(), e.toString());
+        }
       }
       JsonNode next = page.path("proximoCursor");
       cursor = next.isNull() || next.isMissingNode() ? null : next.asText();

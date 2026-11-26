@@ -1,5 +1,6 @@
 package br.dev.plataforma.gateway;
 
+import br.dev.plataforma.core.TenantId;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Optional;
@@ -87,7 +88,17 @@ public class TenantAccessFilter implements WebFilter {
     boolean administrative = path.equals("/api/v1/tenants") || path.startsWith("/api/v1/tenants/");
     boolean tenantOptional = administrative || path.equals("/api/v1/me");
     String tenant = requested;
-    if (tenant == null && !administrative && identity.tenants().size() == 1) {
+    if (tenant != null && !isValidTenantId(tenant)) {
+      return problem(
+          exchange,
+          HttpStatus.BAD_REQUEST,
+          "tenant-invalido",
+          "Tenant inválido",
+          "X-Tenant-Id fora do formato de identificador de tenant.");
+    }
+    // /me sem cabeçalho nunca escolhe tenant sozinho: precisa responder mesmo com o tenant
+    // suspenso ou ainda não carregado, porque é ele que diz ao frontend quais tenants existem.
+    if (tenant == null && !tenantOptional && identity.tenants().size() == 1) {
       tenant = identity.tenants().getFirst();
     }
     if (tenant == null || administrative) {
@@ -198,6 +209,17 @@ public class TenantAccessFilter implements WebFilter {
   private Mono<Void> problem(
       ServerWebExchange exchange, HttpStatus status, String type, String title, String detail) {
     return Problems.write(exchange, json, Problems.of(status, type, title, detail));
+  }
+
+  /**
+   * Formato do {@link TenantId}, sem normalizar: o tenant precisa vir exatamente como cadastrado.
+   */
+  static boolean isValidTenantId(String s) {
+    try {
+      return new TenantId(s).value().equals(s);
+    } catch (IllegalArgumentException e) {
+      return false;
+    }
   }
 
   private static String trimToNull(String s) {

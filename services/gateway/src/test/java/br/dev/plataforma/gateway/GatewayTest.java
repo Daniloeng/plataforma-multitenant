@@ -238,7 +238,8 @@ class GatewayTest {
     web.mutateWith(globex)
         .get()
         .uri("/api/v1/me")
-        .exchange() // um tenant só: o gateway escolhe sozinho
+        .header("X-Tenant-Id", "globex")
+        .exchange()
         .expectStatus()
         .isEqualTo(429)
         .expectHeader()
@@ -298,5 +299,71 @@ class GatewayTest {
     assertThat(status).isEqualTo(429);
     // outro usuário tem o próprio balde
     web.mutateWith(ADMIN).get().uri("/api/v1/tenants").exchange().expectStatus().isOk();
+  }
+
+  @Test
+  void meSemCabecalhoRespondeMesmoComOUnicoTenantSuspenso() {
+    JwtMutator suspenso = usuario("sus", "gestor-tenant", List.of("suspensa"), null);
+    web.mutateWith(suspenso)
+        .get()
+        .uri("/api/v1/me")
+        .exchange()
+        .expectStatus()
+        .isOk()
+        .expectBody()
+        .jsonPath("$.tenants[0].ativo")
+        .isEqualTo(false);
+  }
+
+  @Test
+  void tenantForaDoFormatoDa400() {
+    web.mutateWith(ADMIN)
+        .get()
+        .uri("/api/v1/me")
+        .header("X-Tenant-Id", "ACME!")
+        .exchange()
+        .expectStatus()
+        .isBadRequest()
+        .expectBody()
+        .jsonPath("$.type")
+        .isEqualTo("https://plataforma.dev.br/problemas/tenant-invalido");
+  }
+
+  @Test
+  void rotaInexistenteDa404EmProblemDetails() {
+    web.mutateWith(ADMIN)
+        .get()
+        .uri("/api/v1/nada")
+        .header("X-Tenant-Id", "acme")
+        .exchange()
+        .expectStatus()
+        .isNotFound()
+        .expectHeader()
+        .contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+        .expectBody()
+        .jsonPath("$.type")
+        .isEqualTo("https://plataforma.dev.br/problemas/nao-encontrado");
+  }
+
+  @Test
+  void corsValeTambemParaErrosDoGateway() {
+    web.get()
+        .uri("http://gateway.local/api/v1/me")
+        .header("Origin", "http://localhost:5173")
+        .exchange()
+        .expectStatus()
+        .isUnauthorized()
+        .expectHeader()
+        .valueEquals("Access-Control-Allow-Origin", "http://localhost:5173");
+    web.options()
+        .uri("http://gateway.local/api/v1/me")
+        .header("Origin", "http://localhost:5173")
+        .header("Access-Control-Request-Method", "GET")
+        .header("Access-Control-Request-Headers", "authorization,x-tenant-id")
+        .exchange()
+        .expectStatus()
+        .isOk()
+        .expectHeader()
+        .valueEquals("Access-Control-Allow-Origin", "http://localhost:5173");
   }
 }

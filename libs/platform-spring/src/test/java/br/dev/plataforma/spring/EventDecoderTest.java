@@ -70,14 +70,14 @@ class EventDecoderTest {
   }
 
   @Test
-  void falhaNaConsultaDoSchemaViraIllegalState() {
+  void falhaNaConsultaDoSchemaViraSchemaLookupException() {
     WriterSchemaResolver resolver =
         new WriterSchemaResolver(
             (t, v) -> {
               throw new java.io.IOException("admin fora do ar");
             });
     assertThatThrownBy(() -> resolver.resolve(TOPICO, versao(1)))
-        .isInstanceOf(IllegalStateException.class)
+        .isInstanceOf(br.dev.plataforma.spring.events.SchemaLookupException.class)
         .hasRootCauseMessage("admin fora do ar");
     WriterSchemaResolver quebrado =
         new WriterSchemaResolver(
@@ -85,6 +85,13 @@ class EventDecoderTest {
               throw new IllegalArgumentException("x");
             });
     assertThatThrownBy(() -> quebrado.resolve(TOPICO, versao(1)))
-        .isInstanceOf(IllegalArgumentException.class);
+        .isInstanceOf(br.dev.plataforma.spring.events.SchemaLookupException.class);
+  }
+
+  @Test
+  void schemaInvalidoNaoETemporario() {
+    WriterSchemaResolver resolver = new WriterSchemaResolver((t, v) -> "{nao e json");
+    assertThatThrownBy(() -> resolver.resolve(TOPICO, versao(1)))
+        .isNotInstanceOf(br.dev.plataforma.spring.events.SchemaLookupException.class);
   }
 }

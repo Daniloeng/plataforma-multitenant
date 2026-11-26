@@ -3,12 +3,14 @@ package br.dev.plataforma.gateway;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Collection;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.core.GrantedAuthority;
@@ -24,6 +26,9 @@ import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtAuthenticationConverterAdapter;
 import org.springframework.security.web.server.SecurityWebFilterChain;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.reactive.CorsConfigurationSource;
+import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
 import reactor.core.publisher.Mono;
 
 /**
@@ -36,8 +41,30 @@ import reactor.core.publisher.Mono;
 public class SecurityConfig {
 
   @Bean
+  CorsConfigurationSource corsConfigurationSource(
+      @Value("${plataforma.gateway.cors-origins:http://localhost:5173,http://localhost:4173}")
+          String origins) {
+    CorsConfiguration cors = new CorsConfiguration();
+    cors.setAllowedOrigins(
+        java.util.Arrays.stream(origins.split(","))
+            .map(String::strip)
+            .filter(o -> !o.isEmpty())
+            .toList());
+    cors.setAllowedMethods(List.of("GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"));
+    cors.setAllowedHeaders(List.of("*"));
+    cors.setExposedHeaders(
+        List.of("Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining", "Location"));
+    UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+    source.registerCorsConfiguration("/**", cors);
+    return source;
+  }
+
+  @Bean
   SecurityWebFilterChain security(ServerHttpSecurity http, ObjectMapper json) {
     return http.csrf(ServerHttpSecurity.CsrfSpec::disable)
+        // CORS na cadeia de segurança: vale também para 401/403/429 e para /api/v1/me, que não
+        // passam pelas rotas do gateway (o globalcors só cobre respostas roteadas).
+        .cors(Customizer.withDefaults())
         .httpBasic(ServerHttpSecurity.HttpBasicSpec::disable)
         .formLogin(ServerHttpSecurity.FormLoginSpec::disable)
         .logout(ServerHttpSecurity.LogoutSpec::disable)

@@ -116,4 +116,56 @@ class TenantCatalogLoaderTest {
       server.stop(0);
     }
   }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void falhaTemporariaDoSchemaNaoDescartaAMensagem() {
+    EventDecoder decoder = mock(EventDecoder.class);
+    when(decoder.decode(any(Message.class), any()))
+        .thenThrow(
+            new br.dev.plataforma.spring.events.SchemaLookupException(
+                "admin fora", new java.io.IOException()));
+    Message<byte[]> msg = mock(Message.class);
+    when(msg.getTopicName()).thenReturn(CRIADO);
+    var loader = loader(new TenantDirectory(), decoder, URI.create("http://127.0.0.1:1"));
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> loader.handleSafely(msg, CRIADO))
+        .isInstanceOf(br.dev.plataforma.spring.events.SchemaLookupException.class);
+    assertThat(loader.discardedEvents()).isZero();
+  }
+
+  @Test
+  void tenantComPlanoDesconhecidoNaoImpedeACargaDosOutros() throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext(
+        "/api/v1/tenants",
+        exchange -> {
+          String body =
+              "{\"itens\":[{\"id\":\"novo\",\"nome\":\"Novo\",\"plano\":\"PREMIUM\","
+                  + "\"nivelIsolamento\":\"POOL\",\"ativo\":true,\"versao\":0},"
+                  + "{\"id\":\"acme\",\"nome\":\"ACME\",\"plano\":\"GRATUITO\","
+                  + "\"nivelIsolamento\":\"POOL\",\"ativo\":true,\"versao\":0}],"
+                  + "\"proximoCursor\":null}";
+          byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+          exchange.sendResponseHeaders(200, bytes.length);
+          exchange.getResponseBody().write(bytes);
+          exchange.close();
+        });
+    server.start();
+    try {
+      var directory = new TenantDirectory();
+      var loader =
+          loader(
+              directory,
+              mock(EventDecoder.class),
+              URI.create("http://127.0.0.1:" + server.getAddress().getPort()));
+
+      loader.loadAll();
+
+      assertThat(directory.all()).extracting(TenantInfo::id).containsExactly("acme");
+      assertThat(loader.discardedEvents()).isEqualTo(1);
+    } finally {
+      server.stop(0);
+    }
+  }
 }

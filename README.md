@@ -22,7 +22,7 @@ ferramentas gratuitas.
 | Pedidos | Dia 6 |
 | Pagamentos | Dia 7 |
 | Contratos | 10 eventos Avro, 5 APIs OpenAPI, 9 ADRs ([arquitetura](docs/arquitetura/event-storming.md)) |
-| Cobertura (linhas) | `platform-core` 100% · `contracts` 100% · `platform-spring` 91,7% · `gateway` 92,0% · `tenant-service` 97,4% · `status-service` 98,7% · frontend 99,9% (mínimo exigido: 80%) |
+| Cobertura (linhas) | `platform-core` 100% · `contracts` 100% · `platform-spring` 91,8% · `gateway` 91,1% · `tenant-service` 97,4% · `status-service` 98,7% · frontend 99,9% (mínimo exigido: 80%) |
 
 ## Arquitetura (visão alvo)
 
@@ -121,7 +121,7 @@ com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
   como `ana`/`senha123` e troque entre acme e globex. No Pages, escolha um usuário de demonstração.
 - **Claude Code:** subagente `arquiteto` revisando contrato e fronteiras, frontend em subagente de
   background, skill `adr` para o ADR-0009.
-- **Cobertura:** `gateway` 92,0%, `platform-spring` 91,7%, frontend 99,9% de linhas.
+- **Cobertura:** `gateway` 91,1%, `platform-spring` 91,8%, frontend 99,9% de linhas.
 
 ### Dia 3: tenant-service, outbox e isolamento por tenant · [detalhes](docs/dias/03.md)
 

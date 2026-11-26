@@ -28,7 +28,8 @@ docs/adr/                 decisões de arquitetura (ADRs)
 docs/arquitetura/         event storming e diagramas (Mermaid)
 .claude/                  hooks (format, run-tests), subagentes (arquiteto, testador) e skills (adr)
 ```
-Novos microsserviços entram em `services/<nome>-service`, como módulo do `pom.xml` raiz, dependem de
+Novos microsserviços entram em `services/<nome>-service` (o `services/gateway` é a exceção: é
+infraestrutura de borda, não um serviço de negócio), como módulo do `pom.xml` raiz, dependem de
 `platform-spring` e seguem o `tenant-service` (Dockerfile, `application.yml`, `*IT` com Mongo + Pulsar).
 As dependências web, data-mongodb e pulsar do `platform-spring` são opcionais: o serviço declara as
 que usa. Todo serviço novo ganha uma rota em `services/gateway/.../Routes.java`, não publica porta

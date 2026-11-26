@@ -13,18 +13,6 @@ spring:
       service-url: ${PULSAR_URL:pulsar://localhost:6650}
     admin:
       service-url: ${PULSAR_ADMIN_URL:http://localhost:8080}
-  cloud:
-    gateway:
-      server:
-        webflux:
-          # CORS para o frontend em desenvolvimento (Vite) e no preview.
-          globalcors:
-            cors-configurations:
-              "[/**]":
-                allowed-origins: ${CORS_ORIGINS:http://localhost:5173,http://localhost:4173}
-                allowed-methods: [GET, POST, PATCH, PUT, DELETE, OPTIONS]
-                allowed-headers: ["*"]
-                exposed-headers: [Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining, Location]
 
 management:
   endpoints:
@@ -38,6 +26,8 @@ management:
 
 plataforma:
   gateway:
+    # CORS do frontend em desenvolvimento (Vite) e no preview; vale para todas as respostas.
+    cors-origins: ${CORS_ORIGINS:http://localhost:5173,http://localhost:4173}
     # O navegador obtém o token em localhost:8180; o gateway busca as chaves pelo endereço interno.
     issuer: ${KEYCLOAK_ISSUER:http://localhost:8180/realms/plataforma}
     jwk-set-uri: ${KEYCLOAK_JWKS:http://localhost:8180/realms/plataforma/protocol/openid-connect/certs}

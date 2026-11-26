@@ -35,13 +35,14 @@ public class WriterSchemaResolver {
     return cache.computeIfAbsent(
         new Key(topic, version),
         k -> {
+          String json;
           try {
-            return new Schema.Parser().parse(source.schemaJson(k.topic(), k.version()));
-          } catch (RuntimeException e) {
-            throw e;
+            json = source.schemaJson(k.topic(), k.version());
           } catch (Exception e) {
-            throw new IllegalStateException("Falha ao buscar o schema de " + k.topic(), e);
+            throw new SchemaLookupException(
+                "Falha ao buscar o schema v" + k.version() + " de " + k.topic(), e);
           }
+          return new Schema.Parser().parse(json);
         });
   }
 }

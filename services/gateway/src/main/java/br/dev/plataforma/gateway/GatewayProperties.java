@@ -57,7 +57,18 @@ public record GatewayProperties(
    * @param perSecond reposição de fichas por segundo
    * @param burst capacidade do balde (rajada máxima)
    */
-  public record Limit(int perSecond, int burst) {}
+  public record Limit(int perSecond, int burst) {
+    public Limit {
+      if (perSecond < 1 || burst < 1) {
+        throw new IllegalArgumentException(
+            "Limite inválido (per-second="
+                + perSecond
+                + ", burst="
+                + burst
+                + "): os dois devem ser ≥ 1");
+      }
+    }
+  }
 
   /**
    * @param events liga a leitura de tenant.criado e tenant.alterado no Pulsar
