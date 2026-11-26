@@ -88,10 +88,39 @@ class EventCatalogTest {
   @ParameterizedTest(name = "{0}")
   @MethodSource("eventos")
   void enumsTemDefaultParaConsumidoresAntigos(EventContract contrato) {
-    contrato.schema().getFields().stream()
-        .map(f -> f.schema())
-        .filter(s -> s.getType() == Schema.Type.ENUM)
-        .forEach(s -> assertThat(s.getEnumDefault()).as(s.getFullName()).isNotNull());
+    java.util.List<Schema> enums = new java.util.ArrayList<>();
+    coletarEnums(contrato.schema(), enums, new java.util.HashSet<>());
+    enums.forEach(s -> assertThat(s.getEnumDefault()).as(s.getFullName()).isNotNull());
+  }
+
+  /** Percorre records, uniões, arrays e mapas atrás de enums. */
+  private static void coletarEnums(Schema s, java.util.List<Schema> enums, Set<String> vistos) {
+    switch (s.getType()) {
+      case ENUM -> enums.add(s);
+      case RECORD -> {
+        if (vistos.add(s.getFullName())) {
+          s.getFields().forEach(f -> coletarEnums(f.schema(), enums, vistos));
+        }
+      }
+      case UNION -> s.getTypes().forEach(t -> coletarEnums(t, enums, vistos));
+      case ARRAY -> coletarEnums(s.getElementType(), enums, vistos);
+      case MAP -> coletarEnums(s.getValueType(), enums, vistos);
+      default -> {}
+    }
+  }
+
+  @Test
+  void verificacaoDeEnumsEnxergaUniaoArrayEMapa() {
+    Schema s =
+        new Schema.Parser()
+            .parse(
+                "{\"type\":\"record\",\"name\":\"R\",\"fields\":["
+                    + "{\"name\":\"u\",\"type\":[\"null\",{\"type\":\"enum\",\"name\":\"A\",\"symbols\":[\"X\"]}]},"
+                    + "{\"name\":\"l\",\"type\":{\"type\":\"array\",\"items\":{\"type\":\"enum\",\"name\":\"B\",\"symbols\":[\"X\"]}}},"
+                    + "{\"name\":\"m\",\"type\":{\"type\":\"map\",\"values\":{\"type\":\"enum\",\"name\":\"C\",\"symbols\":[\"X\"]}}}]}");
+    java.util.List<Schema> enums = new java.util.ArrayList<>();
+    coletarEnums(s, enums, new java.util.HashSet<>());
+    assertThat(enums).extracting(Schema::getName).containsExactly("A", "B", "C");
   }
 
   @Test

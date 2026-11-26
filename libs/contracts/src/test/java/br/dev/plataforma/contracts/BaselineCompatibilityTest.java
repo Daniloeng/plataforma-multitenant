@@ -2,6 +2,7 @@ package br.dev.plataforma.contracts;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -74,10 +75,10 @@ class BaselineCompatibilityTest {
         .toList();
   }
 
+  /** Lê o tipo de topo do arquivo como JSON (sem depender da formatação). */
   private static boolean isEnum(Path p) {
     try {
-      return Files.readString(p).contains("\"type\": \"enum\"")
-          && !Files.readString(p).contains("\"type\": \"record\"");
+      return "enum".equals(new ObjectMapper().readTree(p.toFile()).path("type").asText());
     } catch (IOException e) {
       throw new IllegalStateException(e);
     }

@@ -23,6 +23,10 @@ import org.apache.avro.Schema;
  */
 public final class EventCatalog {
 
+  static {
+    AvroTrust.trustContracts();
+  }
+
   private static final EventCatalog DEFAULT =
       new EventCatalog(
           List.of(

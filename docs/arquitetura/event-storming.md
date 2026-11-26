@@ -44,9 +44,12 @@ flowchart LR
     G2([pagamento.recusado])
     G3([pagamento.estornado])
   end
+  GW[[Gateway]]
   T1 -- provisiona dados iniciais --> CAT
-  T2 -- atualiza cache de tenants --> PED
-  T2 -- atualiza cache de tenants --> PAG
+  T1 & T2 -- cache de tenants --> PED
+  T1 & T2 -- cache de tenants --> PAG
+  T1 & T2 -- cache de tenants --> GW
+  T2 -- cache de tenants --> CAT
   C1 -- projeção local de produtos --> PED
   C2 -- atualiza preço de referência --> PED
   P1 -- autoriza e captura --> PAG

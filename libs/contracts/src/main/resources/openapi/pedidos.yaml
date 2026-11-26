@@ -40,7 +40,9 @@ paths:
     get:
       tags: [pedidos]
       operationId: listarPedidos
+      description: Comprador vê só os pedidos do próprio cliente; gestor-tenant vê todos.
       parameters:
+        - $ref: '_comum.yaml#/components/parameters/ClienteIdOpcional'
         - $ref: '_comum.yaml#/components/parameters/Cursor'
         - $ref: '_comum.yaml#/components/parameters/Limite'
         - name: status
@@ -69,6 +71,9 @@ paths:
     get:
       tags: [pedidos]
       operationId: obterPedido
+      description: Pedido de outro cliente responde 404 para o comprador.
+      parameters:
+        - $ref: '_comum.yaml#/components/parameters/ClienteIdOpcional'
       responses:
         '200':
           description: Pedido.
@@ -87,6 +92,9 @@ paths:
       tags: [pedidos]
       operationId: cancelarPedido
       summary: Cancela o pedido e publica pedido.cancelado (gera estorno se já capturado)
+      description: Comprador só cancela pedido do próprio cliente; o de outro cliente responde 404.
+      parameters:
+        - $ref: '_comum.yaml#/components/parameters/ClienteIdOpcional'
       responses:
         '200':
           description: Pedido cancelado.

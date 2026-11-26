@@ -25,6 +25,15 @@ components:
         cliente_id do JWT; nunca vem do corpo (ADR-0007).
       schema:
         type: string
+    ClienteIdOpcional:
+      name: X-Cliente-Id
+      in: header
+      required: false
+      description: >-
+        Presente quando o usuário é um comprador (claim cliente_id). Quando presente, o serviço
+        restringe a operação aos pedidos desse cliente; ausente só para o papel gestor-tenant.
+      schema:
+        type: string
     IdempotencyKey:
       name: Idempotency-Key
       in: header

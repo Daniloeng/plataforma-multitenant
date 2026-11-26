@@ -19,7 +19,8 @@ export interface Adr {
 }
 
 const HEADING = /^#{2,3}\s+(.+?)\s*#*\s*$/;
-const FENCE_OPEN = /^\s*(`{3,}|~{3,})\s*mermaid\s*$/i;
+// Qualquer abertura de bloco de código; o grupo 2 é a linguagem (info string).
+const FENCE_OPEN = /^\s*(`{3,}|~{3,})\s*([\w-]*)/;
 
 /**
  * Extrai os blocos ```mermaid de um Markdown, cada um com o título do heading ## ou ###
@@ -30,15 +31,23 @@ export function extractMermaidBlocks(markdown: string): MermaidBlock[] {
   const blocks: MermaidBlock[] = [];
   let heading: string | undefined;
   let fence: string | undefined;
+  let isMermaid = false;
   let buffer: string[] = [];
 
   for (const line of lines) {
     if (fence !== undefined) {
-      if (line.trim().startsWith(fence) && line.trim().replace(/[`~]/g, '') === '') {
-        blocks.push({ title: heading ?? `Diagrama ${blocks.length + 1}`, code: buffer.join('\n') });
+      // Dentro de qualquer bloco de código: headings e aberturas aninhadas não contam.
+      const trimmed = line.trim();
+      if (trimmed.startsWith(fence) && trimmed.replace(/[`~]/g, '') === '') {
+        if (isMermaid) {
+          blocks.push({
+            title: heading ?? `Diagrama ${blocks.length + 1}`,
+            code: buffer.join('\n'),
+          });
+        }
         fence = undefined;
         buffer = [];
-      } else {
+      } else if (isMermaid) {
         buffer.push(line);
       }
       continue;
@@ -46,6 +55,7 @@ export function extractMermaidBlocks(markdown: string): MermaidBlock[] {
     const open = FENCE_OPEN.exec(line);
     if (open) {
       fence = open[1];
+      isMermaid = (open[2] ?? '').toLowerCase() === 'mermaid';
       continue;
     }
     const h = HEADING.exec(line);

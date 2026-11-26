@@ -24,6 +24,11 @@ import org.junit.jupiter.api.Test;
 /** As classes geradas serializam e deserializam sem perda (o que o Pulsar fará com AVRO). */
 class SerializationTest {
 
+  @org.junit.jupiter.api.BeforeAll
+  static void confiarNosContratos() {
+    AvroTrust.trustContracts();
+  }
+
   private static final Instant AGORA = Instant.now().truncatedTo(ChronoUnit.MILLIS);
 
   @SuppressWarnings("unchecked")

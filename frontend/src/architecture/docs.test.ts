@@ -3,6 +3,25 @@ import { basename, extractMermaidBlocks, parseAdr, parseAdrs } from './docs';
 import { ADRS, DIAGRAMS } from './sources';
 
 describe('extractMermaidBlocks', () => {
+  it('ignora headings e mermaid aninhado dentro de outros blocos de código', () => {
+    const md = [
+      '## Diagrama real',
+      '```bash',
+      '## passo 2',
+      'echo oi',
+      '```',
+      '````markdown',
+      '```mermaid',
+      'graph TD; X-->Y',
+      '```',
+      '````',
+      '```mermaid',
+      'graph TD; A-->B',
+      '```',
+    ].join('\n');
+    expect(extractMermaidBlocks(md)).toEqual([{ title: 'Diagrama real', code: 'graph TD; A-->B' }]);
+  });
+
   it('extrai só os blocos mermaid com o heading anterior', () => {
     expect(extractMermaidBlocks(EVENT_STORMING_MD)).toEqual([
       {

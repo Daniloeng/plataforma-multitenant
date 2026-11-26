@@ -139,4 +139,16 @@ class OpenApiContractsTest {
         .extracting(Parameter::getName)
         .contains("Idempotency-Key", "X-Cliente-Id");
   }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"pedidos.yaml"})
+  void todaOperacaoDePedidosRecebeOClienteParaChecarDono(String arquivo) {
+    OpenAPI api = parse(arquivo);
+    for (Operation op : operacoes(api)) {
+      assertThat(op.getParameters())
+          .as(op.getOperationId())
+          .extracting(Parameter::getName)
+          .contains("X-Cliente-Id");
+    }
+  }
 }
