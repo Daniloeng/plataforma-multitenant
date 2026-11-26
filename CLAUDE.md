@@ -1,0 +1,53 @@
+# CLAUDE.md
+
+Guia para o Claude Code (e para quem chega ao repositório). Projeto de **estudo**: plataforma
+multi-tenant de pedidos B2B + pagamentos em microsserviços. O plano de 22 dias está no
+[README](README.md#plano-de-22-dias).
+
+## Idioma e estilo
+- Textos para pessoas (README, docs, mensagens de commit, PRs, UI) em **português do Brasil**.
+- Código (nomes de classes, métodos, variáveis) em inglês; comentários e Javadoc em português.
+- Commits no formato Conventional Commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `ci:`).
+
+## Estrutura
+```
+libs/platform-core/       tipos compartilhados (TenantId, IsolationLevel), sem Spring
+services/status-service/  Spring Boot: saúde de MongoDB x4 e Pulsar em GET /api/status (porta 8090)
+frontend/                 React + Vite + TS; modo demo com MSW (GitHub Pages)
+infra/                    Docker Compose (MongoDB por serviço, Pulsar standalone) e scripts
+docs/dias/NN.md           diário detalhado de cada dia
+.claude/                  hooks e configurações do Claude Code versionadas
+```
+Novos microsserviços entram em `services/<nome>-service`, como módulo do `pom.xml` raiz.
+
+## Comandos
+| O quê | Comando |
+|---|---|
+| Testes + cobertura backend (≥ 80%) | `mvn -B verify` (precisa de Docker: Testcontainers) |
+| Um módulo só | `mvn -B verify -pl services/status-service -am` |
+| Formatar Java | `mvn spotless:apply` |
+| Frontend | `cd frontend && npm ci && npm run test:coverage && npm run typecheck && npm run format:check` |
+| Ambiente local | `docker compose -f infra/docker-compose.yml up -d --build --wait` |
+| Frontend com API real | `cd frontend && npm run dev` (proxy `/api` → `localhost:8090`) |
+| Frontend em modo demo | `cd frontend && VITE_DEMO=true npm run dev` |
+
+## Regras do projeto
+- **Cobertura mínima de 80%** de linhas por módulo Java (JaCoCo) e no frontend (Vitest, 4 métricas).
+  O CI falha abaixo disso. Toda funcionalidade nova chega com testes unitários e, quando tocar
+  infraestrutura, teste de integração com Testcontainers (classes `*IT`, rodam no `mvn verify`).
+- **Multi-tenant**: o tenant vem só do cabeçalho `X-Tenant-Id` injetado pelo gateway (a partir do
+  Dia 4), nunca do corpo da requisição. Use `TenantId` (valida o formato) em vez de `String`.
+- **Banco por serviço**: um serviço nunca lê o MongoDB de outro; integração só por eventos Pulsar
+  ou API.
+- **Eventos**: tópicos `persistent://plataforma/<dominio>/<entidade>.<evento>.v1`; todo evento
+  carrega `eventId`, `tenantId`, `occurredAt` e `traceparent`.
+- **Custo zero até o Dia 10**: só ferramentas gratuitas; nada de serviços pagos.
+- **Formatação**: google-java-format (Spotless, conferido no `validate`) e Prettier no frontend.
+  O hook `.claude/hooks/format.sh` formata cada arquivo que o Claude edita.
+
+## Fluxo de cada dia
+1. Branch a partir da `main`, PR com testes passando no CI.
+2. Code review (`/code-review`) e merge quando o CI estiver verde; tag `dia-NN`.
+3. Atualizar o **Diário de bordo** do README e criar `docs/dias/NN.md` (o que foi feito, por quê,
+   como testar, recursos do Claude Code usados).
+4. O frontend publicado no GitHub Pages precisa mostrar a funcionalidade do dia.

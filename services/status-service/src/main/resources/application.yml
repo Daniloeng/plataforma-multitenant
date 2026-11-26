@@ -1,0 +1,40 @@
+server:
+  port: 8090
+  shutdown: graceful
+
+spring:
+  application:
+    name: status-service
+  threads:
+    virtual:
+      enabled: true
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+plataforma:
+  status:
+    version: "@project.version@"
+    timeout: 2s
+    mongo:
+      - name: mongo-tenants
+        uri: ${MONGO_TENANTS_URI:mongodb://localhost:27017/?directConnection=true}
+      - name: mongo-catalogo
+        uri: ${MONGO_CATALOGO_URI:mongodb://localhost:27018/?directConnection=true}
+      - name: mongo-pedidos
+        uri: ${MONGO_PEDIDOS_URI:mongodb://localhost:27019/?directConnection=true}
+      - name: mongo-pagamentos
+        uri: ${MONGO_PAGAMENTOS_URI:mongodb://localhost:27020/?directConnection=true}
+    pulsar:
+      name: pulsar
+      admin-url: ${PULSAR_ADMIN_URL:http://localhost:8080}
