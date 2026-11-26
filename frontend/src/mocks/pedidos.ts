@@ -22,6 +22,7 @@ import {
 import type { Tenant } from '../api/tenants';
 import { catalogoSnapshot } from './catalogo';
 import { clienteIdOf, guard, problemResponse } from './gateway';
+import { respostaSeEmMigracao } from './isolamento';
 
 type SeedItem = readonly [sku: string, quantidade: number];
 /**
@@ -365,6 +366,8 @@ function acesso(request: Request, criar = false): Acesso {
   const result = guard(request, { rateLimit: true });
   if ('response' in result) return result;
   if (!result.tenant) return { response: invalida('O cabeçalho X-Tenant-Id é obrigatório.') };
+  const migrando = respostaSeEmMigracao(result.tenant.id);
+  if (migrando) return { response: migrando };
   const { user, tenant } = result;
   const clienteId = clienteIdOf(user);
   const comprador = podeComprar(user.papeis, clienteId);

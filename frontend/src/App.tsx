@@ -25,7 +25,7 @@ const PAGES: Record<Route, { tab: string; title: string; footer: string }> = {
     tab: 'Tenants',
     title: 'Tenants',
     footer:
-      'Dados do tenant-service pelo gateway (GET, POST e PATCH em /api/v1/tenants, papel plataforma-admin).',
+      'Dados do tenant-service pelo gateway (GET, POST e PATCH em /api/v1/tenants e POST em /api/v1/tenants/{id}/promocao, papel plataforma-admin).',
   },
   produtos: {
     tab: 'Produtos',

@@ -3,10 +3,10 @@ import { ROADMAP } from '../data/roadmap';
 import { RoadmapSection } from './RoadmapSection';
 
 describe('RoadmapSection', () => {
-  it('lista status-service, Tenants, Gateway, Catálogo, Pedidos, Pagamentos e Saga ativos e os níveis de isolamento planejados', () => {
+  it('lista do status-service aos níveis de isolamento ativos e a observabilidade planejada', () => {
     render(<RoadmapSection />);
     const items = screen.getAllByRole('listitem');
-    expect(items).toHaveLength(8);
+    expect(items).toHaveLength(9);
 
     const status = screen.getByRole('listitem', { name: 'status-service' });
     expect(status).toHaveTextContent('Dia 1');
@@ -51,8 +51,13 @@ describe('RoadmapSection', () => {
 
     const niveis = screen.getByRole('listitem', { name: 'Níveis de isolamento' });
     expect(niveis).toHaveTextContent('Dia 9');
-    expect(within(niveis).getByText('Planejado')).toHaveClass('pill--planned');
+    expect(within(niveis).getByText('Ativo')).toHaveClass('pill--up');
     expect(niveis).toHaveTextContent('Pool, Bridge ou Silo');
+
+    const observabilidade = screen.getByRole('listitem', { name: 'Observabilidade' });
+    expect(observabilidade).toHaveTextContent('Dia 10');
+    expect(within(observabilidade).getByText('Planejado')).toHaveClass('pill--planned');
+    expect(observabilidade).toHaveTextContent('OpenTelemetry, Prometheus e Grafana');
   });
 
   it('cada serviço tem responsabilidade em uma frase', () => {

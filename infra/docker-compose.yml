@@ -124,6 +124,7 @@ services:
     environment:
       MONGO_URI: mongodb://mongo-tenants:27017/tenants?replicaSet=rs-tenants
       PULSAR_URL: pulsar://pulsar:6650
+      PULSAR_ADMIN_URL: http://pulsar:8080
     depends_on:
       mongo-tenants: { condition: service_healthy }
       pulsar: { condition: service_healthy }

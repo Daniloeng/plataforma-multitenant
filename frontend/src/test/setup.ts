@@ -8,6 +8,7 @@ import { resetTenantStore } from '../mocks/tenants';
 import { resetCatalogoStore } from '../mocks/catalogo';
 import { resetPedidosStore } from '../mocks/pedidos';
 import { resetPagamentosStore } from '../mocks/pagamentos';
+import { resetIsolamentoStore } from '../mocks/isolamento';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => {
@@ -21,6 +22,8 @@ afterEach(() => {
   resetPedidosStore();
   // ... e os pagamentos, o ledger e a agenda de cobranças do gateway simulado.
   resetPagamentosStore();
+  // ... e as migrações de nível em andamento (Dia 9).
+  resetIsolamentoStore();
   // Sessão (token de demo, tenant escolhido) e baldes do rate limit também recomeçam.
   resetRateLimits();
   window.sessionStorage.clear();

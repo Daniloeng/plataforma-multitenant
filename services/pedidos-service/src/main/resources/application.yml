@@ -38,3 +38,11 @@ management:
 plataforma:
   # Contexto produtor (x-produtor) e prefixo das assinaturas: pedidos-produto-alterado, ...
   service: pedidos
+  # Database por tenant (ADR-0014): BRIDGE e SILO ficam em pedidos_t_<tenant>. O outbox e a
+  # deduplicação continuam na database padrão.
+  isolation:
+    enabled: true
+    collections:
+      - pedidos
+      - produtos
+      - tenants

@@ -1,5 +1,6 @@
 package br.dev.plataforma.tenants;
 
+import br.dev.plataforma.spring.web.ForbiddenException;
 import com.mongodb.MongoException;
 import java.net.URI;
 import java.util.stream.Collectors;
@@ -53,6 +54,16 @@ public class ApiErrors extends ResponseEntityExceptionHandler {
         "conflito",
         "Alteração concorrente",
         "O tenant mudou durante a alteração; leia de novo e repita.");
+  }
+
+  @ExceptionHandler(ForbiddenException.class)
+  ProblemDetail forbidden(ForbiddenException e) {
+    return problem(HttpStatus.FORBIDDEN, "acesso-negado", "Acesso negado", e.getMessage());
+  }
+
+  @ExceptionHandler(TenantExceptions.InvalidLevel.class)
+  ProblemDetail invalidLevel(TenantExceptions.InvalidLevel e) {
+    return problem(HttpStatus.CONFLICT, "nivel-invalido", "Nível inválido", e.getMessage());
   }
 
   @ExceptionHandler(TenantExceptions.LevelChangeNotSupported.class)

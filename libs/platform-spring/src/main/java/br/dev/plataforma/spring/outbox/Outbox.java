@@ -2,6 +2,7 @@ package br.dev.plataforma.spring.outbox;
 
 import br.dev.plataforma.contracts.EventCatalog;
 import br.dev.plataforma.contracts.EventContract;
+import br.dev.plataforma.spring.isolation.PlatformDatabase;
 import java.time.Instant;
 import org.apache.avro.specific.SpecificRecord;
 import org.bson.types.ObjectId;
@@ -71,7 +72,9 @@ public class Outbox {
             null,
             0,
             null);
-    return mongo.insert(message);
+    // O outbox fica na database padrão mesmo para tenant com database dedicada (ADR-0014): o relay
+    // lê um lugar só.
+    return PlatformDatabase.call(() -> mongo.insert(message));
   }
 
   private static Object field(SpecificRecord event, String name) {

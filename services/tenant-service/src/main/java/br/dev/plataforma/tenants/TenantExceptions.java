@@ -24,7 +24,22 @@ final class TenantExceptions {
       super(
           "O nível de isolamento de '"
               + id
-              + "' não muda por PATCH: a migração entre níveis chega no Dia 9.");
+              + "' não muda por PATCH: use POST /api/v1/tenants/"
+              + id
+              + "/promocao.");
+    }
+  }
+
+  static final class InvalidLevel extends RuntimeException {
+    InvalidLevel(String id, Object atual, Object pedido) {
+      super(
+          "O tenant '"
+              + id
+              + "' está em "
+              + atual
+              + ": a promoção só sobe de nível (POOL → BRIDGE → SILO), e "
+              + pedido
+              + " não é maior.");
     }
   }
 

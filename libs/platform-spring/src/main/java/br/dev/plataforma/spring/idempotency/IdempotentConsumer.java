@@ -1,6 +1,7 @@
 package br.dev.plataforma.spring.idempotency;
 
 import br.dev.plataforma.core.TenantId;
+import br.dev.plataforma.spring.isolation.PlatformDatabase;
 import java.time.Clock;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.mongodb.core.MongoOperations;
@@ -40,12 +41,21 @@ public class IdempotentConsumer {
     // Consulta antes de inserir: um DuplicateKeyException dentro da transação do MongoDB aborta a
     // transação inteira. A chave única continua protegendo a corrida entre duas entregas
     // simultâneas (aí o commit de uma delas falha e o Pulsar reentrega).
-    if (mongo.exists(Query.query(Criteria.where("_id").is(id)), ProcessedEvent.class)) {
-      return false;
-    }
-    try {
-      mongo.insert(new ProcessedEvent(id, tenant, consumer, eventId, clock.instant()));
-    } catch (DuplicateKeyException e) {
+    // Na database padrão, mesmo com o tenant numa dedicada (ADR-0014).
+    boolean novo =
+        PlatformDatabase.call(
+            () -> {
+              if (mongo.exists(Query.query(Criteria.where("_id").is(id)), ProcessedEvent.class)) {
+                return false;
+              }
+              try {
+                mongo.insert(new ProcessedEvent(id, tenant, consumer, eventId, clock.instant()));
+              } catch (DuplicateKeyException e) {
+                return false;
+              }
+              return true;
+            });
+    if (!novo) {
       return false;
     }
     effect.run();

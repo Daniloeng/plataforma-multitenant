@@ -28,6 +28,10 @@ public class TenantService {
 
   static final int MAX_PAGE = 100;
 
+  /** Ordem explícita dos níveis: um símbolo novo no enum Avro não muda a regra "só sobe". */
+  static final List<NivelIsolamento> ORDEM =
+      List.of(NivelIsolamento.POOL, NivelIsolamento.BRIDGE, NivelIsolamento.SILO);
+
   private final MongoOperations mongo;
   private final Outbox outbox;
   private final Clock clock;
@@ -73,8 +77,7 @@ public class TenantService {
     }
     String id = parseId(rawId);
     TenantDocument current = find(id);
-    // Mudar de nível move os dados do tenant (outra database ou cluster): é um job de migração
-    // (ADR-0005, Dia 9), não um PATCH. Até lá, o nível só é escolhido na criação.
+    // Mudar de nível move os dados do tenant: é a promoção (ADR-0014), não um PATCH.
     if (change.nivelIsolamento() != null && change.nivelIsolamento() != current.nivelIsolamento()) {
       throw new TenantExceptions.LevelChangeNotSupported(id);
     }
@@ -90,6 +93,30 @@ public class TenantService {
       // Nada mudou: não grava nem emite tenant.alterado (evita invalidar caches à toa).
       return TenantView.of(current);
     }
+    return saveAndPublish(changed);
+  }
+
+  /**
+   * Sobe o nível de isolamento (ADR-0014). Só sobe: rebaixar exigiria juntar de volta dados que já
+   * moraram sozinhos, e não há caso de negócio para isso. Os serviços com dados do tenant migram ao
+   * receber o tenant.alterado.
+   */
+  @Transactional
+  public TenantView promote(String rawId, NivelIsolamento nivel) {
+    if (nivel == null) {
+      throw new TenantExceptions.InvalidRequest("Informe o nivelIsolamento de destino.");
+    }
+    String id = parseId(rawId);
+    TenantDocument current = find(id);
+    if (ORDEM.indexOf(nivel) <= ORDEM.indexOf(current.nivelIsolamento())) {
+      throw new TenantExceptions.InvalidLevel(id, current.nivelIsolamento(), nivel);
+    }
+    return saveAndPublish(current.withChanges(new TenantChange(null, null, nivel, null), now()));
+  }
+
+  private TenantView saveAndPublish(TenantDocument changed) {
+    String id = changed.id();
+    Instant now = changed.atualizadoEm();
     // save() com @Version: se outra alteração gravou antes, lança OptimisticLockingFailure (409).
     TenantDocument saved = mongo.save(changed);
     outbox.append(

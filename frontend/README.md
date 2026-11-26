@@ -5,13 +5,15 @@ cabeçalho, login (Keycloak) e troca de tenant:
 
 - **Status** (`#/`): status do `status-service` (`GET /api/status`, atualizado a cada 10 s), o
   roadmap dos microsserviços e o progresso do estudo.
-- **Tenants** (`#/tenants`): administração do catálogo de tenants — cria, lista, suspende e
-  reativa tenants pelo Tenant Service (`/api/v1/tenants`). Só para o papel `plataforma-admin`.
+- **Tenants** (`#/tenants`): administração do catálogo de tenants — cria, lista, suspende,
+  reativa e **promove de nível de isolamento** (Pool → Bridge → Silo, Dia 9) pelo Tenant Service
+  (`/api/v1/tenants`). Só para o papel `plataforma-admin`.
 - **Produtos** (`#/produtos`): catálogo do tenant escolhido no cabeçalho (`/api/v1/produtos`).
   Gestores cadastram, mudam preço, renomeiam e ativam/desativam; compradores montam o carrinho.
 - **Pedidos** (`#/pedidos` e `#/pedidos/<id>`): pedidos do tenant (`/api/v1/pedidos`) — o comprador
   vê os do próprio cliente, o gestor vê os de todos; detalhe (com a situação do pagamento e a
-  **linha do tempo** da saga, ao vivo por SSE) e cancelamento.
+  **linha do tempo** da saga, ao vivo por SSE) e cancelamento. Para gestor e admin, onde os pedidos
+  do tenant ficam guardados (database compartilhada ou dedicada, Dia 9).
 - **Pagamentos** (`#/pagamentos`): o financeiro do tenant — saldo (receita líquida), pagamentos e o
   extrato do ledger (`/api/v1/pagamentos` e `/api/v1/ledger/lancamentos`). Só para `gestor-tenant` e
   `plataforma-admin`.
@@ -56,13 +58,24 @@ docker compose -f infra/docker-compose.yml up -d --build --wait
 - **Seletor de tenant**: lista os `tenants` de `GET /api/v1/me`; o escolhido fica no
   `sessionStorage` e vai no `X-Tenant-Id`. Tenant suspenso aparece desabilitado ("— Suspenso"); se
   o usuário só tem um tenant, ele é selecionado sozinho. Abaixo, o plano e o limite do gateway:
-  Gratuito 5 req/s, Profissional 20 req/s, Empresarial 50 req/s (rajada = 2x).
+  Gratuito 5 req/s, Profissional 20 req/s, Empresarial 50 req/s (rajada = 2x), e o **selo do nível
+  de isolamento** (`nivelIsolamento` do `/me`, `src/components/isolamento/NivelSelo.tsx`): "Pool"
+  (cinza), "Bridge" (azul) ou "Silo" (roxo), com `title` e texto para leitor de tela explicando o
+  nível ("Pool: dados compartilhados, filtrados por tenant"; "Bridge: database e namespace Pulsar
+  dedicados"; "Silo: isolamento máximo"). O mesmo selo aparece em cada linha da página Tenants.
 - **Cabeçalhos**: `src/api/http.ts` (`apiFetch`) injeta `Authorization: Bearer <token>` e
   `X-Tenant-Id` a partir do _session provider_ que o `AuthProvider` registra. `GET /api/status`
   não leva token; `/api/v1/me` (que define os tenants) e `/api/v1/tenants` (administrativa) não
   levam `X-Tenant-Id`.
 - **Erros do gateway** (Problem Details): 401 encerra a sessão e pede login de novo ("Sua sessão
   expirou"); 403 e 429 mostram o `detail` (ex.: "Esta operação exige o papel plataforma-admin.").
+- **Tenant em migração** (Dia 9): enquanto os serviços migram os dados de um tenant promovido, as
+  APIs de negócio dele respondem 503 `tenant-em-migracao` com `Retry-After`. O tratamento é central:
+  `toApiError` (`src/api/http.ts`) troca o `detail` por "Os dados deste tenant estão sendo migrados
+  para outro nível; tente de novo em instantes." (o `ApiError` continua com `problemType` e
+  `retryAfterSeconds`; `isTenantEmMigracao(erro)` reconhece o caso). Nas listas de Produtos, Pedidos
+  e Pagamentos, o `ErroDeCarga` (`src/components/ErroDeCarga.tsx`) mostra essa mensagem num aviso
+  amarelo com "Tentar de novo", no lugar da dica de subir o ambiente.
 - **Testar limite** (Minha conta): dispara a rajada do plano + 20 requisições simultâneas (mínimo 30) a `GET /api/v1/me` com o `X-Tenant-Id` selecionado e mostra quantas deram 200 e quantas 429
   (e o `Retry-After`).
 
@@ -97,12 +110,20 @@ simulados. A página exibe o selo "Modo demo (API simulada)".
 - `/api/v1/pagamentos`, `/api/v1/pagamentos/:id` e `/api/v1/ledger/lancamentos`
   (`src/mocks/pagamentos.ts`): pagamentos-service simulado, atrás do gateway simulado (403
   `acesso-negado` para quem não é gestor ou admin). Veja [Página Pagamentos](#página-pagamentos-e-extrato).
+- **Migração de nível** (`src/mocks/isolamento.ts`, Dia 9): `POST /api/v1/tenants/:id/promocao`
+  muda o nível no store de tenants (o `/api/v1/me` passa a mostrá-lo) e começa a migração simulada,
+  que dura 1,5 s (`MIGRACAO_MS`). Como nas cobranças, não há `setTimeout`: o fim é conferido a cada
+  requisição (`migrandoAgora`). Durante a migração, produtos, pedidos, pagamentos e ledger daquele
+  tenant respondem 503 `tenant-em-migracao` com `Retry-After: 1`, e `GET /api/v1/isolamento/pedidos`
+  responde `situacao: MIGRANDO`; depois, `PRONTO` com a database `pedidos_t_<tenant>` e o
+  `migradoEm`. Tenants em Pool respondem a database compartilhada `pedidos`.
 - `/api/v1/tenants` e `/api/v1/tenants/:id` (`src/mocks/tenants.ts`): store em memória
-  pré-populado com 5 tenants fictícios (Pool, Bridge e Silo), com as mesmas regras do contrato —
+  pré-populado com 5 tenants fictícios (`atacado-vale-verde` em Bridge, `metalurgica-serra-azul` em
+  Silo e os demais em Pool), com as mesmas regras do contrato —
   400 em Problem Details (`application/problem+json`) para dados inválidos, 409 para id repetido,
   404 para tenant inexistente e paginação por cursor real (ordem: mais recentes primeiro; cursor =
   id do último item da página). O store vive só na aba do navegador: recarregar a página volta ao
-  estado inicial. Nos testes, `resetTenantStore()`, `resetCatalogoStore()`, `resetPedidosStore()`, `resetPagamentosStore()`, `resetRateLimits()` e a limpeza do
+  estado inicial. Nos testes, `resetTenantStore()`, `resetCatalogoStore()`, `resetPedidosStore()`, `resetPagamentosStore()`, `resetIsolamentoStore()`, `resetRateLimits()` e a limpeza do
   `sessionStorage` rodam depois de cada teste (`src/test/setup.ts`).
 
 ```bash
@@ -118,11 +139,12 @@ O service worker (`public/mockServiceWorker.js`) é gerado por `npx msw init pub
 Consome o contrato `libs/contracts/src/main/resources/openapi/tenants.yaml` (cliente e tipos em
 `src/api/tenants.ts`; URLs absolutas a partir do `BASE_URL`, como em `src/api/status.ts`).
 
-| Ação               | Chamada                                                | Na tela                                          |
-| ------------------ | ------------------------------------------------------ | ------------------------------------------------ |
-| Listar             | `GET api/v1/tenants?limite=20&cursor=…`                | tabela (cartões no celular) + "Carregar mais"    |
-| Criar              | `POST api/v1/tenants` → 201                            | formulário "Novo tenant"; entra no topo da lista |
-| Suspender/reativar | `PATCH api/v1/tenants/{id}` com `{ "ativo": … }` → 200 | botão em cada linha                              |
+| Ação               | Chamada                                                                  | Na tela                                          |
+| ------------------ | ------------------------------------------------------------------------ | ------------------------------------------------ |
+| Listar             | `GET api/v1/tenants?limite=20&cursor=…`                                  | tabela (cartões no celular) + "Carregar mais"    |
+| Criar              | `POST api/v1/tenants` → 201                                              | formulário "Novo tenant"; entra no topo da lista |
+| Suspender/reativar | `PATCH api/v1/tenants/{id}` com `{ "ativo": … }` → 200                   | botão em cada linha                              |
+| Promover de nível  | `POST api/v1/tenants/{id}/promocao` com `{ "nivelIsolamento": … }` → 200 | "Promover" em cada linha (Dia 9)                 |
 
 - O formulário valida no cliente com as mesmas regras do contrato e do `TenantId` de
   `libs/platform-core`: id com `^[a-z][a-z0-9-]{1,38}[a-z0-9]$` e sem `--`; nome de 2 a 120
@@ -132,6 +154,12 @@ Consome o contrato `libs/contracts/src/main/resources/openapi/tenants.yaml` (cli
   sem corpo, o código HTTP.
 - Datas em pt-BR no fuso `America/Sao_Paulo`, como na página Status.
 - Se a API estiver inacessível, a página explica como subir o tenant-service ou usar o modo demo.
+- **Promover** (Dia 9, `src/components/tenants/PromoverTenant.tsx`): abre, na própria linha, a
+  escolha entre os níveis acima do atual (Pool → Bridge ou Silo; Bridge → Silo; Silo mostra "Nível
+  máximo") e "Confirmar". Deu certo: o selo da linha muda, um aviso explica que os serviços migram
+  os dados em segundos (com 503 `tenant-em-migracao` enquanto isso) e o `/api/v1/me` é recarregado,
+  para o selo do cabeçalho mostrar o nível novo. Rebaixar ou repetir o nível dá 409 `nivel-invalido`,
+  mostrado com o `detail` acima da tabela. O PATCH continua recusando troca de nível (409).
 
 ## Página Produtos
 
@@ -167,13 +195,14 @@ recarrega a lista.
 Consome `libs/contracts/src/main/resources/openapi/pedidos.yaml` (cliente e tipos em
 `src/api/pedidos.ts`).
 
-| Ação     | Chamada                                                            | Quem                                |
-| -------- | ------------------------------------------------------------------ | ----------------------------------- |
-| Criar    | `POST api/v1/pedidos` com `Idempotency-Key` → 201 (ou 200 repete)  | comprador                           |
-| Listar   | `GET api/v1/pedidos?limite=20&cursor=…&status=…`                   | comprador (os seus), gestor (todos) |
-| Detalhe  | `GET api/v1/pedidos/{id}`                                          | comprador (os seus), gestor         |
-| Ao vivo  | `GET api/v1/pedidos/{id}/linha-do-tempo` (Server-Sent Events)      | comprador (os seus), gestor         |
-| Cancelar | `POST api/v1/pedidos/{id}/cancelamento` → 200; 409 se já cancelado | comprador (os seus), gestor         |
+| Ação       | Chamada                                                            | Quem                                |
+| ---------- | ------------------------------------------------------------------ | ----------------------------------- |
+| Criar      | `POST api/v1/pedidos` com `Idempotency-Key` → 201 (ou 200 repete)  | comprador                           |
+| Listar     | `GET api/v1/pedidos?limite=20&cursor=…&status=…`                   | comprador (os seus), gestor (todos) |
+| Detalhe    | `GET api/v1/pedidos/{id}`                                          | comprador (os seus), gestor         |
+| Ao vivo    | `GET api/v1/pedidos/{id}/linha-do-tempo` (Server-Sent Events)      | comprador (os seus), gestor         |
+| Cancelar   | `POST api/v1/pedidos/{id}/cancelamento` → 200; 409 se já cancelado | comprador (os seus), gestor         |
+| Isolamento | `GET api/v1/isolamento/pedidos` (Dia 9)                            | gestor / admin (comprador: 403)     |
 
 - **Carrinho** (só para `comprador`, na aba Produtos): cada produto ativo tem quantidade e
   "Adicionar ao carrinho". O resumo mostra os itens com quantidade editável (1 a 10.000), subtotal,
@@ -188,6 +217,12 @@ Consome `libs/contracts/src/main/resources/openapi/pedidos.yaml` (cliente e tipo
   (evita `chave-reutilizada`). Ao criar, o carrinho esvazia e a página abre `#/pedidos/<id>`.
 - **Erros** mostram o `detail` do Problem Details; `produto-indisponivel` (409) destaca o item citado
   no carrinho.
+- **Isolamento dos pedidos** (Dia 9, `src/components/isolamento/IsolamentoPedidos.tsx` e
+  `src/hooks/useIsolamentoPedidos.ts`): para gestor e admin, o cartão do tenant diz onde os pedidos
+  ficam — "Seus pedidos ficam na database compartilhada `pedidos` (Pool)" ou "Seus pedidos ficam na
+  database `pedidos_t_<tenant>` (Bridge)" — e quando foi a última migração. Com `situacao: MIGRANDO`
+  (ou um 503 `tenant-em-migracao` na própria consulta) mostra "Migrando dados…" e consulta de novo a
+  cada 1 s até `PRONTO`; no fim, a lista de pedidos recarrega sozinha.
 - **Lista**: data, cliente (só gestor), resumo dos itens, total em R$, selo de status (Pendente,
   Confirmado, Cancelado), filtro de status e "Carregar mais" pelo `proximoCursor`, do mais recente
   para o mais antigo.
@@ -317,6 +352,13 @@ Nos testes o módulo `mermaid` é sempre mockado (em `src/test/setup.ts`), porqu
 layout de SVG; cada teste pode forçar um erro com `vi.mocked(mermaid.render).mockRejectedValueOnce`.
 As funções de parse são testadas com fixtures (`src/test/architecture-fixtures.ts`), e há testes
 que leem os schemas e documentos reais do repositório.
+
+Os níveis de isolamento (Dia 9) têm testes do cliente (`src/api/isolamento.test.ts`, `promoteTenant`
+em `src/api/tenants.test.ts`, o 503 em `src/api/http.test.ts`), do mock com o relógio falso
+(`src/mocks/isolamento.test.ts`: regras de 409, `/me` atualizado, `MIGRANDO` por 1,5 s e o 503 nas
+APIs de negócio) e de tela (`src/pages/Isolamento.test.tsx` e `src/pages/TenantsPage.test.tsx`:
+selo no cabeçalho, promoção, "Migrando dados…" até a database dedicada e a mensagem da migração em
+Produtos, Pedidos e Pagamentos).
 
 A linha do tempo é testada em camadas: o parser SSE (`src/api/sse.test.ts`) com pedaços partidos,
 CRLF e UTF-8 cortado; o hook (`src/hooks/usePedidoAoVivo.test.ts`) com um `fetch` falso que devolve

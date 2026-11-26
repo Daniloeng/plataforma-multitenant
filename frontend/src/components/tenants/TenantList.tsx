@@ -1,5 +1,7 @@
 import type { UseTenants } from '../../hooks/useTenants';
 import { formatDateTime, NIVEL_ISOLAMENTO_LABEL, PLANO_LABEL } from '../../utils/format';
+import { NivelSelo } from '../isolamento/NivelSelo';
+import { PromoverTenant } from './PromoverTenant';
 
 const COMPOSE_COMMAND = 'docker compose -f infra/docker-compose.yml up -d --build --wait';
 
@@ -15,6 +17,8 @@ type Props = Pick<
   | 'reload'
   | 'loadMore'
   | 'setActive'
+  | 'promote'
+  | 'promoted'
 >;
 
 /** Lista de tenants: tabela no desktop, cartões no celular (via CSS), com paginação por cursor. */
@@ -29,6 +33,8 @@ export function TenantList({
   reload,
   loadMore,
   setActive,
+  promote,
+  promoted,
 }: Props) {
   return (
     <section className="section" aria-labelledby="tenants-title">
@@ -59,6 +65,17 @@ export function TenantList({
       {actionError ? (
         <div className="alert" role="alert">
           {actionError}
+        </div>
+      ) : null}
+
+      {promoted ? (
+        <div className="alert alert--info" role="status">
+          <strong>
+            <code>{promoted.id}</code> promovido para {NIVEL_ISOLAMENTO_LABEL[promoted.nivel]}.
+          </strong>{' '}
+          Os serviços migram os dados do tenant para o nível novo em segundos; enquanto isso, as
+          APIs de negócio desse tenant respondem 503 (<code>tenant-em-migracao</code>) e pedem para
+          tentar de novo em instantes.
         </div>
       ) : null}
 
@@ -102,9 +119,7 @@ export function TenantList({
                     </td>
                     <td data-label="Plano">{PLANO_LABEL[t.plano]}</td>
                     <td data-label="Nível">
-                      <span className={`pill pill--nivel-${t.nivelIsolamento.toLowerCase()}`}>
-                        {NIVEL_ISOLAMENTO_LABEL[t.nivelIsolamento]}
-                      </span>
+                      <NivelSelo nivel={t.nivelIsolamento} />
                     </td>
                     <td data-label="Situação">
                       <span className={`pill ${t.ativo ? 'pill--up' : 'pill--down'}`}>
@@ -118,6 +133,7 @@ export function TenantList({
                       </time>
                     </td>
                     <td className="tenants__acoes">
+                      <PromoverTenant tenant={t} pending={pending} onPromover={promote} />
                       <button
                         type="button"
                         className="button button--small button--secondary"

@@ -305,6 +305,61 @@ jobs:
           esperar_pedido "$caro" CANCELADO
           [ "$(campo 'd["motivoCancelamento"]')" = PAGAMENTO_RECUSADO ]
           pagamento "$caro" RECUSADO
+      - name: Promoção de nível pelo gateway (POOL → BRIDGE, database e namespace próprios)
+        run: |
+          token() {
+            curl -fsS http://localhost:8180/realms/plataforma/protocol/openid-connect/token \
+              -d grant_type=password -d client_id=plataforma-cli -d "username=$1" -d password=senha123 |
+              python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])'
+          }
+          ADMIN=$(token admin); ANA=$(token ana)
+          api() { curl -sS -o resp.json -w '%{http_code}' "$@"; }
+          promover() { api -X POST http://localhost:8000/api/v1/tenants/globex/promocao -H "Authorization: Bearer $1" -H 'Content-Type: application/json' -d "{\"nivelIsolamento\":\"$2\"}"; }
+          contar() { # database coleção: documentos do globex
+            docker compose -f infra/docker-compose.yml exec -T mongo-pedidos mongosh --quiet \
+              --eval "db.getSiblingDB('$1').$2.countDocuments({tenantId: 'globex'})"
+          }
+          # Cópia local do catálogo do globex (o seed criou 2 produtos), ainda na database padrão.
+          for i in $(seq 1 30); do [ "$(contar pedidos produtos)" -ge 2 ] && break; sleep 1; done
+          antes=$(contar pedidos produtos); echo "produtos do globex antes: $antes"
+          [ "$antes" -ge 2 ]
+          # Só o admin promove; repetir o nível é 409 nivel-invalido.
+          test "$(promover "$ANA" BRIDGE)" = 403
+          test "$(promover "$ADMIN" BRIDGE)" = 200
+          test "$(promover "$ADMIN" BRIDGE)" = 409
+          grep -q nivel-invalido resp.json
+          # O pedidos-service migra os dados do globex para a database dedicada.
+          for i in $(seq 1 30); do
+            test "$(api http://localhost:8000/api/v1/isolamento/pedidos -H "Authorization: Bearer $ANA" -H 'X-Tenant-Id: globex')" = 200
+            python3 -c 'import json; d=json.load(open("resp.json")); exit(0 if d["situacao"] == "PRONTO" and d["database"] == "pedidos_t_globex" else 1)' && break
+            sleep 1
+          done
+          cat resp.json; echo
+          python3 -c 'import json; d=json.load(open("resp.json")); assert d["nivel"] == "BRIDGE" and d["situacao"] == "PRONTO" and d["database"] == "pedidos_t_globex", d'
+          docker compose -f infra/docker-compose.yml exec -T mongo-pedidos mongosh --quiet --eval 'db.getMongo().getDBNames().join(" ")' | tee dbs.txt
+          grep -qw pedidos_t_globex dbs.txt
+          # Nada se perdeu nem ficou para trás: tudo do globex está só na database dedicada.
+          test "$(contar pedidos_t_globex produtos)" = "$antes"
+          test "$(contar pedidos produtos)" = 0
+          test "$(contar pedidos tenants)" = 0
+          # As APIs do tenant seguem funcionando, agora na database dedicada; acme fica no POOL.
+          test "$(api http://localhost:8000/api/v1/pedidos -H "Authorization: Bearer $ANA" -H 'X-Tenant-Id: globex')" = 200
+          test "$(api http://localhost:8000/api/v1/isolamento/pedidos -H "Authorization: Bearer $ANA" -H 'X-Tenant-Id: acme')" = 200
+          python3 -c 'import json; d=json.load(open("resp.json")); assert d["nivel"] == "POOL" and d["database"] == "pedidos", d'
+          # Namespace Pulsar próprio, com retenção e cota pelo plano.
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:8080/admin/v2/namespaces/plataforma | grep -q 'plataforma/t-globex' && break
+            sleep 1
+          done
+          curl -fsS http://localhost:8080/admin/v2/namespaces/plataforma/t-globex/retention | tee retencao.json; echo
+          python3 -c 'import json; assert json.load(open("retencao.json"))["retentionTimeInMinutes"] == 1440'
+          # O gateway aprende o nível novo pelo tenant.alterado e mostra no /me.
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:8000/api/v1/me -H "Authorization: Bearer $ANA" > me.json
+            python3 -c 'import json; m=json.load(open("me.json")); exit(0 if {t["id"]: t["nivelIsolamento"] for t in m["tenants"]}["globex"] == "BRIDGE" else 1)' && break
+            sleep 1
+          done
+          python3 -c 'import json; m=json.load(open("me.json")); assert {t["id"]: t["nivelIsolamento"] for t in m["tenants"]}["globex"] == "BRIDGE", m'
       - name: Logs em caso de falha
         if: failure()
         run: docker compose -f infra/docker-compose.yml logs --tail 200

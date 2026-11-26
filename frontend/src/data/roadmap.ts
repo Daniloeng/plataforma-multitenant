@@ -64,10 +64,17 @@ export const ROADMAP: readonly RoadmapService[] = [
     day: 9,
     responsibility:
       'Isola cada tenant no nível do plano (Pool, Bridge ou Silo) e promove o tenant de nível sem perder dados.',
+    situation: 'Ativo',
+  },
+  {
+    name: 'Observabilidade',
+    day: 10,
+    responsibility:
+      'Mede cada serviço com OpenTelemetry, Prometheus e Grafana e mostra a saúde por serviço com traces de ponta a ponta.',
     situation: 'Planejado',
   },
 ];
 
-export const CURRENT_DAY = 8;
+export const CURRENT_DAY = 9;
 export const TOTAL_DAYS = 22;
 export const REPOSITORY_URL = 'https://github.com/Daniloeng/plataforma-multitenant';

@@ -20,7 +20,14 @@ class LinhaDoTempoTest {
 
   private final MongoTemplate mongo = mock(MongoTemplate.class);
   private final LinhaDoTempo linha =
-      new LinhaDoTempo(mongo, Duration.ofMinutes(5), Duration.ofSeconds(15), 2, 3);
+      new LinhaDoTempo(
+          mongo,
+          Duration.ofMinutes(5),
+          Duration.ofSeconds(15),
+          2,
+          3,
+          new org.springframework.beans.factory.support.StaticListableBeanFactory()
+              .getBeanProvider(br.dev.plataforma.spring.isolation.TenantPlacements.class));
 
   private static PedidoDocument pedido(String tenant, String id, long versao) {
     PedidoDocument doc =

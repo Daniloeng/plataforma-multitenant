@@ -13,16 +13,57 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param outbox publicação de eventos
  * @param idempotency retenção dos registros de deduplicação e do outbox publicado
  * @param events consumo de eventos ({@code EventSubscriber})
+ * @param isolation database por tenant nos níveis BRIDGE e SILO (ADR-0014)
  */
 @ConfigurationProperties("plataforma")
 public record PlatformProperties(
-    String service, Tenancy tenancy, OutboxProps outbox, Idempotency idempotency, Events events) {
+    String service,
+    Tenancy tenancy,
+    OutboxProps outbox,
+    Idempotency idempotency,
+    Events events,
+    Isolation isolation) {
 
   public PlatformProperties {
     events = events == null ? new Events(0) : events;
     tenancy = tenancy == null ? new Tenancy(null, null) : tenancy;
     outbox = outbox == null ? new OutboxProps(null, null, null, 0) : outbox;
     idempotency = idempotency == null ? new Idempotency(null) : idempotency;
+    isolation = isolation == null ? new Isolation(false, null, null, null, null, null) : isolation;
+  }
+
+  /**
+   * @param enabled liga o roteamento por tenant e a migração (padrão: false)
+   * @param collections coleções de negócio que mudam de database com o tenant
+   * @param refresh intervalo de releitura do mapa de isolamento (padrão: 1 s)
+   * @param grace espera antes de copiar, para as outras réplicas pararem de gravar (padrão: 3 s);
+   *     precisa ser maior que duas vezes o {@code refresh}: uma réplica que passa de {@code grace -
+   *     refresh} sem reler o mapa recusa as operações dos tenants
+   * @param lease sem batimento por esse tempo, outra réplica assume a migração (padrão: 1 min)
+   * @param awaitTimeout quanto um consumidor espera a migração antes do nack (padrão: 2 min)
+   */
+  public record Isolation(
+      boolean enabled,
+      List<String> collections,
+      Duration refresh,
+      Duration grace,
+      Duration lease,
+      Duration awaitTimeout) {
+    public Isolation {
+      collections = collections == null ? List.of() : List.copyOf(collections);
+      refresh = refresh == null ? Duration.ofSeconds(1) : refresh;
+      grace = grace == null ? Duration.ofSeconds(3) : grace;
+      lease = lease == null ? Duration.ofMinutes(1) : lease;
+      awaitTimeout = awaitTimeout == null ? Duration.ofMinutes(2) : awaitTimeout;
+      if (grace.compareTo(refresh.multipliedBy(2)) <= 0) {
+        throw new IllegalArgumentException(
+            "plataforma.isolation.grace ("
+                + grace
+                + ") precisa ser maior que duas vezes o refresh ("
+                + refresh
+                + ")");
+      }
+    }
   }
 
   /**

@@ -20,6 +20,8 @@ import {
 } from '../api/pedidos';
 import { useAuth } from '../auth/context';
 import { LoginPrompt } from '../components/auth/LoginPrompt';
+import { ErroDeCarga } from '../components/ErroDeCarga';
+import { IsolamentoPedidos } from '../components/isolamento/IsolamentoPedidos';
 import { LinhaDoTempo } from '../components/pedidos/LinhaDoTempo';
 import { CancelarPedido, StatusPedidoPill } from '../components/pedidos/PedidoParts';
 import { ROUTE_HASH, parsePedidoId, pedidoHash, useHash } from '../hooks/useHashRoute';
@@ -121,7 +123,10 @@ function ListaPedidos({
 }) {
   const uid = useId();
   const [status, setStatus] = useState<StatusPedido | ''>('');
-  const pedidos = usePedidos(tenant.id, status || undefined);
+  // Gestor e admin consultam o isolamento (Dia 9): a lista espera a primeira resposta e, se os
+  // dados estiverem migrando de nível, espera a migração terminar (em vez de receber o 503).
+  const [aguardandoMigracao, setAguardandoMigracao] = useState(gestor);
+  const pedidos = usePedidos(tenant.id, status || undefined, !aguardandoMigracao);
   const { items, nextCursor, loading, loadingMore, error, actionError } = pedidos;
 
   return (
@@ -137,6 +142,9 @@ function ListaPedidos({
               ? 'Você vê os pedidos de todos os clientes do tenant e pode cancelar qualquer um.'
               : 'Você vê os pedidos do seu cliente. Para comprar, monte o carrinho na aba Produtos.'}
           </p>
+          {gestor ? (
+            <IsolamentoPedidos tenantId={tenant.id} onSituacao={setAguardandoMigracao} />
+          ) : null}
         </div>
         {comprador ? (
           <p className="pedidos__comprar">
@@ -180,13 +188,14 @@ function ListaPedidos({
         </div>
 
         {error ? (
-          <div className="alert" role="alert">
-            <strong>Não foi possível carregar os pedidos.</strong> {error}
-            <p>
-              Para dados reais, suba o ambiente com <code>{COMPOSE_COMMAND}</code>. Sem Docker, use
-              o modo demo: <code>VITE_DEMO=true npm run dev</code>.
-            </p>
-          </div>
+          <ErroDeCarga
+            titulo="Não foi possível carregar os pedidos."
+            mensagem={error}
+            onTentarDeNovo={() => void pedidos.reload()}
+          >
+            Para dados reais, suba o ambiente com <code>{COMPOSE_COMMAND}</code>. Sem Docker, use o
+            modo demo: <code>VITE_DEMO=true npm run dev</code>.
+          </ErroDeCarga>
         ) : null}
 
         {actionError ? (

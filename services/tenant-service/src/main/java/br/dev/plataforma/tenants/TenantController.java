@@ -1,5 +1,7 @@
 package br.dev.plataforma.tenants;
 
+import br.dev.plataforma.contracts.tenants.NivelIsolamento;
+import br.dev.plataforma.spring.web.Caller;
 import jakarta.validation.Valid;
 import java.net.URI;
 import org.springframework.http.ResponseEntity;
@@ -20,15 +22,21 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/tenants")
 public class TenantController {
 
-  private final TenantService service;
+  /** Corpo do POST de promoção. */
+  public record Promocao(NivelIsolamento nivelIsolamento) {}
 
-  public TenantController(TenantService service) {
+  private final TenantService service;
+  private final PulsarNamespaces namespaces;
+
+  public TenantController(TenantService service, PulsarNamespaces namespaces) {
     this.service = service;
+    this.namespaces = namespaces;
   }
 
   @PostMapping
   public ResponseEntity<TenantView> create(@Valid @RequestBody NewTenant request) {
     TenantView created = service.create(request);
+    namespaces.provisionQuietly(created); // depois do commit
     return ResponseEntity.created(URI.create("/api/v1/tenants/" + created.id())).body(created);
   }
 
@@ -46,6 +54,19 @@ public class TenantController {
 
   @PatchMapping("/{tenantId}")
   public TenantView change(@PathVariable String tenantId, @Valid @RequestBody TenantChange change) {
-    return service.change(tenantId, change);
+    TenantView changed = service.change(tenantId, change);
+    namespaces.provisionQuietly(changed); // plano novo muda os limites do namespace
+    return changed;
+  }
+
+  /** Sobe o nível de isolamento (ADR-0014); o namespace Pulsar sai depois do commit. */
+  @PostMapping("/{tenantId}/promocao")
+  public TenantView promote(
+      Caller caller, @PathVariable String tenantId, @RequestBody Promocao promocao) {
+    // A operação mais pesada do cadastro: confere o papel aqui também, não só no gateway.
+    caller.requireAnyRole(Caller.ADMIN);
+    TenantView promoted = service.promote(tenantId, promocao.nivelIsolamento());
+    namespaces.provisionQuietly(promoted);
+    return promoted;
   }
 }

@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { describeTenantError, listTenants, updateTenant, type Tenant } from '../api/tenants';
+import {
+  describeTenantError,
+  listTenants,
+  promoteTenant,
+  updateTenant,
+  type NivelIsolamento,
+  type Tenant,
+} from '../api/tenants';
+import { NIVEL_ISOLAMENTO_LABEL } from '../utils/format';
 
 export interface TenantsState {
   /** Tenants carregados até agora (páginas acumuladas). */
@@ -12,10 +20,12 @@ export interface TenantsState {
   loadingMore: boolean;
   /** Falha ao carregar a lista (primeira página). */
   error: string | null;
-  /** Falha da última ação (paginação ou suspender/reativar). */
+  /** Falha da última ação (paginação, suspender/reativar ou promover). */
   actionError: string | null;
-  /** Ids com PATCH em andamento. */
+  /** Ids com PATCH ou promoção em andamento. */
   pendingIds: ReadonlySet<string>;
+  /** Última promoção que deu certo (aviso de que os serviços estão migrando os dados). */
+  promoted: { id: string; nivel: NivelIsolamento } | null;
 }
 
 export interface UseTenants extends TenantsState {
@@ -25,6 +35,8 @@ export interface UseTenants extends TenantsState {
   prepend: (tenant: Tenant) => void;
   /** Suspende (false) ou reativa (true) um tenant via PATCH. */
   setActive: (id: string, ativo: boolean) => Promise<void>;
+  /** Promove o tenant a um nível acima (POST .../promocao); devolve true se deu certo. */
+  promote: (id: string, nivel: NivelIsolamento) => Promise<boolean>;
 }
 
 const INITIAL: TenantsState = {
@@ -35,7 +47,14 @@ const INITIAL: TenantsState = {
   error: null,
   actionError: null,
   pendingIds: new Set(),
+  promoted: null,
 };
+
+function semId(pendingIds: ReadonlySet<string>, id: string): Set<string> {
+  const next = new Set(pendingIds);
+  next.delete(id);
+  return next;
+}
 
 /** Junta páginas sem repetir ids (um tenant criado aqui pode reaparecer numa página seguinte). */
 function merge(current: Tenant[], incoming: Tenant[]): Tenant[] {
@@ -113,25 +132,46 @@ export function useTenants(): UseTenants {
       actionError: null,
       pendingIds: new Set(prev.pendingIds).add(id),
     }));
-    const done = (pendingIds: ReadonlySet<string>) => {
-      const next = new Set(pendingIds);
-      next.delete(id);
-      return next;
-    };
     try {
       const updated = await updateTenant(id, { ativo });
       setState((prev) => ({
         ...prev,
         items: prev.items.map((t) => (t.id === id ? updated : t)),
-        pendingIds: done(prev.pendingIds),
+        pendingIds: semId(prev.pendingIds, id),
       }));
     } catch (err) {
       const acao = ativo ? 'reativar' : 'suspender';
       setState((prev) => ({
         ...prev,
-        pendingIds: done(prev.pendingIds),
+        pendingIds: semId(prev.pendingIds, id),
         actionError: `Não foi possível ${acao} '${id}': ${describeTenantError(err)}`,
       }));
+    }
+  }, []);
+
+  const promote = useCallback(async (id: string, nivel: NivelIsolamento) => {
+    setState((prev) => ({
+      ...prev,
+      actionError: null,
+      promoted: null,
+      pendingIds: new Set(prev.pendingIds).add(id),
+    }));
+    try {
+      const updated = await promoteTenant(id, nivel);
+      setState((prev) => ({
+        ...prev,
+        items: prev.items.map((t) => (t.id === id ? updated : t)),
+        pendingIds: semId(prev.pendingIds, id),
+        promoted: { id, nivel: updated.nivelIsolamento },
+      }));
+      return true;
+    } catch (err) {
+      setState((prev) => ({
+        ...prev,
+        pendingIds: semId(prev.pendingIds, id),
+        actionError: `Não foi possível promover '${id}' para ${NIVEL_ISOLAMENTO_LABEL[nivel]}: ${describeTenantError(err)}`,
+      }));
+      return false;
     }
   }, []);
 
@@ -140,5 +180,5 @@ export function useTenants(): UseTenants {
     return () => controllerRef.current?.abort();
   }, [reload]);
 
-  return { ...state, reload, loadMore, prepend, setActive };
+  return { ...state, reload, loadMore, prepend, setActive, promote };
 }

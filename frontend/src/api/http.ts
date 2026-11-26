@@ -51,6 +51,29 @@ export interface Problema {
 export const PROBLEM_BASE = 'https://plataforma.dev.br/problemas/';
 
 /**
+ * 503 que as APIs de negócio respondem enquanto os dados do tenant migram de nível de isolamento
+ * (Dia 9, ADR-0014), com `Retry-After`.
+ */
+export const PROBLEMA_TENANT_EM_MIGRACAO = `${PROBLEM_BASE}tenant-em-migracao`;
+
+/** Mensagem única para o 503 tenant-em-migracao, em qualquer tela de negócio. */
+export const MENSAGEM_TENANT_EM_MIGRACAO =
+  'Os dados deste tenant estão sendo migrados para outro nível; tente de novo em instantes.';
+
+/** O erro é o 503 tenant-em-migracao? */
+export function isTenantEmMigracao(error: unknown): boolean {
+  return error instanceof ApiError && error.problemType === PROBLEMA_TENANT_EM_MIGRACAO;
+}
+
+/**
+ * Uma mensagem de erro já traduzida (os hooks guardam texto) fala da migração do tenant? Serve
+ * para a tela trocar a dica de "suba o ambiente" por "tente de novo".
+ */
+export function falaDeMigracao(mensagem: string | null | undefined): boolean {
+  return mensagem?.includes(MENSAGEM_TENANT_EM_MIGRACAO) ?? false;
+}
+
+/**
  * URL absoluta de um caminho da API, respeitando o BASE_URL do Vite ('/' ou
  * '/plataforma-multitenant/'). `path` vem sem barra inicial, ex.: 'api/v1/tenants'.
  */
@@ -135,6 +158,8 @@ export async function toApiError(response: Response): Promise<ApiError> {
   } catch {
     // corpo vazio ou não JSON: fica só o código HTTP
   }
+  // Tratamento central do 503 da migração de nível: a mesma frase em todas as telas de negócio.
+  if (type === PROBLEMA_TENANT_EM_MIGRACAO) detail = MENSAGEM_TENANT_EM_MIGRACAO;
   return new ApiError(
     detail ?? `A API respondeu com HTTP ${response.status}.`,
     response.status,

@@ -1733,3 +1733,92 @@ summary:focus-visible {
   font-size: 0.88rem;
   overflow-wrap: anywhere;
 }
+
+/* ---- Níveis de isolamento e migração (Dia 9) ---- */
+
+.alert--info {
+  border-color: var(--publish);
+  background: var(--publish-bg);
+}
+
+.tenants td.tenants__acoes {
+  white-space: normal;
+}
+
+.tenants__acoes > * + * {
+  margin-left: 8px;
+}
+
+.promover {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  vertical-align: middle;
+}
+
+.input--small {
+  width: auto;
+  min-height: 34px;
+  padding: 4px 8px;
+  font-size: 0.85rem;
+}
+
+.promover__max {
+  font-size: 0.8rem;
+}
+
+.isolamento {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin: 10px 0 0;
+  font-size: 0.9rem;
+}
+
+.isolamento code {
+  overflow-wrap: anywhere;
+}
+
+.isolamento--migrando {
+  color: var(--degraded);
+  font-weight: 600;
+}
+
+.isolamento--migrando .muted {
+  font-weight: 400;
+}
+
+.isolamento__spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: isolamento-giro 0.8s linear infinite;
+}
+
+@keyframes isolamento-giro {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .isolamento__spinner {
+    animation: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .tenants td.tenants__acoes {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .tenants__acoes > * + * {
+    margin-left: 0;
+  }
+}

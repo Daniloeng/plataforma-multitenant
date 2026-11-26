@@ -1,5 +1,6 @@
 import { describePlano } from '../../api/me';
 import { useAuth } from '../../auth/context';
+import { NivelSelo } from '../isolamento/NivelSelo';
 
 /** Troca de tenant: o escolhido vai no cabeçalho X-Tenant-Id de cada chamada. */
 export function TenantSelector() {
@@ -28,6 +29,7 @@ export function TenantSelector() {
       </select>
       <span id="tenant-plano" className="tenant-selector__plano muted">
         {selected ? describePlano(selected.plano) : 'Nenhum tenant selecionado'}
+        {selected ? <NivelSelo nivel={selected.nivelIsolamento} /> : null}
         {suspensos > 0 ? (
           <span className="pill pill--down" title="Tenants suspensos não podem ser selecionados">
             {suspensos === 1 ? '1 suspenso' : `${suspensos} suspensos`}
