@@ -2,6 +2,7 @@ package br.dev.plataforma.spring;
 
 import br.dev.plataforma.contracts.EventCatalog;
 import br.dev.plataforma.spring.events.EventDecoder;
+import br.dev.plataforma.spring.events.EventSubscriber;
 import br.dev.plataforma.spring.events.WriterSchemaResolver;
 import br.dev.plataforma.spring.idempotency.IdempotencyIndexes;
 import br.dev.plataforma.spring.idempotency.IdempotentConsumer;
@@ -11,8 +12,11 @@ import br.dev.plataforma.spring.outbox.OutboxRelay;
 import br.dev.plataforma.spring.outbox.PulsarEventPublisher;
 import br.dev.plataforma.spring.tenancy.TenantContextFilter;
 import br.dev.plataforma.spring.tenancy.TenantGuard;
+import br.dev.plataforma.spring.web.Caller;
+import br.dev.plataforma.spring.web.CallerArgumentResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Clock;
+import java.util.List;
 import org.apache.pulsar.client.admin.PulsarAdmin;
 import org.apache.pulsar.client.api.PulsarClient;
 import org.springframework.beans.factory.SmartInitializingSingleton;
@@ -35,6 +39,9 @@ import org.springframework.pulsar.core.PulsarAdministration;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.concurrent.SimpleAsyncTaskScheduler;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.method.support.HandlerMethodArgumentResolver;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
  * Liga a biblioteca comum em qualquer serviço que a tenha no classpath: filtro de tenant, guarda de
@@ -94,6 +101,17 @@ public class PlatformAutoConfiguration {
       registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 10);
       return registration;
     }
+
+    /** Controllers recebem {@link Caller} (usuário e papéis vindos do gateway). */
+    @Bean
+    WebMvcConfigurer callerArgumentResolver() {
+      return new WebMvcConfigurer() {
+        @Override
+        public void addArgumentResolvers(List<HandlerMethodArgumentResolver> resolvers) {
+          resolvers.add(new CallerArgumentResolver());
+        }
+      };
+    }
   }
 
   /** MongoDB: transações, guarda de tenant, outbox e deduplicação. */
@@ -129,6 +147,31 @@ public class PlatformAutoConfiguration {
     @Bean
     SmartInitializingSingleton platformIndexes(MongoOperations mongo, PlatformProperties props) {
       return () -> IdempotencyIndexes.ensure(mongo, props.idempotency().retention());
+    }
+  }
+
+  /** Consumidor padrão: assinatura durável, schema do escritor, idempotência e transação. */
+  @Configuration(proxyBeanMethods = false)
+  @ConditionalOnClass({MongoOperations.class, PulsarClient.class, PulsarAdministration.class})
+  static class Subscriber {
+
+    @Bean
+    @ConditionalOnMissingBean
+    EventSubscriber eventSubscriber(
+        PulsarClient client,
+        EventCatalog catalog,
+        EventDecoder decoder,
+        IdempotentConsumer idempotent,
+        PlatformTransactionManager transactions,
+        PlatformProperties props) {
+      return new EventSubscriber(
+          client,
+          catalog,
+          decoder,
+          idempotent,
+          new TransactionTemplate(transactions),
+          props.service(),
+          props.events().maxRedeliveries());
     }
   }
 

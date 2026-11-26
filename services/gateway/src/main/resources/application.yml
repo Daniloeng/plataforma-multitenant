@@ -34,3 +34,4 @@ plataforma:
     services:
       tenants: ${TENANT_SERVICE_URL:http://localhost:8081}
       status: ${STATUS_SERVICE_URL:http://localhost:8090}
+      catalogo: ${CATALOGO_SERVICE_URL:http://localhost:8082}

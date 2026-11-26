@@ -2,14 +2,14 @@ import { render, screen } from '@testing-library/react';
 import { ProgressSection } from './ProgressSection';
 
 describe('ProgressSection', () => {
-  it('mostra o Dia 4 de 22 com barra e link do repositório', () => {
+  it('mostra o Dia 5 de 22 com barra e link do repositório', () => {
     render(<ProgressSection />);
-    expect(screen.getByText('Dia 4 de 22')).toBeVisible();
-    expect(screen.getByText('18%')).toBeVisible();
+    expect(screen.getByText('Dia 5 de 22')).toBeVisible();
+    expect(screen.getByText('23%')).toBeVisible();
     const bar = screen.getByRole('progressbar', { name: 'Progresso do estudo' });
-    expect(bar).toHaveAttribute('aria-valuenow', '4');
+    expect(bar).toHaveAttribute('aria-valuenow', '5');
     expect(bar).toHaveAttribute('aria-valuemax', '22');
-    expect(bar.firstElementChild).toHaveStyle({ width: '18%' });
+    expect(bar.firstElementChild).toHaveStyle({ width: '23%' });
     expect(screen.getByRole('link', { name: 'repositório no GitHub' })).toHaveAttribute(
       'href',
       'https://github.com/Daniloeng/plataforma-multitenant',

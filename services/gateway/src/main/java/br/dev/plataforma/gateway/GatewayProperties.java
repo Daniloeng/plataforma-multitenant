@@ -30,7 +30,7 @@ public record GatewayProperties(
 
   public GatewayProperties {
     audience = audience == null ? "plataforma-gateway" : audience;
-    services = services == null ? new Services(null, null) : services;
+    services = services == null ? new Services(null, null, null) : services;
     Map<Plano, Limit> merged = new EnumMap<>(Plano.class);
     merged.put(Plano.GRATUITO, new Limit(5, 10));
     merged.put(Plano.PROFISSIONAL, new Limit(20, 40));
@@ -44,9 +44,10 @@ public record GatewayProperties(
   }
 
   /** Endereços dos serviços de destino. */
-  public record Services(URI tenants, URI status) {
+  public record Services(URI tenants, URI status, URI catalogo) {
     public Services {
       tenants = tenants == null ? URI.create("http://localhost:8081") : tenants;
+      catalogo = catalogo == null ? URI.create("http://localhost:8082") : catalogo;
       status = status == null ? URI.create("http://localhost:8090") : status;
     }
   }

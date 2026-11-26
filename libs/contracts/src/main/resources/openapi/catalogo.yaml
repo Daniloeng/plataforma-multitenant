@@ -2,12 +2,16 @@ openapi: 3.1.0
 info:
   title: Catálogo
   version: 1.0.0
-  description: Produtos e preços por tenant.
+  description: >-
+    Produtos e preços por tenant. O tenant, o usuário e os papéis chegam nos cabeçalhos escritos
+    pelo gateway (ADR-0009). Compradores só enxergam produtos ativos; gestores enxergam todos. O
+    número de produtos por tenant é limitado pelo plano (GRATUITO 20, PROFISSIONAL 500,
+    EMPRESARIAL 10000), aprendido pelos eventos tenant.criado e tenant.alterado.
 servers:
   - url: http://localhost:8082
 security:
   - jwt: []
-x-autorizacao: "Leitura: qualquer usuário do tenant. Escrita: papel gestor-tenant."
+x-autorizacao: "Leitura: qualquer usuário do tenant (comprador vê só ativos). Escrita: gestor-tenant ou plataforma-admin."
 tags:
   - name: produtos
 paths:
@@ -22,7 +26,12 @@ paths:
         - $ref: '_comum.yaml#/components/parameters/Limite'
         - name: busca
           in: query
-          schema: { type: string }
+          description: Trecho do nome ou do SKU, sem diferenciar maiúsculas.
+          schema: { type: string, maxLength: 100 }
+        - name: ativo
+          in: query
+          description: Filtra por situação (só para gestores; compradores sempre veem os ativos).
+          schema: { type: boolean }
       responses:
         '200':
           description: Página de produtos.
@@ -30,16 +39,34 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [itens]
+                required: [itens, total, limitePlano, plano, usados]
                 properties:
                   itens:
                     type: array
                     items: { $ref: '#/components/schemas/Produto' }
                   proximoCursor: { type: [string, 'null'] }
+                  total:
+                    type: integer
+                    description: Produtos do tenant que atendem ao filtro (todas as páginas).
+                  limitePlano:
+                    type: integer
+                    description: Máximo de produtos do plano do tenant (ativos e inativos).
+                  plano:
+                    type: string
+                    enum: [GRATUITO, PROFISSIONAL, EMPRESARIAL]
+                    description: >-
+                      Plano usado no limite: a cópia local do catálogo, que pode estar um instante
+                      atrás do cadastro de tenants (GRATUITO até o tenant.criado chegar).
+                  usados:
+                    type: integer
+                    description: Produtos cadastrados no tenant, ativos e inativos.
     post:
       tags: [produtos]
       operationId: criarProduto
       summary: Cria um produto e publica produto.alterado e preco.alterado
+      description: >-
+        409 com type `sku-duplicado` quando o SKU já existe no tenant, ou `limite-do-plano` quando
+        o tenant atingiu o número de produtos do plano.
       requestBody:
         required: true
         content:
@@ -52,6 +79,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Produto' }
         '400': { $ref: '_comum.yaml#/components/responses/RequisicaoInvalida' }
+        '403': { $ref: '#/components/responses/SemPermissao' }
         '409': { $ref: '_comum.yaml#/components/responses/Conflito' }
   /api/v1/produtos/{produtoId}:
     parameters:
@@ -70,6 +98,25 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Produto' }
         '404': { $ref: '_comum.yaml#/components/responses/NaoEncontrado' }
+    patch:
+      tags: [produtos]
+      operationId: alterarProduto
+      summary: Altera nome ou situação e publica produto.alterado (sem evento se nada mudar)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AlteracaoProduto' }
+      responses:
+        '200':
+          description: Produto alterado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Produto' }
+        '400': { $ref: '_comum.yaml#/components/responses/RequisicaoInvalida' }
+        '403': { $ref: '#/components/responses/SemPermissao' }
+        '404': { $ref: '_comum.yaml#/components/responses/NaoEncontrado' }
+        '409': { $ref: '_comum.yaml#/components/responses/Conflito' }
   /api/v1/produtos/{produtoId}/preco:
     parameters:
       - $ref: '_comum.yaml#/components/parameters/TenantId'
@@ -93,12 +140,26 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Produto' }
         '400': { $ref: '_comum.yaml#/components/responses/RequisicaoInvalida' }
+        '403': { $ref: '#/components/responses/SemPermissao' }
         '404': { $ref: '_comum.yaml#/components/responses/NaoEncontrado' }
+        '409': { $ref: '_comum.yaml#/components/responses/Conflito' }
 components:
   securitySchemes:
     jwt:
       $ref: '_comum.yaml#/components/securitySchemes/jwt'
+  responses:
+    SemPermissao:
+      description: O papel do usuário não permite alterar o catálogo.
+      content:
+        application/problem+json:
+          schema: { $ref: '_comum.yaml#/components/schemas/Problema' }
   schemas:
+    AlteracaoProduto:
+      type: object
+      minProperties: 1
+      properties:
+        nome: { type: string, minLength: 2, maxLength: 200 }
+        ativo: { type: boolean }
     NovoProduto:
       type: object
       required: [sku, nome, preco]
@@ -115,3 +176,5 @@ components:
         nome: { type: string }
         preco: { $ref: '_comum.yaml#/components/schemas/Dinheiro' }
         ativo: { type: boolean }
+        criadoEm: { type: string, format: date-time }
+        atualizadoEm: { type: string, format: date-time }

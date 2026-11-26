@@ -305,4 +305,58 @@ class PlatformSpringIT {
         .satisfies(i -> assertThat(i.getExpireAfter()).hasValue(java.time.Duration.ofDays(3)));
     IdempotencyIndexes.ensure(mongo, java.time.Duration.ofDays(7));
   }
+
+  @Test
+  void eventSubscriberConsomeComIdempotenciaETentaDeNovoAposFalha() throws Exception {
+    var subscriber =
+        new br.dev.plataforma.spring.events.EventSubscriber(
+            pulsar,
+            EventCatalog.defaultCatalog(),
+            decoder,
+            idempotent,
+            tx,
+            "teste-" + UUID.randomUUID().toString().substring(0, 8),
+            5);
+    java.util.concurrent.atomic.AtomicInteger tentativas =
+        new java.util.concurrent.atomic.AtomicInteger();
+    subscriber.on(
+        TenantCriado.class,
+        "notas",
+        e -> {
+          // A primeira tentativa falha depois de gravar: o rollback desfaz a nota e o registro.
+          mongo.insert(new Nota(e.getEventId().toString(), null, e.getNome().toString()));
+          if (tentativas.incrementAndGet() == 1) {
+            throw new IllegalStateException("falha temporária");
+          }
+        });
+    subscriber.start();
+    try {
+      assertThat(subscriber.isRunning()).isTrue();
+      TenantCriado evento = evento("acme");
+      tx.executeWithoutResult(s -> outbox.append(evento, "acme"));
+      relay.runCycle();
+
+      org.awaitility.Awaitility.await()
+          .atMost(java.time.Duration.ofSeconds(30))
+          .until(() -> mongo.count(new Query(), Nota.class) == 1);
+      Nota nota = mongo.findById(evento.getEventId().toString(), Nota.class);
+      assertThat(nota.getTenantId()).isEqualTo("acme"); // tenant do evento no contexto
+      assertThat(tentativas.get()).isEqualTo(2);
+      assertThat(mongo.count(new Query(), ProcessedEvent.class)).isEqualTo(1);
+    } finally {
+      subscriber.stop();
+    }
+    assertThat(subscriber.isRunning()).isFalse();
+  }
+
+  @Test
+  void eventSubscriberExigeNomeDoServico() {
+    var subscriber =
+        new br.dev.plataforma.spring.events.EventSubscriber(
+            pulsar, EventCatalog.defaultCatalog(), decoder, idempotent, tx, null, 5);
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> subscriber.on(TenantCriado.class, "x", e -> {}))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("plataforma.service");
+  }
 }

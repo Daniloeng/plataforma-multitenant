@@ -43,6 +43,7 @@ class GatewayTest {
   static void propriedades(DynamicPropertyRegistry registry) {
     registry.add("plataforma.gateway.services.tenants", BACKEND::url);
     registry.add("plataforma.gateway.services.status", BACKEND::url);
+    registry.add("plataforma.gateway.services.catalogo", BACKEND::url);
   }
 
   @AfterAll
@@ -365,5 +366,21 @@ class GatewayTest {
         .isOk()
         .expectHeader()
         .valueEquals("Access-Control-Allow-Origin", "http://localhost:5173");
+  }
+
+  @Test
+  void produtosVaoParaOCatalogoComTenantEPapeis() {
+    web.mutateWith(ANA)
+        .get()
+        .uri("/api/v1/produtos?busca=cafe")
+        .header("X-Tenant-Id", "acme")
+        .exchange()
+        .expectStatus()
+        .isOk();
+    assertThat(BACKEND.lastHeaders)
+        .containsEntry("path", "/api/v1/produtos?busca=cafe")
+        .containsEntry("X-Tenant-Id", "acme")
+        .containsEntry("X-Papeis", "gestor-tenant")
+        .containsEntry("X-Usuario", "ana");
   }
 }

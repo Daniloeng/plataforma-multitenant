@@ -1,3 +1,4 @@
+import type { Produto } from '../api/catalogo';
 import type { StatusResponse } from '../api/status';
 import type { Tenant } from '../api/tenants';
 
@@ -51,4 +52,18 @@ export function makeTenants(count: number): Tenant[] {
     ativo: true,
     criadoEm: new Date(Date.UTC(2026, 10, 26, 12, 0, 0) - i * 60_000).toISOString(),
   }));
+}
+
+/** Gera `count` produtos com SKUs em ordem (PRD-001, PRD-002…), todos ativos e a R$ 10,00. */
+export function makeProdutos(count: number, prefixo = 'PRD'): Produto[] {
+  return Array.from({ length: count }, (_, i) => {
+    const n = String(i + 1).padStart(3, '0');
+    return {
+      id: `id-${prefixo.toLowerCase()}-${n}`,
+      sku: `${prefixo}-${n}`,
+      nome: `Produto ${i + 1}`,
+      preco: { centavos: 1000, moeda: 'BRL' },
+      ativo: true,
+    };
+  });
 }

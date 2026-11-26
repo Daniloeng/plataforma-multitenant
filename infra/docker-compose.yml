@@ -99,6 +99,7 @@ services:
       MONGO_PAGAMENTOS_URI: mongodb://mongo-pagamentos:27017/?directConnection=true
       PULSAR_ADMIN_URL: http://pulsar:8080
       TENANT_SERVICE_URL: http://tenant-service:8081
+      CATALOGO_SERVICE_URL: http://catalogo-service:8082
       GATEWAY_URL: http://gateway:8000
       KEYCLOAK_MANAGEMENT_URL: http://keycloak:9000
     depends_on:
@@ -123,6 +124,25 @@ services:
       PULSAR_URL: pulsar://pulsar:6650
     depends_on:
       mongo-tenants: { condition: service_healthy }
+      pulsar: { condition: service_healthy }
+      pulsar-init: { condition: service_completed_successfully }
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  catalogo-service:
+    build:
+      context: ..
+      dockerfile: services/catalogo-service/Dockerfile
+    image: plataforma/catalogo-service:dev
+    environment:
+      MONGO_URI: mongodb://mongo-catalogo:27017/catalogo?replicaSet=rs-catalogo
+      PULSAR_URL: pulsar://pulsar:6650
+      PULSAR_ADMIN_URL: http://pulsar:8080
+    depends_on:
+      mongo-catalogo: { condition: service_healthy }
       pulsar: { condition: service_healthy }
       pulsar-init: { condition: service_completed_successfully }
     restart: unless-stopped
@@ -174,6 +194,7 @@ services:
       KEYCLOAK_JWKS: http://keycloak:8080/realms/plataforma/protocol/openid-connect/certs
       TENANT_SERVICE_URL: http://tenant-service:8081
       STATUS_SERVICE_URL: http://status-service:8090
+      CATALOGO_SERVICE_URL: http://catalogo-service:8082
       PULSAR_URL: pulsar://pulsar:6650
       PULSAR_ADMIN_URL: http://pulsar:8080
     depends_on:

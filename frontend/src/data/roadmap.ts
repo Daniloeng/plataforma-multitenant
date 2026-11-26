@@ -34,8 +34,9 @@ export const ROADMAP: readonly RoadmapService[] = [
   {
     name: 'Catálogo',
     day: 5,
-    responsibility: 'Mantém produtos, preços e estoque disponíveis para cada tenant.',
-    situation: 'Planejado',
+    responsibility:
+      'Mantém produtos e preços de cada tenant, com limite por plano; publica produto.alterado e preco.alterado pelo outbox.',
+    situation: 'Ativo',
   },
   {
     name: 'Pedidos',
@@ -51,6 +52,6 @@ export const ROADMAP: readonly RoadmapService[] = [
   },
 ];
 
-export const CURRENT_DAY = 4;
+export const CURRENT_DAY = 5;
 export const TOTAL_DAYS = 22;
 export const REPOSITORY_URL = 'https://github.com/Daniloeng/plataforma-multitenant';

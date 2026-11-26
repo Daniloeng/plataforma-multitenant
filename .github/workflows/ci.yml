@@ -84,7 +84,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Subir MongoDB x4, Pulsar, Keycloak, gateway e serviços
+      - name: Subir MongoDB x4, Pulsar, Keycloak, gateway, tenant, catálogo e status
         run: docker compose -f infra/docker-compose.yml up -d --build --wait --wait-timeout 420
       - name: Conferir /api/status pelo gateway
         run: |
@@ -93,7 +93,7 @@ jobs:
           import json
           s = json.load(open("status.json"))
           assert s["status"] == "UP", s
-          assert len(s["components"]) == 8, s
+          assert len(s["components"]) == 9, s
           print("\nPlataforma UP com", len(s["components"]), "componentes")
           PY
       - name: Conferir namespaces Pulsar
@@ -105,7 +105,7 @@ jobs:
           done
       - name: Serviços não ficam expostos fora do gateway
         run: |
-          for url in http://localhost:8081/api/v1/tenants http://localhost:8090/api/status; do
+          for url in http://localhost:8081/api/v1/tenants http://localhost:8082/api/v1/produtos http://localhost:8090/api/status; do
             if curl -fsS -m 3 "$url"; then echo "$url respondeu fora do gateway" && exit 1; fi
           done
       - name: Sem token, a API responde 401
@@ -147,6 +147,42 @@ jobs:
           # O limite do plano aparece nos cabeçalhos (globex é GRATUITO: 5 req/s).
           curl -fsS -D headers.txt -o /dev/null http://localhost:8000/api/v1/me -H "Authorization: Bearer $ANA" -H 'X-Tenant-Id: globex'
           grep -i '^x-ratelimit-limit: 5' headers.txt
+      - name: Catálogo pelo gateway (produtos por tenant, papéis e limite do plano)
+        run: |
+          token() {
+            curl -fsS http://localhost:8180/realms/plataforma/protocol/openid-connect/token \
+              -d grant_type=password -d client_id=plataforma-cli -d "username=$1" -d password=senha123 |
+              python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])'
+          }
+          ANA=$(token ana); BRUNO=$(token bruno)
+          api() { curl -sS -o resp.json -w '%{http_code}' "$@"; }
+          # O seed criou produtos em acme; o catálogo aprende o plano de acme pelo tenant.criado
+          # (consistência eventual: espera a cópia local chegar, até 30 s).
+          for i in $(seq 1 30); do
+            test "$(api http://localhost:8000/api/v1/produtos -H "Authorization: Bearer $BRUNO" -H 'X-Tenant-Id: acme')" = 200
+            python3 -c 'import json,sys; sys.exit(json.load(open("resp.json"))["plano"] != "PROFISSIONAL")' && break
+            sleep 1
+          done
+          cat resp.json
+          python3 - <<'PY'
+          import json
+          p = json.load(open("resp.json"))
+          assert p["total"] >= 3 and p["limitePlano"] == 500, p
+          assert all(i["ativo"] for i in p["itens"]), p
+          PY
+          # Comprador não cadastra; gestor cadastra e o preco.alterado chega ao Pulsar.
+          test "$(api -X POST http://localhost:8000/api/v1/produtos -H "Authorization: Bearer $BRUNO" -H 'X-Tenant-Id: acme' -H 'Content-Type: application/json' -d '{"sku":"CI-1","nome":"Item do CI","preco":{"centavos":990}}')" = 403
+          test "$(api -X POST http://localhost:8000/api/v1/produtos -H "Authorization: Bearer $ANA" -H 'X-Tenant-Id: acme' -H 'Content-Type: application/json' -d '{"sku":"CI-1","nome":"Item do CI","preco":{"centavos":990}}')" = 201
+          # globex é de outro tenant: o produto de acme não aparece lá.
+          test "$(api 'http://localhost:8000/api/v1/produtos?busca=CI-1' -H "Authorization: Bearer $ANA" -H 'X-Tenant-Id: globex')" = 200
+          python3 -c 'import json; p=json.load(open("resp.json")); assert p["total"] == 0, p'
+          topico=http://localhost:8080/admin/v2/persistent/plataforma/catalogo/preco.alterado.v1
+          for i in $(seq 1 30); do
+            n=$(curl -fsS "$topico/stats" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("msgInCounter", 0))' || echo 0)
+            [ "$n" -ge 4 ] && echo "preco.alterado publicado ($n mensagens)" && exit 0
+            sleep 1
+          done
+          echo "preco.alterado não chegou ao Pulsar" && exit 1
       - name: Logs em caso de falha
         if: failure()
         run: docker compose -f infra/docker-compose.yml logs --tail 200
