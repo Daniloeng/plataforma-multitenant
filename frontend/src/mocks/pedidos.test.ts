@@ -3,7 +3,13 @@ import { apiUrl } from '../api/http';
 import { resetCatalogoStore, catalogoSnapshot } from './catalogo';
 import { clienteIdOf } from './gateway';
 import { findDemoUser } from '../auth/demoUsers';
-import { hashCorpo, pedidosSnapshot, resetPedidosStore } from './pedidos';
+import {
+  aplicarPagamento,
+  assinarPedidos,
+  hashCorpo,
+  pedidosSnapshot,
+  resetPedidosStore,
+} from './pedidos';
 
 const FARMA = 'farmaceutica-boa-saude';
 const DIP = 'prd-farmaceutica-boa-saude-001';
@@ -45,16 +51,26 @@ const criar = (body: unknown, chave = 'chave-0001', opts: Chamada = {}) =>
 type Pagina = { itens: Pedido[]; proximoCursor: string | null };
 
 describe('dados de exemplo', () => {
-  it('o tenant de bruno tem pedidos dele e de outros clientes, PENDENTE ou CANCELADO, com preços do catálogo', () => {
+  it('o tenant de bruno tem pedidos dele e de outros clientes, em todas as situações de pagamento, com preços do catálogo', () => {
     const pedidos = pedidosSnapshot(FARMA);
     expect(pedidos).toHaveLength(8);
     const clientes = new Set(pedidos.map((p) => p.clienteId));
     expect(clientes.has('cli-bruno')).toBe(true);
     expect(clientes.size).toBeGreaterThanOrEqual(3);
-    expect(pedidos.every((p) => p.status === 'PENDENTE' || p.status === 'CANCELADO')).toBe(true);
-    for (const p of pedidos.filter((x) => x.status === 'CANCELADO')) {
-      expect(p.motivoCancelamento).toBe('SOLICITADO_PELO_CLIENTE');
-    }
+    expect(pedidos.map((p) => [p.id, p.status, p.motivoCancelamento, p.pagamentoId])).toEqual([
+      ['ped-farmaceutica-0008', 'PENDENTE', null, null],
+      ['ped-farmaceutica-0007', 'CONFIRMADO', null, 'pag-farmaceutica-0007'],
+      ['ped-farmaceutica-0006', 'CONFIRMADO', null, 'pag-farmaceutica-0006'],
+      // Pago e depois cancelado pelo cliente: guarda o pagamento (estornado).
+      ['ped-farmaceutica-0005', 'CANCELADO', 'SOLICITADO_PELO_CLIENTE', 'pag-farmaceutica-0005'],
+      // Acima de R$ 10.000,00: o gateway simulado recusa.
+      ['ped-farmaceutica-0004', 'CANCELADO', 'PAGAMENTO_RECUSADO', null],
+      ['ped-farmaceutica-0003', 'CONFIRMADO', null, 'pag-farmaceutica-0003'],
+      // Cancelado antes de qualquer cobrança.
+      ['ped-farmaceutica-0002', 'CANCELADO', 'SOLICITADO_PELO_CLIENTE', null],
+      ['ped-farmaceutica-0001', 'CONFIRMADO', null, 'pag-farmaceutica-0001'],
+    ]);
+    expect(pedidos[4]!.total.centavos).toBeGreaterThan(1_000_000);
     // Do mais recente para o mais antigo.
     const datas = pedidos.map((p) => Date.parse(p.criadoEm));
     expect([...datas].sort((a, b) => b - a)).toEqual(datas);
@@ -67,7 +83,7 @@ describe('dados de exemplo', () => {
       precoUnitario: { centavos: 22450, moeda: 'BRL' },
     });
     expect(primeiro.total).toEqual({ centavos: 22450 * 4 + 9360 * 10, moeda: 'BRL' });
-    expect(pedidosSnapshot('distribuidora-aurora')).toHaveLength(3);
+    expect(pedidosSnapshot('distribuidora-aurora')).toHaveLength(4);
     expect(pedidosSnapshot('tenant-sem-pedidos')).toEqual([]);
   });
 
@@ -302,11 +318,12 @@ describe('GET /api/v1/pedidos', () => {
       .json as unknown as Pagina;
     expect(cancelados.itens.map((p) => p.clienteId)).toEqual([
       'cli-bruno',
+      'cli-clinica-vida',
       'cli-hospital-sao-lucas',
     ]);
-    const confirmados = (await call('api/v1/pedidos?status=CONFIRMADO', { usuario: 'admin' }))
+    const pendentes = (await call('api/v1/pedidos?status=PENDENTE', { usuario: 'admin' }))
       .json as unknown as Pagina;
-    expect(confirmados.itens).toEqual([]);
+    expect(pendentes.itens.map((p) => p.id)).toEqual(['ped-farmaceutica-0008']);
   });
 
   it('pagina por cursor (id do último), sem repetir nem pular, também com filtro', async () => {
@@ -321,14 +338,14 @@ describe('GET /api/v1/pedidos', () => {
     } while (cursor);
     expect(vistos).toEqual(pedidosSnapshot(FARMA).map((p) => p.id));
 
-    const p1 = (await call('api/v1/pedidos?limite=2&status=PENDENTE', { usuario: 'admin' }))
+    const p1 = (await call('api/v1/pedidos?limite=2&status=CONFIRMADO', { usuario: 'admin' }))
       .json as unknown as Pagina;
     const p2 = (
-      await call(`api/v1/pedidos?limite=2&status=PENDENTE&cursor=${p1.proximoCursor}`, {
+      await call(`api/v1/pedidos?limite=2&status=CONFIRMADO&cursor=${p1.proximoCursor}`, {
         usuario: 'admin',
       })
     ).json as unknown as Pagina;
-    expect(p2.itens.every((p) => p.status === 'PENDENTE')).toBe(true);
+    expect(p2.itens.every((p) => p.status === 'CONFIRMADO')).toBe(true);
     expect(p2.itens[0]!.id).not.toBe(p1.itens[1]!.id);
     // Cursor do último pedido: página vazia.
     const ultimo = pedidosSnapshot(FARMA).at(-1)!.id;
@@ -424,5 +441,41 @@ describe('GET /api/v1/pedidos/{id} e POST /cancelamento', () => {
   it('pedido de outro tenant não existe neste', async () => {
     const { status } = await call('api/v1/pedidos/ped-distribuidora-0003', { usuario: 'admin' });
     expect(status).toBe(404);
+  });
+});
+
+describe('integração com o pagamentos-service simulado', () => {
+  it('assinarPedidos entrega pedido.criado e devolve a função que remove o assinante', async () => {
+    const criados: string[] = [];
+    const sair = assinarPedidos({
+      pedidoCriado: (_tenant, p) => criados.push(p.id),
+      pedidoCancelado: () => {},
+      sincronizar: () => {},
+    });
+    const primeiro = await criar({ itens: [{ produtoId: DIP, quantidade: 1 }] }, 'chave-assina-1');
+    sair();
+    await criar({ itens: [{ produtoId: DIP, quantidade: 2 }] }, 'chave-assina-2');
+    expect(criados).toEqual([primeiro.json.id]);
+  });
+
+  it('aplicarPagamento só muda pedido PENDENTE existente', () => {
+    const quando = '2026-11-26T12:00:00.000Z';
+    expect(aplicarPagamento(FARMA, 'nao-existe', { aprovado: false }, quando)).toBe(false);
+    expect(
+      aplicarPagamento(
+        FARMA,
+        'ped-farmaceutica-0007',
+        { aprovado: true, pagamentoId: 'x' },
+        quando,
+      ),
+    ).toBe(false);
+    expect(aplicarPagamento(FARMA, 'ped-farmaceutica-0008', { aprovado: false }, quando)).toBe(
+      true,
+    );
+    expect(pedidosSnapshot(FARMA)[0]).toMatchObject({
+      status: 'CANCELADO',
+      motivoCancelamento: 'PAGAMENTO_RECUSADO',
+      atualizadoEm: quando,
+    });
   });
 });

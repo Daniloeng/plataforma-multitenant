@@ -2,7 +2,7 @@ import { fetchStatus } from '../api/status';
 import { DEMO_VERSION, buildDemoStatus } from './handlers';
 
 describe('buildDemoStatus', () => {
-  it('monta Mongo, Pulsar, tenant-service, catalogo-service, pedidos-service, gateway e keycloak no ar com latência base quando random = 0', () => {
+  it('monta Mongo, Pulsar, tenant-service, catalogo-service, pedidos-service, pagamentos-service, gateway e keycloak no ar com latência base quando random = 0', () => {
     const now = new Date('2026-11-26T12:00:00Z');
     const status = buildDemoStatus(() => 0, now);
     expect(status.status).toBe('UP');
@@ -17,11 +17,12 @@ describe('buildDemoStatus', () => {
       'tenant-service',
       'catalogo-service',
       'pedidos-service',
+      'pagamentos-service',
       'gateway',
       'keycloak',
     ]);
     expect(status.components.every((c) => c.status === 'UP')).toBe(true);
-    expect(status.components.map((c) => c.latencyMs)).toEqual([2, 3, 3, 4, 10, 6, 5, 5, 4, 12]);
+    expect(status.components.map((c) => c.latencyMs)).toEqual([2, 3, 3, 4, 10, 6, 5, 5, 6, 4, 12]);
     expect(status.components[4]).toMatchObject({ type: 'PULSAR', details: 'broker saudável' });
     expect(status.components[5]).toMatchObject({
       type: 'SERVICE',
@@ -40,8 +41,14 @@ describe('buildDemoStatus', () => {
       status: 'UP',
       details: 'readiness UP',
     });
-    expect(status.components[8]).toMatchObject({ name: 'gateway', details: 'readiness UP' });
-    expect(status.components[9]).toMatchObject({ type: 'SERVICE', details: 'realm plataforma' });
+    expect(status.components[8]).toMatchObject({
+      name: 'pagamentos-service',
+      type: 'SERVICE',
+      status: 'UP',
+      details: 'readiness UP',
+    });
+    expect(status.components[9]).toMatchObject({ name: 'gateway', details: 'readiness UP' });
+    expect(status.components[10]).toMatchObject({ type: 'SERVICE', details: 'realm plataforma' });
     expect(status.components[0]).toMatchObject({
       type: 'MONGODB',
       details: 'replica set rs-tenants',
@@ -50,7 +57,9 @@ describe('buildDemoStatus', () => {
 
   it('varia a latência dentro de uma faixa pequena', () => {
     const status = buildDemoStatus(() => 1);
-    expect(status.components.map((c) => c.latencyMs)).toEqual([6, 7, 7, 8, 18, 12, 11, 11, 8, 22]);
+    expect(status.components.map((c) => c.latencyMs)).toEqual([
+      6, 7, 7, 8, 18, 12, 11, 11, 12, 8, 22,
+    ]);
   });
 
   it('usa Math.random e a hora atual por padrão', () => {
@@ -68,6 +77,6 @@ describe('handlers', () => {
   it('respondem /api/status dentro do contrato e sem token (servidor msw/node padrão)', async () => {
     const status = await fetchStatus();
     expect(status.status).toBe('UP');
-    expect(status.components).toHaveLength(10);
+    expect(status.components).toHaveLength(11);
   });
 });

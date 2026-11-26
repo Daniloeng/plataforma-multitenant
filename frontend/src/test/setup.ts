@@ -7,6 +7,7 @@ import { resetRateLimits } from '../mocks/gateway';
 import { resetTenantStore } from '../mocks/tenants';
 import { resetCatalogoStore } from '../mocks/catalogo';
 import { resetPedidosStore } from '../mocks/pedidos';
+import { resetPagamentosStore } from '../mocks/pagamentos';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => {
@@ -18,6 +19,8 @@ afterEach(() => {
   resetCatalogoStore();
   // ... e os pedidos (com as chaves de idempotência).
   resetPedidosStore();
+  // ... e os pagamentos, o ledger e a agenda de cobranças do gateway simulado.
+  resetPagamentosStore();
   // Sessão (token de demo, tenant escolhido) e baldes do rate limit também recomeçam.
   resetRateLimits();
   window.sessionStorage.clear();

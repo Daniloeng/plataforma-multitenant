@@ -2,6 +2,7 @@ package br.dev.plataforma.pedidos;
 
 import br.dev.plataforma.contracts.pedidos.ItemPedido;
 import br.dev.plataforma.contracts.pedidos.PedidoCancelado;
+import br.dev.plataforma.contracts.pedidos.PedidoConfirmado;
 import br.dev.plataforma.contracts.pedidos.PedidoCriado;
 import br.dev.plataforma.spring.outbox.Outbox;
 import br.dev.plataforma.spring.tenancy.TenantContext;
@@ -155,13 +156,72 @@ public class PedidoService {
     if (doc.getStatus() == StatusPedido.CANCELADO) {
       throw new PedidosExceptions.JaCancelado(id);
     }
-    Instant agora = agora();
     // Quem cancela entra no motivo: a auditoria distingue o cliente do gestor do tenant.
-    doc.cancelar(
-        clienteId == null
-            ? MotivoCancelamento.CANCELADO_PELO_TENANT
-            : MotivoCancelamento.SOLICITADO_PELO_CLIENTE,
-        agora);
+    return PedidoView.of(
+        cancelarEPublicar(
+            doc,
+            clienteId == null
+                ? MotivoCancelamento.CANCELADO_PELO_TENANT
+                : MotivoCancelamento.SOLICITADO_PELO_CLIENTE));
+  }
+
+  /**
+   * pagamento.aprovado: confirma o pedido PENDENTE e publica pedido.confirmado. Pedido já em outro
+   * estado (cancelado pelo cliente ou expirado) fica como está: o estorno é com Pagamentos, que
+   * também recebe o pedido.cancelado (ADR-0006). Roda na transação do consumidor.
+   */
+  public void confirmarPagamento(String pedidoId, String pagamentoId) {
+    PedidoDocument doc = pendente(pedidoId);
+    if (doc == null) {
+      return;
+    }
+    Instant agora = agora();
+    doc.confirmar(pagamentoId, agora);
+    PedidoDocument salvo = mongo.save(doc);
+    outbox.append(
+        PedidoConfirmado.newBuilder()
+            .setEventId(UUID.randomUUID())
+            .setTenantId(salvo.getTenantId())
+            .setOccurredAt(agora)
+            .setPedidoId(salvo.getId())
+            .setPagamentoId(pagamentoId)
+            .setVersao(salvo.getVersion())
+            .build(),
+        salvo.getId());
+  }
+
+  /** pagamento.recusado: cancela o pedido PENDENTE com PAGAMENTO_RECUSADO. */
+  public void recusarPagamento(String pedidoId) {
+    PedidoDocument doc = pendente(pedidoId);
+    if (doc != null) {
+      cancelarEPublicar(doc, MotivoCancelamento.PAGAMENTO_RECUSADO);
+    }
+  }
+
+  /**
+   * Job de expiração: cancela com EXPIRADO o pedido que continua PENDENTE (sem resposta do
+   * pagamento). Relê dentro da transação, então um pagamento que chegou no meio vence.
+   */
+  @Transactional
+  public boolean expirar(String pedidoId) {
+    PedidoDocument doc = pendente(pedidoId);
+    if (doc == null) {
+      return false;
+    }
+    cancelarEPublicar(doc, MotivoCancelamento.EXPIRADO);
+    return true;
+  }
+
+  private PedidoDocument pendente(String pedidoId) {
+    return mongo.findOne(
+        TenantQueries.scoped(
+            Criteria.where("_id").is(pedidoId).and("status").is(StatusPedido.PENDENTE)),
+        PedidoDocument.class);
+  }
+
+  private PedidoDocument cancelarEPublicar(PedidoDocument doc, MotivoCancelamento motivo) {
+    Instant agora = agora();
+    doc.cancelar(motivo, agora);
     PedidoDocument salvo = mongo.save(doc);
     outbox.append(
         PedidoCancelado.newBuilder()
@@ -175,7 +235,7 @@ public class PedidoService {
             .setVersao(salvo.getVersion())
             .build(),
         salvo.getId());
-    return PedidoView.of(salvo);
+    return salvo;
   }
 
   /**

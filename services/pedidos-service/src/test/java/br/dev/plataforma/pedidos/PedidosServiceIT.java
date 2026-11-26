@@ -6,7 +6,10 @@ import static org.awaitility.Awaitility.await;
 import br.dev.plataforma.contracts.EventCatalog;
 import br.dev.plataforma.contracts.catalogo.PrecoAlterado;
 import br.dev.plataforma.contracts.catalogo.ProdutoAlterado;
+import br.dev.plataforma.contracts.pagamentos.PagamentoAprovado;
+import br.dev.plataforma.contracts.pagamentos.PagamentoRecusado;
 import br.dev.plataforma.contracts.pedidos.PedidoCancelado;
+import br.dev.plataforma.contracts.pedidos.PedidoConfirmado;
 import br.dev.plataforma.contracts.pedidos.PedidoCriado;
 import br.dev.plataforma.contracts.tenants.NivelIsolamento;
 import br.dev.plataforma.contracts.tenants.Plano;
@@ -62,7 +65,11 @@ import org.testcontainers.utility.DockerImageName;
 @Testcontainers
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = {"server.shutdown=immediate"})
+    properties = {
+      "server.shutdown=immediate",
+      "plataforma.pedidos.expiracao=PT2S",
+      "plataforma.pedidos.expiracao-intervalo=PT1H"
+    })
 class PedidosServiceIT {
 
   @Container static final MongoDBContainer MONGO = new MongoDBContainer("mongo:8.0");
@@ -89,12 +96,14 @@ class PedidosServiceIT {
       admin.namespaces().createNamespace("plataforma/tenants");
       admin.namespaces().createNamespace("plataforma/catalogo");
       admin.namespaces().createNamespace("plataforma/pedidos");
+      admin.namespaces().createNamespace("plataforma/pagamentos");
     }
   }
 
   @LocalServerPort int port;
   @Autowired MongoTemplate mongo;
   @Autowired PulsarClient pulsar;
+  @Autowired ExpiracaoPedidos expiracao;
 
   final HttpClient http = HttpClient.newHttpClient();
   final ObjectMapper json = new ObjectMapper();
@@ -550,5 +559,107 @@ class PedidosServiceIT {
             comoComprador("POST", "/api/v1/pedidos/" + antes + "/cancelamento", "loja-i", "cli-1")
                 .status())
         .isEqualTo(200);
+  }
+
+  void aprovado(String tenant, String pedidoId, String pagamentoId) throws Exception {
+    publicar(
+        PagamentoAprovado.newBuilder()
+            .setEventId(UUID.randomUUID())
+            .setTenantId(tenant)
+            .setOccurredAt(Instant.now().truncatedTo(ChronoUnit.MILLIS))
+            .setPagamentoId(pagamentoId)
+            .setPedidoId(pedidoId)
+            .setValorCentavos(100)
+            .setMoeda("BRL")
+            .setChaveIdempotencia(tenant + ":" + pedidoId)
+            .build(),
+        tenant,
+        pedidoId);
+  }
+
+  String status(String tenant, String pedidoId) throws Exception {
+    return comoGestor("GET", "/api/v1/pedidos/" + pedidoId, tenant).corpo().get("status").asText();
+  }
+
+  @Test
+  void pagamentoAprovadoConfirmaERecusadoCancela() throws Exception {
+    catalogo("loja-j", "p", 100);
+    String itens = "[" + item("p", 1) + "]";
+    String pago = comprar("loja-j", "cli-1", chave(), itens).corpo().get("id").asText();
+    String recusado = comprar("loja-j", "cli-1", chave(), itens).corpo().get("id").asText();
+    String jaCancelado = comprar("loja-j", "cli-1", chave(), itens).corpo().get("id").asText();
+    comoComprador("POST", "/api/v1/pedidos/" + jaCancelado + "/cancelamento", "loja-j", "cli-1");
+    try (Consumer<byte[]> consumer =
+        ouvir("persistent://plataforma/pedidos/pedido.confirmado.v1")) {
+      aprovado("loja-j", pago, "pag-1");
+      Message<byte[]> msg = consumer.receive(30, TimeUnit.SECONDS);
+      assertThat(msg).isNotNull();
+      PedidoConfirmado evento = AvroCodec.decode(msg.getValue(), PedidoConfirmado.class);
+      assertThat(evento.getPedidoId()).isEqualTo(pago);
+      assertThat(evento.getPagamentoId()).isEqualTo("pag-1");
+      assertThat(evento.getVersao()).isEqualTo(1);
+      JsonNode confirmado =
+          comoComprador("GET", "/api/v1/pedidos/" + pago, "loja-j", "cli-1").corpo();
+      assertThat(confirmado.get("status").asText()).isEqualTo("CONFIRMADO");
+      assertThat(confirmado.get("pagamentoId").asText()).isEqualTo("pag-1");
+
+      // Aprovado de um pedido já cancelado não o ressuscita (o estorno é com Pagamentos).
+      aprovado("loja-j", jaCancelado, "pag-2");
+      assertThat(consumer.receive(3, TimeUnit.SECONDS)).isNull();
+      assertThat(status("loja-j", jaCancelado)).isEqualTo("CANCELADO");
+    }
+    publicar(
+        PagamentoRecusado.newBuilder()
+            .setEventId(UUID.randomUUID())
+            .setTenantId("loja-j")
+            .setOccurredAt(Instant.now().truncatedTo(ChronoUnit.MILLIS))
+            .setPagamentoId("pag-3")
+            .setPedidoId(recusado)
+            .setMotivo("Valor acima do limite")
+            .build(),
+        "loja-j",
+        recusado);
+    await()
+        .atMost(30, TimeUnit.SECONDS)
+        .untilAsserted(() -> assertThat(status("loja-j", recusado)).isEqualTo("CANCELADO"));
+    assertThat(
+            comoGestor("GET", "/api/v1/pedidos/" + recusado, "loja-j")
+                .corpo()
+                .get("motivoCancelamento")
+                .asText())
+        .isEqualTo("PAGAMENTO_RECUSADO");
+    // Cliente cancela um pedido já pago: vale (Pagamentos estorna ao receber o pedido.cancelado).
+    assertThat(
+            comoComprador("POST", "/api/v1/pedidos/" + pago + "/cancelamento", "loja-j", "cli-1")
+                .status())
+        .isEqualTo(200);
+  }
+
+  @Test
+  void pendenteSemRespostaDoPagamentoExpira() throws Exception {
+    catalogo("loja-k", "p", 100);
+    String itens = "[" + item("p", 1) + "]";
+    String velho = comprar("loja-k", "cli-1", chave(), itens).corpo().get("id").asText();
+    Thread.sleep(2500);
+    String novo = comprar("loja-k", "cli-1", chave(), itens).corpo().get("id").asText();
+    try (Consumer<byte[]> consumer = ouvir("persistent://plataforma/pedidos/pedido.cancelado.v1")) {
+      assertThat(expiracao.expirarVencidos()).isGreaterThanOrEqualTo(1);
+      JsonNode expirado = comoGestor("GET", "/api/v1/pedidos/" + velho, "loja-k").corpo();
+      assertThat(expirado.get("status").asText()).isEqualTo("CANCELADO");
+      assertThat(expirado.get("motivoCancelamento").asText()).isEqualTo("EXPIRADO");
+      assertThat(status("loja-k", novo)).isEqualTo("PENDENTE");
+      boolean viu = false;
+      for (Message<byte[]> m = consumer.receive(10, TimeUnit.SECONDS);
+          m != null;
+          m = consumer.receive(2, TimeUnit.SECONDS)) {
+        PedidoCancelado e = AvroCodec.decode(m.getValue(), PedidoCancelado.class);
+        viu |= e.getPedidoId().equals(velho) && e.getMotivo().name().equals("EXPIRADO");
+      }
+      assertThat(viu).isTrue();
+    }
+    // Rodar de novo não mexe no pedido já cancelado.
+    JsonNode antes = comoGestor("GET", "/api/v1/pedidos/" + velho, "loja-k").corpo();
+    expiracao.expirarVencidos();
+    assertThat(comoGestor("GET", "/api/v1/pedidos/" + velho, "loja-k").corpo()).isEqualTo(antes);
   }
 }

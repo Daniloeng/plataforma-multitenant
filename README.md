@@ -10,7 +10,7 @@ ferramentas gratuitas.
 
 **Demo:** <https://daniloeng.github.io/plataforma-multitenant/> (frontend em modo demo, API simulada)
 
-## Estado atual: Dia 6 de 22
+## Estado atual: Dia 7 de 22
 
 | Componente | Situação |
 |---|---|
@@ -20,9 +20,9 @@ ferramentas gratuitas.
 | Biblioteca comum | ✅ `platform-spring`: contexto de tenant, outbox transacional, consumidor padrão de eventos (`EventSubscriber`), identidade do gateway (`Caller`) |
 | Catálogo | ✅ Ativo: produtos e preços por tenant em `/api/v1/produtos`, limite de produtos por plano, publica `produto.alterado` e `preco.alterado` |
 | Pedidos | ✅ Ativo: `/api/v1/pedidos` com preço da cópia local do catálogo, `Idempotency-Key`, cancelamento; publica `pedido.criado` e `pedido.cancelado` |
-| Pagamentos | Dia 7 |
-| Contratos | 10 eventos Avro, 5 APIs OpenAPI, 11 ADRs ([arquitetura](docs/arquitetura/event-storming.md)) |
-| Cobertura (linhas) | `platform-core` 100% · `contracts` 100% · `platform-spring` 91,1% · `gateway` 91,2% · `catalogo-service` 94,2% · `pedidos-service` 94,1% · `tenant-service` 97,4% · `status-service` 98,7% · frontend 99,9% (mínimo exigido: 80%) |
+| Pagamentos | ✅ Ativo: cobra cada `pedido.criado` num gateway simulado (aprova até R$ 10.000,00), estorna pedidos cancelados, ledger de partida dobrada em `/api/v1/ledger/lancamentos`; Pedidos confirma, cancela recusados e expira PENDENTE após 15 min |
+| Contratos | 10 eventos Avro, 5 APIs OpenAPI, 12 ADRs ([arquitetura](docs/arquitetura/event-storming.md)) |
+| Cobertura (linhas) | `platform-core` 100% · `contracts` 100% · `platform-spring` 91,1% · `gateway` 91,3% · `catalogo-service` 94,2% · `pedidos-service` 94,1% · `pagamentos-service` 99,1% · `tenant-service` 97,4% · `status-service` 98,7% · frontend 99,9% (mínimo exigido: 80%) |
 
 ## Arquitetura (visão alvo)
 
@@ -46,7 +46,7 @@ ferramentas gratuitas.
 Pré-requisitos: Java 21, Maven 3.9, Node 22, Docker.
 
 ```bash
-# Infraestrutura + serviços (4 MongoDB, Pulsar, Keycloak, gateway, tenants, catálogo, pedidos, status)
+# Infraestrutura + serviços (4 MongoDB, Pulsar, Keycloak, gateway, tenants, catálogo, pedidos, pagamentos, status)
 docker compose -f infra/docker-compose.yml up -d --build --wait
 infra/seed.sh                      # cria os tenants acme, globex e initech e produtos de exemplo
 curl -s localhost:8000/api/status  # público
@@ -83,7 +83,8 @@ cd frontend && npm run test:coverage   # Vitest, falha abaixo de 80%
 O CI (GitHub Actions) roda backend, frontend e um teste do **Compose inteiro**: sobe todos os
 containers, exige `UP` em `/api/status` pelo gateway, cria tenants com token do Keycloak, confere
 o `tenant.criado` no Pulsar, o `/api/v1/me`, os 403 de papel e de tenant, o limite do plano e
-uma compra com repetição pela mesma `Idempotency-Key`. Nada entra na `main` com CI vermelho.
+uma compra com repetição pela mesma `Idempotency-Key` e a saga de pagamento (aprovação, recusa acima
+do limite e estorno). Nada entra na `main` com CI vermelho.
 
 ## Estrutura
 
@@ -95,6 +96,7 @@ services/gateway/         porta de entrada: JWT, tenant, rate limit e rotas (por
 services/tenant-service/  cadastro de tenants (porta 8081, só na rede interna)
 services/catalogo-service/ produtos e preços por tenant (porta 8082, só na rede interna)
 services/pedidos-service/ pedidos B2B com idempotência (porta 8083, só na rede interna)
+services/pagamentos-service/ cobrança simulada, estorno e ledger (porta 8084, só na rede interna)
 services/status-service/  saúde da plataforma (porta 8090)
 frontend/                 React + Vite + TypeScript, publicado no GitHub Pages
 infra/                    Docker Compose, realm do Keycloak, scripts do Pulsar e seed
@@ -109,6 +111,21 @@ CLAUDE.md                 regras e comandos para o Claude Code
 
 Cada dia equivale a ~10 h de trabalho executado pelo Claude Code e revisado pelo Danilo, e termina
 com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
+
+### Dia 7: pagamentos, ledger e a saga do pedido · [detalhes](docs/dias/07.md)
+
+- **Feito:** `pagamentos-service` que cobra cada `pedido.criado` num gateway simulado (aprova até
+  R$ 10.000,00, recusa acima), estorna quando o pedido pago é cancelado e grava tudo num ledger de
+  partida dobrada; Pedidos confirma o pedido aprovado, cancela o recusado e expira o PENDENTE
+  esquecido; ADR-0012. No frontend, a aba **Pagamentos** com saldo e extrato, e o detalhe do pedido
+  mostrando o pagamento chegar.
+- **Por quê:** é o trecho da saga que move dinheiro. Reentrega, ordem trocada e cancelamento no
+  meio da cobrança não podem cobrar duas vezes nem cobrar pedido cancelado.
+- **Como testar:** como `bruno`, faça um pedido e veja-o passar de "Aguardando o pagamento." a
+  "Pago."; como `ana`, abra a aba Pagamentos. Os comandos com `curl` estão no diário.
+- **Cobertura:** `pagamentos-service` 99%, frontend 99,9% de linhas.
+- **Claude Code:** frontend por subagente em background enquanto o backend era testado no Compose;
+  revisão do `arquiteto` focada nas corridas da saga.
 
 ### Dia 6: pedidos com outbox e idempotência · [detalhes](docs/dias/06.md)
 
@@ -209,7 +226,7 @@ com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
 | 4 ✅ | Keycloak, Spring Cloud Gateway, rate limit por tenant | Login e troca de tenant |
 | 5 ✅ | Catálogo | Produtos por tenant |
 | 6 ✅ | Pedidos com outbox | Carrinho e pedido |
-| 7 | Pagamentos: autorização, captura, ledger | Pagamento e extrato |
+| 7 ✅ | Pagamentos: autorização, captura, ledger | Pagamento e extrato |
 | 8 | Saga completa | Linha do tempo do pedido (SSE) |
 | 9 | Níveis Pool, Bridge e Silo | Selo e promoção de nível |
 | 10 | Observabilidade (OpenTelemetry, Prometheus, Grafana) | Saúde por serviço |

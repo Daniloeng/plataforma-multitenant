@@ -59,6 +59,8 @@ export interface Pedido {
   status: StatusPedido;
   itens: ItemPedido[];
   total: Dinheiro;
+  /** Pagamento que confirmou o pedido (pagamento.aprovado); ausente ou null antes disso. */
+  pagamentoId?: string | null;
   motivoCancelamento?: MotivoCancelamento | null;
   criadoEm: string;
   atualizadoEm?: string;
@@ -187,6 +189,7 @@ export function isPedido(value: unknown): value is Pedido {
     Array.isArray(p.itens) &&
     p.itens.every(isItemPedido) &&
     isDinheiro(p.total) &&
+    optionalString(p.pagamentoId) &&
     isMotivo(p.motivoCancelamento) &&
     typeof p.criadoEm === 'string' &&
     optionalString(p.atualizadoEm)

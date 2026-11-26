@@ -27,6 +27,7 @@ public class PedidoDocument implements TenantOwned {
   private List<Item> itens;
   private long totalCentavos;
   private String moeda;
+  private String pagamentoId;
   private MotivoCancelamento motivoCancelamento;
   private Instant criadoEm;
   private Instant atualizadoEm;
@@ -52,6 +53,13 @@ public class PedidoDocument implements TenantOwned {
     this.totalCentavos = totalCentavos;
     this.moeda = moeda;
     this.criadoEm = agora;
+    this.atualizadoEm = agora;
+  }
+
+  /** Pagamento aprovado: PENDENTE vira CONFIRMADO. */
+  void confirmar(String pagamentoId, Instant agora) {
+    this.status = StatusPedido.CONFIRMADO;
+    this.pagamentoId = pagamentoId;
     this.atualizadoEm = agora;
   }
 
@@ -101,6 +109,10 @@ public class PedidoDocument implements TenantOwned {
 
   public String getMoeda() {
     return moeda;
+  }
+
+  public String getPagamentoId() {
+    return pagamentoId;
   }
 
   public MotivoCancelamento getMotivoCancelamento() {

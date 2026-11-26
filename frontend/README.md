@@ -1,6 +1,6 @@
-# Frontend — Status, Tenants, Produtos, Pedidos, Arquitetura e Minha conta
+# Frontend — Status, Tenants, Produtos, Pedidos, Pagamentos, Arquitetura e Minha conta
 
-Frontend da plataforma multi-tenant (pedidos B2B + pagamentos), com seis páginas em abas e, no
+Frontend da plataforma multi-tenant (pedidos B2B + pagamentos), com sete páginas em abas e, no
 cabeçalho, login (Keycloak) e troca de tenant:
 
 - **Status** (`#/`): status do `status-service` (`GET /api/status`, atualizado a cada 10 s), o
@@ -10,14 +10,18 @@ cabeçalho, login (Keycloak) e troca de tenant:
 - **Produtos** (`#/produtos`): catálogo do tenant escolhido no cabeçalho (`/api/v1/produtos`).
   Gestores cadastram, mudam preço, renomeiam e ativam/desativam; compradores montam o carrinho.
 - **Pedidos** (`#/pedidos` e `#/pedidos/<id>`): pedidos do tenant (`/api/v1/pedidos`) — o comprador
-  vê os do próprio cliente, o gestor vê os de todos; detalhe e cancelamento.
+  vê os do próprio cliente, o gestor vê os de todos; detalhe (com a situação do pagamento) e
+  cancelamento.
+- **Pagamentos** (`#/pagamentos`): o financeiro do tenant — saldo (receita líquida), pagamentos e o
+  extrato do ledger (`/api/v1/pagamentos` e `/api/v1/ledger/lancamentos`). Só para `gestor-tenant` e
+  `plataforma-admin`.
 - **Arquitetura** (`#/arquitetura`): diagramas do event storming, catálogo de eventos, matriz
   produtor × consumidor e lista de ADRs — tudo lido **em build time** do próprio repositório.
 
 - **Minha conta** (`#/conta`): o que o gateway sabe do usuário (`GET /api/v1/me`) — papéis,
   tenants, plano e limite de cada um — e o botão "Testar limite".
 
-O roteamento é por hash (`#/`, `#/tenants`, `#/produtos`, `#/pedidos`, `#/arquitetura` e `#/conta`), sem biblioteca de rotas,
+O roteamento é por hash (`#/`, `#/tenants`, `#/produtos`, `#/pedidos`, `#/pagamentos`, `#/arquitetura` e `#/conta`), sem biblioteca de rotas,
 para funcionar no GitHub Pages (que não reescreve rotas para o `index.html`).
 
 Stack: React 19 + Vite 7 + TypeScript, testes com Vitest + Testing Library + MSW. Requer Node 22+.
@@ -82,7 +86,7 @@ simulados. A página exibe o selo "Modo demo (API simulada)".
   (`tenant-suspenso`) para tenant suspenso; rate limit por tenant em `/api/v1/me` (token bucket em
   memória, conforme o plano) com 429 + `Retry-After`.
 - `/api/status` (`src/mocks/handlers.ts`), público: MongoDB x4, Pulsar, `tenant-service`,
-  `catalogo-service`, `pedidos-service`, `gateway` e `keycloak` (type `SERVICE`) no ar, latências
+  `catalogo-service`, `pedidos-service`, `pagamentos-service`, `gateway` e `keycloak` (type `SERVICE`) no ar, latências
   variando.
 - `/api/v1/produtos` (`src/mocks/catalogo.ts`): catálogo em memória por tenant, atrás do gateway
   simulado (token e `X-Tenant-Id` obrigatórios; 403 para comprador escrevendo). Veja
@@ -90,12 +94,15 @@ simulados. A página exibe o selo "Modo demo (API simulada)".
 - `/api/v1/pedidos` (`src/mocks/pedidos.ts`): pedidos em memória por tenant, atrás do gateway
   simulado; o `X-Cliente-Id` vem do usuário do token (`clienteIdOf` em `src/mocks/gateway.ts`). Veja
   [Carrinho e página Pedidos](#carrinho-e-página-pedidos).
+- `/api/v1/pagamentos`, `/api/v1/pagamentos/:id` e `/api/v1/ledger/lancamentos`
+  (`src/mocks/pagamentos.ts`): pagamentos-service simulado, atrás do gateway simulado (403
+  `acesso-negado` para quem não é gestor ou admin). Veja [Página Pagamentos](#página-pagamentos-e-extrato).
 - `/api/v1/tenants` e `/api/v1/tenants/:id` (`src/mocks/tenants.ts`): store em memória
   pré-populado com 5 tenants fictícios (Pool, Bridge e Silo), com as mesmas regras do contrato —
   400 em Problem Details (`application/problem+json`) para dados inválidos, 409 para id repetido,
   404 para tenant inexistente e paginação por cursor real (ordem: mais recentes primeiro; cursor =
   id do último item da página). O store vive só na aba do navegador: recarregar a página volta ao
-  estado inicial. Nos testes, `resetTenantStore()`, `resetCatalogoStore()`, `resetPedidosStore()`, `resetRateLimits()` e a limpeza do
+  estado inicial. Nos testes, `resetTenantStore()`, `resetCatalogoStore()`, `resetPedidosStore()`, `resetPagamentosStore()`, `resetRateLimits()` e a limpeza do
   `sessionStorage` rodam depois de cada teste (`src/test/setup.ts`).
 
 ```bash
@@ -183,14 +190,55 @@ Consome `libs/contracts/src/main/resources/openapi/pedidos.yaml` (cliente e tipo
 - **Lista**: data, cliente (só gestor), resumo dos itens, total em R$, selo de status (Pendente,
   Confirmado, Cancelado), filtro de status e "Carregar mais" pelo `proximoCursor`, do mais recente
   para o mais antigo. **Detalhe**: itens com SKU, nome e preço unitário gravados no pedido,
-  subtotal, total e o motivo do cancelamento. **Cancelar** pede confirmação na própria linha (sem
+  subtotal, total, o motivo do cancelamento e a **situação do pagamento**: "Aguardando o pagamento"
+  (`PENDENTE`), "Pago" com o `pagamentoId` (`CONFIRMADO`), "Pagamento recusado" (`CANCELADO` por
+  `PAGAMENTO_RECUSADO`; o gestor vê também o motivo do gateway), "Estornado" (pago e depois
+  cancelado) ou "Sem cobrança". Enquanto o pedido está `PENDENTE`, o detalhe consulta
+  `GET api/v1/pedidos/{id}` de novo a cada 1,5 s, até 10 vezes, e para ao sair da tela; depois
+  disso, "Consultar de novo" recomeça. É assim que, logo depois de "Fazer pedido", a confirmação
+  aparece sozinha. **Cancelar** pede confirmação na própria linha (sem
   `window.confirm`).
 - **Modo demo**: pedidos de exemplo no tenant de `bruno` (dele e de outros três clientes, visíveis
   para a `admin`) e nos tenants da `ana`. Preço, SKU e nome vêm do catálogo simulado; produto
   inativo ou de outro tenant responde 409 `produto-indisponivel`. Idempotência por (tenant, cliente,
-  chave) com hash do corpo. No Dia 6 todo pedido novo fica `PENDENTE` (o pagamento chega no Dia 7);
-  o cancelamento usa o motivo `SOLICITADO_PELO_CLIENTE`. Comprador lendo ou cancelando pedido de
+  chave) com hash do corpo. Todo pedido novo nasce `PENDENTE` e o pagamentos-service simulado o
+  cobra 1,2 s depois (veja [Página Pagamentos](#página-pagamentos-e-extrato)); o cancelamento pelo
+  comprador usa o motivo `SOLICITADO_PELO_CLIENTE` e pelo gestor `CANCELADO_PELO_TENANT`. Comprador lendo ou cancelando pedido de
   outro cliente recebe 404.
+
+## Página Pagamentos e extrato
+
+Consome `libs/contracts/src/main/resources/openapi/pagamentos.yaml` (cliente, tipos e guardas em
+`src/api/pagamentos.ts`). Só leitura: a cobrança é assíncrona, a partir de `pedido.criado`.
+
+| Ação       | Chamada                                                          | Quem           |
+| ---------- | ---------------------------------------------------------------- | -------------- |
+| Pagamentos | `GET api/v1/pagamentos?limite=20&cursor=…&status=…&pedidoId=…`   | gestor / admin |
+| Pagamento  | `GET api/v1/pagamentos/{id}`                                     | gestor / admin |
+| Extrato    | `GET api/v1/ledger/lancamentos?limite=20&cursor=…` (com `saldo`) | gestor / admin |
+
+- **Resumo**: o saldo (receita líquida = créditos em Receita do tenant − débitos em Estornos) e
+  "Atualizar". **Pagamentos**: data, pedido (link para o detalhe), cliente, valor em R$, selo
+  (Autorizando, Aprovado, Recusado, Estornado), motivo da recusa, filtro de status e "Carregar mais".
+- **Extrato**: lançamentos do mais recente para o mais antigo, com a conta (Caixa no gateway,
+  Receita do tenant, Estornos, cada uma com uma frase do que representa), a natureza (Débito ou
+  Crédito), o valor e o pedido, paginado com "Carregar mais". Uma legenda curta explica as partidas
+  dobradas: cada movimento gera um débito e um crédito de mesmo valor; captura = débito em Caixa no
+  gateway + crédito em Receita do tenant; estorno = débito em Estornos + crédito em Caixa no gateway.
+- **Comprador** (`bruno`): vê o aviso "Só o gestor do tenant vê o financeiro." e acompanha o
+  pagamento de cada pedido na aba Pedidos (a API responde 403 para ele).
+- **Modo demo** (`src/mocks/pagamentos.ts`): o pedidos simulado avisa os assinantes de
+  `pedido.criado` e `pedido.cancelado` (`assinarPedidos`); o pagamentos simulado agenda a cobrança
+  para 1,2 s depois. Não há `setTimeout`: as cobranças vencidas são processadas no começo de cada
+  requisição aos pedidos e aos pagamentos (`processarCobrancas`), então o poll do detalhe vê a
+  confirmação chegar, nada fica rodando entre testes, e os testes controlam o tempo com os timers
+  falsos do Vitest (que também falsificam o `Date`). O gateway simulado aprova até R$ 10.000,00
+  (pedido `CONFIRMADO` com `pagamentoId`, lançamentos de captura) e recusa acima ("Valor acima do
+  limite de aprovação do gateway simulado (R$ 10.000,00)."; pedido `CANCELADO` por
+  `PAGAMENTO_RECUSADO`, sem lançamentos). Pedido cancelado antes da cobrança nunca é cobrado;
+  cancelar um pedido `CONFIRMADO` gera o estorno (pagamento `ESTORNADO`). Os pedidos de exemplo têm
+  pagamentos coerentes: na `farmaceutica-boa-saude` e na `distribuidora-aurora` há aprovados, um
+  estornado e um recusado (o pedido mais recente de `bruno` segue pendente, do Dia 6).
 
 ## Página Arquitetura
 

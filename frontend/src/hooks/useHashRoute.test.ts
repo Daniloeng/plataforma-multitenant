@@ -18,6 +18,8 @@ describe('useHashRoute', () => {
     ['#/pedidos', 'pedidos'],
     ['#/pedidos/ped-n00001', 'pedidos'],
     ['#/Pedidos/', 'pedidos'],
+    ['#/pagamentos', 'pagamentos'],
+    ['#/Pagamentos/', 'pagamentos'],
     ['#/outra', 'status'],
   ])('%s → %s', (hash, route) => {
     expect(parseHash(hash)).toBe(route);

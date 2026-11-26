@@ -36,3 +36,4 @@ plataforma:
       status: ${STATUS_SERVICE_URL:http://localhost:8090}
       catalogo: ${CATALOGO_SERVICE_URL:http://localhost:8082}
       pedidos: ${PEDIDOS_SERVICE_URL:http://localhost:8083}
+      pagamentos: ${PAGAMENTOS_SERVICE_URL:http://localhost:8084}

@@ -48,11 +48,19 @@ export const ROADMAP: readonly RoadmapService[] = [
   {
     name: 'Pagamentos',
     day: 7,
-    responsibility: 'Processa cobranças dos pedidos e confirma pagamentos por eventos.',
+    responsibility:
+      'Cobra cada pedido num gateway simulado a partir de pedido.criado, registra captura e estorno num ledger de partidas dobradas e publica pagamento.aprovado, pagamento.recusado e pagamento.estornado.',
+    situation: 'Ativo',
+  },
+  {
+    name: 'Saga do pedido',
+    day: 8,
+    responsibility:
+      'Fecha a saga coreografada de ponta a ponta e mostra a linha do tempo de cada pedido em tempo real (SSE).',
     situation: 'Planejado',
   },
 ];
 
-export const CURRENT_DAY = 6;
+export const CURRENT_DAY = 7;
 export const TOTAL_DAYS = 22;
 export const REPOSITORY_URL = 'https://github.com/Daniloeng/plataforma-multitenant';

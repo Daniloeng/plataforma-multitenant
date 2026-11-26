@@ -186,6 +186,9 @@ components:
           type: array
           items: { $ref: '#/components/schemas/ItemPedido' }
         total: { $ref: '_comum.yaml#/components/schemas/Dinheiro' }
+        pagamentoId:
+          type: [string, 'null']
+          description: Pagamento que confirmou o pedido (pagamento.aprovado).
         motivoCancelamento:
           oneOf:
             - $ref: '#/components/schemas/MotivoCancelamento'

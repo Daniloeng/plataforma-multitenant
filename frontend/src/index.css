@@ -1461,3 +1461,125 @@ summary:focus-visible {
     justify-content: flex-end;
   }
 }
+
+/* ---- Pagamentos: situação no pedido, aba Pagamentos e extrato do ledger (Dia 7) ---- */
+
+.pedido__pagamento {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+
+.pedido__pagamento--pendente {
+  background: var(--degraded-bg);
+}
+
+.pedido__pagamento--pago {
+  background: var(--up-bg);
+}
+
+.pedido__pagamento--recusado,
+.pedido__pagamento--estornado {
+  background: var(--down-bg);
+}
+
+.pedido__pagamento code {
+  overflow-wrap: anywhere;
+}
+
+.pedido__pagamento .button {
+  min-height: 32px;
+}
+
+.financeiro-resumo {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 12px 24px;
+  align-items: center;
+}
+
+.financeiro-resumo p,
+.financeiro-saldo,
+.financeiro-saldo dd {
+  margin: 0;
+}
+
+.financeiro-saldo__valor {
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+
+.financeiro-saldo__ajuda {
+  font-size: 0.85rem;
+}
+
+.financeiro-resumo__acoes {
+  justify-self: end;
+}
+
+.pill--debito {
+  color: var(--publish);
+  background: var(--publish-bg);
+}
+
+.pill--credito {
+  color: var(--consume);
+  background: var(--consume-bg);
+}
+
+.conta {
+  display: flex;
+  flex-direction: column;
+}
+
+.conta__nome {
+  font-weight: 600;
+}
+
+.conta__descricao {
+  font-size: 0.8rem;
+}
+
+.extrato__legenda {
+  margin-bottom: 12px;
+  font-size: 0.88rem;
+}
+
+.extrato__legenda p {
+  margin: 0 0 6px;
+}
+
+.extrato__legenda ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.pagamentos__motivo {
+  min-width: 180px;
+  font-size: 0.85rem;
+}
+
+@media (max-width: 720px) {
+  .financeiro-resumo__acoes {
+    justify-self: stretch;
+  }
+
+  .financeiro-resumo__acoes .button {
+    width: 100%;
+  }
+
+  .tenants td .conta {
+    align-items: flex-end;
+    text-align: right;
+  }
+
+  .pagamentos__motivo {
+    min-width: 0;
+  }
+}

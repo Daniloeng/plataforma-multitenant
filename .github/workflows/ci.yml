@@ -84,7 +84,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Subir MongoDB x4, Pulsar, Keycloak, gateway, tenant, catálogo, pedidos e status
+      - name: Subir MongoDB x4, Pulsar, Keycloak, gateway, tenant, catálogo, pedidos, pagamentos e status
         run: docker compose -f infra/docker-compose.yml up -d --build --wait --wait-timeout 420
       - name: Conferir /api/status pelo gateway
         run: |
@@ -93,7 +93,7 @@ jobs:
           import json
           s = json.load(open("status.json"))
           assert s["status"] == "UP", s
-          assert len(s["components"]) == 10, s
+          assert len(s["components"]) == 11, s
           print("\nPlataforma UP com", len(s["components"]), "componentes")
           PY
       - name: Conferir namespaces Pulsar
@@ -105,7 +105,7 @@ jobs:
           done
       - name: Serviços não ficam expostos fora do gateway
         run: |
-          for url in http://localhost:8081/api/v1/tenants http://localhost:8082/api/v1/produtos http://localhost:8083/api/v1/pedidos http://localhost:8090/api/status; do
+          for url in http://localhost:8081/api/v1/tenants http://localhost:8082/api/v1/produtos http://localhost:8083/api/v1/pedidos http://localhost:8084/api/v1/pagamentos http://localhost:8090/api/status; do
             if curl -fsS -m 3 "$url"; then echo "$url respondeu fora do gateway" && exit 1; fi
           done
       - name: Sem token, a API responde 401
@@ -235,6 +235,60 @@ jobs:
             done
             [ "$ok" = 1 ] || { echo "$evento não chegou ao Pulsar"; exit 1; }
           done
+      - name: Saga de pagamento pelo gateway (aprova, recusa acima do limite e estorna)
+        run: |
+          token() {
+            curl -fsS http://localhost:8180/realms/plataforma/protocol/openid-connect/token \
+              -d grant_type=password -d client_id=plataforma-cli -d "username=$1" -d password=senha123 |
+              python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])'
+          }
+          ANA=$(token ana); BRUNO=$(token bruno)
+          api() { curl -sS -o resp.json -w '%{http_code}' "$@"; }
+          campo() { python3 -c "import json,sys; d=json.load(open('resp.json')); print(eval(sys.argv[1]))" "$1"; }
+          produto() {
+            test "$(api "http://localhost:8000/api/v1/produtos?busca=$1" -H "Authorization: Bearer $BRUNO" -H 'X-Tenant-Id: acme')" = 200
+            campo 'd["itens"][0]["id"]'
+          }
+          pedir() {
+            test "$(api -X POST http://localhost:8000/api/v1/pedidos -H "Authorization: Bearer $BRUNO" -H 'X-Tenant-Id: acme' \
+              -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -H 'Content-Type: application/json' \
+              -d "{\"itens\":[{\"produtoId\":\"$1\",\"quantidade\":$2}]}")" = 201
+            campo 'd["id"]'
+          }
+          # Espera o pedido sair de PENDENTE (o pagamento é assíncrono) e confere o estado final.
+          esperar_pedido() {
+            for i in $(seq 1 30); do
+              test "$(api http://localhost:8000/api/v1/pedidos/$1 -H "Authorization: Bearer $BRUNO" -H 'X-Tenant-Id: acme')" = 200
+              [ "$(campo 'd["status"]')" = "$2" ] && cat resp.json && echo && return 0
+              sleep 1
+            done
+            cat resp.json; echo "pedido $1 não chegou a $2"; return 1
+          }
+          pagamento() {
+            for i in $(seq 1 30); do
+              test "$(api "http://localhost:8000/api/v1/pagamentos?pedidoId=$1" -H "Authorization: Bearer $ANA" -H 'X-Tenant-Id: acme')" = 200
+              [ "$(campo 'd["itens"][0]["status"] if d["itens"] else ""')" = "$2" ] && return 0
+              sleep 1
+            done
+            cat resp.json; echo "pagamento do pedido $1 não chegou a $2"; return 1
+          }
+          # Até R$ 10.000,00 o gateway simulado aprova: o pedido é confirmado e a receita entra no ledger.
+          pago=$(pedir "$(produto FITA-ISO)" 2)
+          esperar_pedido "$pago" CONFIRMADO
+          pagamento "$pago" APROVADO
+          test "$(api http://localhost:8000/api/v1/ledger/lancamentos -H "Authorization: Bearer $ANA" -H 'X-Tenant-Id: acme')" = 200
+          cat resp.json; echo
+          python3 -c 'import json; d=json.load(open("resp.json")); assert d["saldo"]["centavos"] >= 1580, d'
+          # Comprador não vê o financeiro.
+          test "$(api http://localhost:8000/api/v1/pagamentos -H "Authorization: Bearer $BRUNO" -H 'X-Tenant-Id: acme')" = 403
+          # Cancelar o pedido pago gera o estorno.
+          test "$(api -X POST http://localhost:8000/api/v1/pedidos/$pago/cancelamento -H "Authorization: Bearer $BRUNO" -H 'X-Tenant-Id: acme')" = 200
+          pagamento "$pago" ESTORNADO
+          # Acima do limite o pagamento é recusado e o pedido cancelado com PAGAMENTO_RECUSADO.
+          caro=$(pedir "$(produto LUVA-NIT)" 2000)
+          esperar_pedido "$caro" CANCELADO
+          [ "$(campo 'd["motivoCancelamento"]')" = PAGAMENTO_RECUSADO ]
+          pagamento "$caro" RECUSADO
       - name: Logs em caso de falha
         if: failure()
         run: docker compose -f infra/docker-compose.yml logs --tail 200

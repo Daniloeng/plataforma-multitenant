@@ -23,7 +23,13 @@ import { catalogoSnapshot } from './catalogo';
 import { clienteIdOf, guard, problemResponse } from './gateway';
 
 type SeedItem = readonly [sku: string, quantidade: number];
-type Seed = readonly [clienteId: string, itens: readonly SeedItem[], cancelado?: boolean];
+/**
+ * Situação do exemplo: pendente (Dia 6, ainda sem cobrança), pago (CONFIRMADO com pagamento
+ * aprovado), estornado (pago e depois cancelado pelo cliente), recusado (total acima do limite do
+ * gateway simulado: CANCELADO por PAGAMENTO_RECUSADO) ou cancelado (antes de qualquer cobrança).
+ */
+export type SituacaoSeed = 'pendente' | 'pago' | 'estornado' | 'recusado' | 'cancelado';
+type Seed = readonly [clienteId: string, itens: readonly SeedItem[], situacao?: SituacaoSeed];
 
 /** Pedidos de exemplo, do mais recente para o mais antigo. */
 const SEEDS: Record<string, readonly Seed[]> = {
@@ -35,7 +41,7 @@ const SEEDS: Record<string, readonly Seed[]> = {
         ['SOR-FIS-500', 10],
       ],
     ],
-    ['cli-hospital-sao-lucas', [['LUV-PRO-M', 50]]],
+    ['cli-hospital-sao-lucas', [['LUV-PRO-M', 50]], 'pago'],
     [
       'cli-drogaria-central',
       [
@@ -43,14 +49,16 @@ const SEEDS: Record<string, readonly Seed[]> = {
         ['ALC-GEL-70', 6],
         ['MAS-TRI-50', 20],
       ],
+      'pago',
     ],
-    ['cli-bruno', [['SER-5ML-100', 12]], true],
+    ['cli-bruno', [['SER-5ML-100', 12]], 'estornado'],
     [
       'cli-clinica-vida',
       [
+        ['TER-DIG-01', 80],
         ['GAZ-EST-10', 8],
-        ['TER-DIG-01', 1],
       ],
+      'recusado',
     ],
     [
       'cli-bruno',
@@ -59,9 +67,10 @@ const SEEDS: Record<string, readonly Seed[]> = {
         ['MAS-TRI-50', 15],
         ['LUV-PRO-M', 10],
       ],
+      'pago',
     ],
-    ['cli-hospital-sao-lucas', [['SOR-FIS-500', 40]], true],
-    ['cli-drogaria-central', [['DIP-500-CX10', 2]]],
+    ['cli-hospital-sao-lucas', [['SOR-FIS-500', 40]], 'cancelado'],
+    ['cli-drogaria-central', [['DIP-500-CX10', 2]], 'pago'],
   ],
   'distribuidora-aurora': [
     [
@@ -70,11 +79,13 @@ const SEEDS: Record<string, readonly Seed[]> = {
         ['ARZ-T1-5KG', 10],
         ['FEJ-CAR-1KG', 8],
       ],
+      'pago',
     ],
-    ['cli-padaria-trigo-de-ouro', [['FAR-TRI-1KG', 25]]],
-    ['cli-mercado-bom-preco', [['CAF-TOR-500', 3]], true],
+    ['cli-padaria-trigo-de-ouro', [['FAR-TRI-1KG', 25]], 'pago'],
+    ['cli-mercado-bom-preco', [['CAF-TOR-500', 3]], 'estornado'],
+    ['cli-padaria-trigo-de-ouro', [['CAF-TOR-500', 30]], 'recusado'],
   ],
-  'atacado-vale-verde': [['cli-hotel-serra-verde', [['PAP-HIG-F30', 6]]]],
+  'atacado-vale-verde': [['cli-hotel-serra-verde', [['PAP-HIG-F30', 6]], 'pago']],
 };
 
 /** Datas dos exemplos: antes do primeiro dia do pedidos-service; pedidos novos ficam no topo. */
@@ -99,28 +110,103 @@ function totalDe(itens: readonly ItemPedido[]): Pedido['total'] {
   return { centavos, moeda: itens[0]?.precoUnitario?.moeda ?? MOEDA_PADRAO };
 }
 
+/** Id do pagamento de um pedido de exemplo: ped-<x>-0001 → pag-<x>-0001. */
+export function pagamentoIdDoExemplo(pedidoId: string): string {
+  return pedidoId.replace(/^ped-/, 'pag-');
+}
+
 function seedPedidos(tenantId: string): Pedido[] {
   const catalogo = catalogoSnapshot(tenantId);
-  return (SEEDS[tenantId] ?? []).map(([clienteId, seedItens, cancelado = false], i) => {
+  const seeds = SEEDS[tenantId] ?? [];
+  return seeds.map(([clienteId, seedItens, situacao = 'pendente'], i) => {
     const itens = seedItens.flatMap(([sku, quantidade]) => {
       const produto = catalogo.find((p) => p.sku === sku);
       return produto ? [itemDe(produto, quantidade)] : [];
     });
-    const criadoEm = new Date(SEED_DATE - i * 7 * HORA).toISOString();
-    const atualizadoEm = cancelado
-      ? new Date(SEED_DATE - i * 7 * HORA + HORA).toISOString()
-      : criadoEm;
+    const id = `ped-${tenantId.split('-')[0]}-${String(seeds.length - i).padStart(4, '0')}`;
+    const criado = SEED_DATE - i * 7 * HORA;
+    const criadoEm = new Date(criado).toISOString();
+    const cancelado =
+      situacao === 'estornado' || situacao === 'recusado' || situacao === 'cancelado';
+    // Cobrança em segundos; cancelamento pelo cliente uma hora depois.
+    const atualizadoEm =
+      situacao === 'pendente'
+        ? criadoEm
+        : new Date(
+            criado + (situacao === 'pago' || situacao === 'recusado' ? 1200 : HORA),
+          ).toISOString();
     return {
-      id: `ped-${tenantId.split('-')[0]}-${String(SEEDS[tenantId]!.length - i).padStart(4, '0')}`,
+      id,
       clienteId,
-      status: cancelado ? 'CANCELADO' : 'PENDENTE',
+      status: cancelado ? 'CANCELADO' : situacao === 'pago' ? 'CONFIRMADO' : 'PENDENTE',
       itens,
       total: totalDe(itens),
-      motivoCancelamento: cancelado ? 'SOLICITADO_PELO_CLIENTE' : null,
+      pagamentoId:
+        situacao === 'pago' || situacao === 'estornado' ? pagamentoIdDoExemplo(id) : null,
+      motivoCancelamento:
+        situacao === 'recusado'
+          ? 'PAGAMENTO_RECUSADO'
+          : cancelado
+            ? 'SOLICITADO_PELO_CLIENTE'
+            : null,
       criadoEm,
       atualizadoEm,
     };
   });
+}
+
+// ---- Integração com o pagamentos-service simulado ----
+
+/**
+ * Quem assina os "eventos" do pedidos-service simulado: o pagamentos-service simulado
+ * (src/mocks/pagamentos.ts) cobra em pedido.criado e estorna em pedido.cancelado. A dependência
+ * vai só de pagamentos para pedidos, como na plataforma real (integração por eventos).
+ */
+export interface AssinantePedidos {
+  /** pedido.criado. */
+  pedidoCriado(tenantId: string, pedido: Pedido): void;
+  /** pedido.cancelado; `anterior` é o status antes do cancelamento. */
+  pedidoCancelado(tenantId: string, pedido: Pedido, anterior: StatusPedido): void;
+  /** Antes de cada leitura ou cancelamento: entrega as cobranças que já "venceram". */
+  sincronizar(): void;
+}
+
+const assinantes = new Set<AssinantePedidos>();
+
+/** Registra um assinante; devolve a função que o remove. */
+export function assinarPedidos(assinante: AssinantePedidos): () => void {
+  assinantes.add(assinante);
+  return () => {
+    assinantes.delete(assinante);
+  };
+}
+
+function sincronizar(): void {
+  for (const a of assinantes) a.sincronizar();
+}
+
+/**
+ * pagamento.aprovado ou pagamento.recusado chegando ao pedidos-service: só um pedido PENDENTE muda
+ * (aprovado → CONFIRMADO com o pagamentoId; recusado → CANCELADO por PAGAMENTO_RECUSADO).
+ * Devolve false se o pedido não existe ou já saiu de PENDENTE.
+ */
+export function aplicarPagamento(
+  tenantId: string,
+  pedidoId: string,
+  resultado: { aprovado: true; pagamentoId: string } | { aprovado: false },
+  quando: string,
+): boolean {
+  const pedido = pedidosDo(tenantId).find((p) => p.id === pedidoId);
+  if (pedido?.status !== 'PENDENTE') return false;
+  if (resultado.aprovado) {
+    pedido.status = 'CONFIRMADO';
+    pedido.pagamentoId = resultado.pagamentoId;
+  } else {
+    pedido.status = 'CANCELADO';
+    pedido.motivoCancelamento = 'PAGAMENTO_RECUSADO';
+  }
+  pedido.atualizadoEm = quando;
+  return true;
 }
 
 interface Chave {
@@ -316,12 +402,14 @@ export const pedidosHandlers = [
       status: 'PENDENTE',
       itens: itensPedido,
       total: totalDe(itensPedido),
+      pagamentoId: null,
       motivoCancelamento: null,
       criadoEm: agora,
       atualizadoEm: agora,
     };
     pedidosDo(a.tenant.id).unshift(pedido);
     chaves.set(chaveId, { hash, pedidoId: pedido.id });
+    for (const assinante of assinantes) assinante.pedidoCriado(a.tenant.id, copia(pedido));
     return HttpResponse.json(copia(pedido), {
       status: 201,
       headers: { Location: `/api/v1/pedidos/${pedido.id}` },
@@ -331,6 +419,7 @@ export const pedidosHandlers = [
   http.get('*/api/v1/pedidos', ({ request }) => {
     const a = acesso(request);
     if ('response' in a) return a.response;
+    sincronizar();
     const params = new URL(request.url).searchParams;
 
     const limiteRaw = params.get('limite');
@@ -369,6 +458,7 @@ export const pedidosHandlers = [
   http.get('*/api/v1/pedidos/:id', ({ request, params }) => {
     const a = acesso(request);
     if ('response' in a) return a.response;
+    sincronizar();
     const id = String(params.id);
     const pedido = encontra(a.tenant.id, id, a.clienteId);
     return pedido ? HttpResponse.json(copia(pedido)) : naoEncontrado(id);
@@ -377,6 +467,7 @@ export const pedidosHandlers = [
   http.post('*/api/v1/pedidos/:id/cancelamento', ({ request, params }) => {
     const a = acesso(request);
     if ('response' in a) return a.response;
+    sincronizar();
     const id = String(params.id);
     const pedido = encontra(a.tenant.id, id, a.clienteId);
     if (!pedido) return naoEncontrado(id);
@@ -388,11 +479,14 @@ export const pedidosHandlers = [
         `O pedido '${id}' já está cancelado.`,
       );
     }
+    const anterior = pedido.status;
     pedido.status = 'CANCELADO';
     // Quem cancela entra no motivo, como no pedidos-service.
     pedido.motivoCancelamento =
       a.clienteId === null ? 'CANCELADO_PELO_TENANT' : 'SOLICITADO_PELO_CLIENTE';
     pedido.atualizadoEm = new Date().toISOString();
+    for (const assinante of assinantes)
+      assinante.pedidoCancelado(a.tenant.id, copia(pedido), anterior);
     return HttpResponse.json(copia(pedido));
   }),
 ];

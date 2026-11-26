@@ -20,9 +20,14 @@ import { LoginPrompt } from '../components/auth/LoginPrompt';
 import { CancelarPedido, StatusPedidoPill } from '../components/pedidos/PedidoParts';
 import { ROUTE_HASH, parsePedidoId, pedidoHash, useHash } from '../hooks/useHashRoute';
 import { usePedidos } from '../hooks/usePedidos';
+import { describePagamentoError, listPagamentos } from '../api/pagamentos';
 import { formatDateTime } from '../utils/format';
 
 const COMPOSE_COMMAND = 'docker compose -f infra/docker-compose.yml up -d --build --wait';
+
+/** Poll do detalhe enquanto o pedido está PENDENTE: a cada 1,5 s, até 10 consultas. */
+export const POLL_INTERVALO_MS = 1500;
+export const POLL_TENTATIVAS = 10;
 
 /** Página Pedidos: lista (#/pedidos) e detalhe (#/pedidos/<id>) do pedidos-service. */
 export function PedidosPage() {
@@ -279,10 +284,13 @@ type Detalhe =
 
 function DetalhePedido({ id, gestor }: { id: string; gestor: boolean }) {
   const [detalhe, setDetalhe] = useState<Detalhe>({ estado: 'carregando' });
+  /** Consultas feitas pelo poll desde a última carga. */
+  const [tentativas, setTentativas] = useState(0);
 
   const carregar = useCallback(
     async (signal?: AbortSignal) => {
       setDetalhe({ estado: 'carregando' });
+      setTentativas(0);
       try {
         const pedido = await getPedido(id, signal);
         if (!signal?.aborted) setDetalhe({ estado: 'ok', pedido });
@@ -303,6 +311,31 @@ function DetalhePedido({ id, gestor }: { id: string; gestor: boolean }) {
     void carregar(controller.signal);
     return () => controller.abort();
   }, [carregar]);
+
+  // Enquanto PENDENTE, consulta de novo: o pagamentos-service cobra de forma assíncrona e a
+  // confirmação (ou o cancelamento por recusa) chega alguns instantes depois. Para ao sair da tela.
+  const pendente = detalhe.estado === 'ok' && detalhe.pedido.status === 'PENDENTE';
+  const consultando = pendente && tentativas < POLL_TENTATIVAS;
+  useEffect(() => {
+    if (!consultando) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      getPedido(id, controller.signal)
+        .then((pedido) => {
+          if (controller.signal.aborted) return;
+          setDetalhe({ estado: 'ok', pedido });
+          setTentativas((t) => t + 1);
+        })
+        .catch(() => {
+          // Falha numa consulta do poll não apaga o pedido da tela: conta como tentativa.
+          if (!controller.signal.aborted) setTentativas((t) => t + 1);
+        });
+    }, POLL_INTERVALO_MS);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [consultando, tentativas, id]);
 
   return (
     <section className="section" aria-label="Detalhe do pedido">
@@ -339,6 +372,8 @@ function DetalhePedido({ id, gestor }: { id: string; gestor: boolean }) {
         <PedidoCard
           pedido={detalhe.pedido}
           gestor={gestor}
+          consultando={consultando}
+          onConsultar={() => setTentativas(0)}
           onCancelado={(pedido) => setDetalhe({ estado: 'ok', pedido })}
         />
       ) : null}
@@ -346,13 +381,117 @@ function DetalhePedido({ id, gestor }: { id: string; gestor: boolean }) {
   );
 }
 
+/** Situação do pagamento do pedido, em linguagem do cliente. */
+function SituacaoPagamento({
+  pedido: p,
+  gestor,
+  consultando,
+  onConsultar,
+}: {
+  pedido: Pedido;
+  gestor: boolean;
+  consultando: boolean;
+  onConsultar: () => void;
+}) {
+  if (p.status === 'PENDENTE') {
+    return (
+      <div className="pedido__pagamento pedido__pagamento--pendente" role="status">
+        <strong>Aguardando o pagamento.</strong>{' '}
+        <span className="muted">
+          {consultando
+            ? 'O pagamentos-service cobra o pedido logo depois de criado; esta tela consulta de novo a cada 1,5 s.'
+            : 'A confirmação ainda não chegou.'}
+        </span>{' '}
+        {consultando ? null : (
+          <button
+            type="button"
+            className="button button--small button--secondary"
+            onClick={onConsultar}
+          >
+            Consultar de novo
+          </button>
+        )}
+      </div>
+    );
+  }
+  if (p.status === 'CONFIRMADO') {
+    return (
+      <div className="pedido__pagamento pedido__pagamento--pago" role="status">
+        <strong>Pago.</strong>{' '}
+        <span>
+          Pagamento aprovado
+          {p.pagamentoId ? (
+            <>
+              {' '}
+              <code>{p.pagamentoId}</code>
+            </>
+          ) : null}
+          ; o pedido está confirmado.
+        </span>
+      </div>
+    );
+  }
+  if (p.motivoCancelamento === 'PAGAMENTO_RECUSADO') {
+    return (
+      <div className="pedido__pagamento pedido__pagamento--recusado" role="status">
+        <strong>Pagamento recusado.</strong>{' '}
+        <span>
+          O gateway de pagamento recusou a cobrança e o pedido foi cancelado; nada foi cobrado.
+        </span>{' '}
+        {gestor ? <MotivoRecusa pedidoId={p.id} /> : null}
+      </div>
+    );
+  }
+  if (p.pagamentoId) {
+    return (
+      <div className="pedido__pagamento pedido__pagamento--estornado" role="status">
+        <strong>Estornado.</strong>{' '}
+        <span>
+          O pedido foi pago (<code>{p.pagamentoId}</code>) e cancelado depois: o valor foi devolvido
+          ao cliente.
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="pedido__pagamento" role="status">
+      <strong>Sem cobrança.</strong> <span>O pedido foi cancelado antes do pagamento.</span>
+    </div>
+  );
+}
+
+/** Motivo da recusa, do pagamentos-service (só o financeiro consulta pagamentos). */
+function MotivoRecusa({ pedidoId }: { pedidoId: string }) {
+  const [motivo, setMotivo] = useState<string | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    listPagamentos({ pedidoId, limite: 1, signal: controller.signal })
+      .then((pagina) => {
+        if (!controller.signal.aborted) {
+          setMotivo(pagina.itens[0]?.motivoRecusa ?? 'O gateway não informou o motivo.');
+        }
+      })
+      .catch((err: unknown) => {
+        if (!controller.signal.aborted) {
+          setMotivo(`Motivo indisponível: ${describePagamentoError(err)}`);
+        }
+      });
+    return () => controller.abort();
+  }, [pedidoId]);
+  return motivo ? <span className="pedido__motivo-recusa">Motivo: {motivo}</span> : null;
+}
+
 function PedidoCard({
   pedido: p,
   gestor,
+  consultando,
+  onConsultar,
   onCancelado,
 }: {
   pedido: Pedido;
   gestor: boolean;
+  consultando: boolean;
+  onConsultar: () => void;
   onCancelado: (pedido: Pedido) => void;
 }) {
   return (
@@ -393,11 +532,12 @@ function PedidoCard({
           </div>
         ) : null}
       </dl>
-      {p.status === 'PENDENTE' ? (
-        <p className="muted pedido__nota">
-          Aguardando o pagamento: a confirmação chega pelos eventos do pagamentos-service.
-        </p>
-      ) : null}
+      <SituacaoPagamento
+        pedido={p}
+        gestor={gestor}
+        consultando={consultando}
+        onConsultar={onConsultar}
+      />
 
       <div className="table-wrap pedido__itens">
         <table className="tenants">
