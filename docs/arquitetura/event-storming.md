@@ -130,11 +130,12 @@ stateDiagram-v2
 - **Ordem dos eventos.** Dentro de um tópico, a chave `tenantId:pedidoId` com assinatura
   `Key_Shared` garante a ordem dos eventos do mesmo pedido. **Entre tópicos não há ordem**:
   `pedido.cancelado` pode chegar a Pagamentos antes de `pedido.criado`. Pagamentos guarda a marca
-  de cancelamento por pedido e nunca cobra um pedido já cancelado; se o cancelamento chegar durante
-  a captura, estorna logo em seguida (ADR-0006).
+  de cancelamento por pedido e nunca cobra um pedido já cancelado. Se o cancelamento chegar durante
+  a captura, o índice único por pedido faz uma das transações abortar e ser refeita: a cobrança
+  vencedora é estornada, ou a marca vencedora impede a cobrança (ADR-0006, ADR-0012).
 - **Cancelamento concorrente com a aprovação.** O cliente cancela enquanto o pagamento está sendo
   capturado. Pedidos ignora `pagamento.aprovado` de um pedido já CANCELADO; quem devolve o dinheiro
-  é Pagamentos, que estorna ao ver a marca de cancelamento.
+  é Pagamentos, que estorna ao receber o `pedido.cancelado` de um pedido com pagamento APROVADO.
 - **Pedido esquecido.** Um pedido PENDENTE sem resposta de pagamento por 15 minutos é expirado por
   um job de Pedidos (`EXPIRADO`); se o pagamento aprovar depois, Pagamentos estorna.
 - **Pedido em nome de outro cliente.** O cliente vem do token (`X-Cliente-Id`), nunca do corpo

@@ -19,6 +19,8 @@ public class ConsultaService {
 
   static final int MAX_PAGE = 100;
   static final String MOEDA_PADRAO = "BRL";
+  private static final java.util.regex.Pattern MOEDA =
+      java.util.regex.Pattern.compile("^[A-Z]{3}$");
 
   private final MongoOperations mongo;
 
@@ -61,7 +63,10 @@ public class ConsultaService {
     return Views.PagamentoView.of(doc);
   }
 
-  public Views.Extrato extrato(String cursor, int limite) {
+  public Views.Extrato extrato(String cursor, int limite, String moeda) {
+    if (moeda == null || !MOEDA.matcher(moeda).matches()) {
+      throw new RequisicaoInvalida("moeda deve ter 3 letras maiúsculas (ISO 4217).");
+    }
     validarLimite(limite);
     Pagina<Lancamento> p =
         pagina(
@@ -73,11 +78,12 @@ public class ConsultaService {
             Lancamento::getOcorridoEm,
             Lancamento::getId);
     return new Views.Extrato(
-        p.itens().stream().map(Views.LancamentoView::of).toList(), saldo(), p.proximo());
+        p.itens().stream().map(Views.LancamentoView::of).toList(), saldo(moeda), p.proximo());
   }
 
   /** Receita líquida: créditos em RECEITA_TENANT menos débitos em ESTORNOS, somados no banco. */
-  Dinheiro saldo() {
+  /** Receita líquida numa moeda: valores de moedas diferentes nunca são somados. */
+  Dinheiro saldo(String moeda) {
     String tenant = TenantContext.require().toString();
     Criteria receita =
         Criteria.where("conta")
@@ -91,16 +97,17 @@ public class ConsultaService {
             .is(Lancamento.Natureza.DEBITO);
     Aggregation agg =
         Aggregation.newAggregation(
-            Aggregation.match(Criteria.where("tenantId").is(tenant).orOperator(receita, estornos)),
-            Aggregation.group("conta", "moeda").sum("valorCentavos").as("total"));
+            Aggregation.match(
+                Criteria.where("tenantId")
+                    .is(tenant)
+                    .and("moeda")
+                    .is(moeda)
+                    .orOperator(receita, estornos)),
+            Aggregation.group("conta").sum("valorCentavos").as("total"));
     long saldo = 0;
-    String moeda = MOEDA_PADRAO;
     for (Document d : mongo.aggregate(agg, Lancamento.class, Document.class).getMappedResults()) {
-      Document id = d.get("_id", Document.class);
       long total = ((Number) d.get("total")).longValue();
-      moeda = id.getString("moeda");
-      saldo +=
-          Lancamento.Conta.RECEITA_TENANT.name().equals(id.getString("conta")) ? total : -total;
+      saldo += Lancamento.Conta.RECEITA_TENANT.name().equals(d.getString("_id")) ? total : -total;
     }
     return new Dinheiro(saldo, moeda);
   }

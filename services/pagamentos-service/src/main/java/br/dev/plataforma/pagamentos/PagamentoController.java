@@ -42,8 +42,9 @@ public class PagamentoController {
   public Views.Extrato extrato(
       Caller caller,
       @RequestParam(required = false) String cursor,
-      @RequestParam(defaultValue = "20") int limite) {
+      @RequestParam(defaultValue = "20") int limite,
+      @RequestParam(defaultValue = ConsultaService.MOEDA_PADRAO) String moeda) {
     caller.requireAnyRole(Caller.GESTOR, Caller.ADMIN);
-    return consultas.extrato(cursor, limite);
+    return consultas.extrato(cursor, limite, moeda);
   }
 }

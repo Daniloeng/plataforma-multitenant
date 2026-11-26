@@ -219,6 +219,11 @@ class PagamentosServiceIT {
       assertThat(extrato.corpo().get("itens").findValuesAsText("conta"))
           .containsExactlyInAnyOrder("CAIXA_GATEWAY", "RECEITA_TENANT");
       assertThat(extrato.corpo().get("saldo").get("centavos").asLong()).isEqualTo(4990);
+      // Saldo por moeda: os reais não entram no saldo em dólares.
+      JsonNode saldoUsd =
+          gestor("/api/v1/ledger/lancamentos?moeda=USD", "loja-a").corpo().get("saldo");
+      assertThat(saldoUsd.get("centavos").asLong()).isZero();
+      assertThat(saldoUsd.get("moeda").asText()).isEqualTo("USD");
 
       publicar(cancelado("loja-a", "ped-1"), "loja-a", "ped-1");
       Message<byte[]> estorno = estornados.receive(30, TimeUnit.SECONDS);
@@ -321,5 +326,6 @@ class PagamentosServiceIT {
     assertThat(gestor("/api/v1/pagamentos?limite=0", "loja-d").status()).isEqualTo(400);
     assertThat(gestor("/api/v1/pagamentos?cursor=@@@", "loja-d").status()).isEqualTo(400);
     assertThat(gestor("/api/v1/pagamentos?status=PAGO", "loja-d").status()).isEqualTo(400);
+    assertThat(gestor("/api/v1/ledger/lancamentos?moeda=real", "loja-d").status()).isEqualTo(400);
   }
 }

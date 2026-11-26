@@ -6,6 +6,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoOperations;
 import org.springframework.data.mongodb.core.index.Index;
+import org.springframework.data.mongodb.core.index.PartialIndexFilter;
+import org.springframework.data.mongodb.core.query.Criteria;
 
 /**
  * Índices e coleções, criados antes de o servidor aceitar requisições e de os consumidores
@@ -46,6 +48,17 @@ public class PedidosIndexes {
                   .on("criadoEm", Sort.Direction.DESC)
                   .on("_id", Sort.Direction.DESC)
                   .named("ix_cliente_recentes"));
+      // Job de expiração (ADR-0012): lê PENDENTES de todos os tenants, por isso não começa por
+      // tenantId. Parcial: só os PENDENTES entram no índice, que fica pequeno.
+      mongo
+          .indexOps(PedidoDocument.class)
+          .createIndex(
+              new Index()
+                  .on("criadoEm", Sort.Direction.ASC)
+                  .partial(
+                      PartialIndexFilter.of(
+                          Criteria.where("status").is(StatusPedido.PENDENTE.name())))
+                  .named("ix_pendentes_expiracao"));
       mongo
           .indexOps(ProdutoLocal.class)
           .createIndex(

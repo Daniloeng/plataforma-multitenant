@@ -18,8 +18,8 @@ import org.springframework.stereotype.Service;
 /**
  * As decisões sobre dinheiro da saga (ADR-0006, ADR-0012). Roda dentro da transação do consumidor
  * ({@code EventSubscriber}): pagamento, lançamentos e evento no outbox entram juntos ou não entram.
- * Os eventos de pagamento usam o {@code pedidoId} como chave, para o Key_Shared entregar os eventos
- * de um mesmo pedido em ordem ao consumidor de Pedidos.
+ * Os eventos de pagamento usam o {@code pedidoId} como agregado da chave da mensagem: com um
+ * pagamento por pedido, isso só facilita correlacionar os eventos com o pedido.
  */
 @Service
 public class CobrancaService {

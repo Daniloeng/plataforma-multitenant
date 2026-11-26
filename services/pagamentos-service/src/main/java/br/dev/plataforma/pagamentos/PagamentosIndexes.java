@@ -43,6 +43,18 @@ public class PagamentosIndexes {
                   .on("ocorridoEm", Sort.Direction.DESC)
                   .on("_id", Sort.Direction.DESC)
                   .named("ix_tenant_extrato"));
+      // Defesa em profundidade: cada pagamento tem no máximo um lançamento por conta e natureza
+      // (captura e estorno usam pares diferentes), então um estorno repetido falha na escrita.
+      mongo
+          .indexOps(Lancamento.class)
+          .createIndex(
+              new Index()
+                  .on("tenantId", Sort.Direction.ASC)
+                  .on("pagamentoId", Sort.Direction.ASC)
+                  .on("conta", Sort.Direction.ASC)
+                  .on("natureza", Sort.Direction.ASC)
+                  .unique()
+                  .named("ux_lancamento"));
     };
   }
 }

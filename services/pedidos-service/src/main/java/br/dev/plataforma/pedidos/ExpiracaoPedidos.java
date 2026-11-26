@@ -77,6 +77,9 @@ public class ExpiracaoPedidos {
       } catch (DataAccessException e) {
         // Pagamento ou outra réplica mexeu no pedido ao mesmo tempo: a próxima rodada decide.
         LOG.debug("Pedido {} não expirou agora: {}", p.getId(), e.toString());
+      } catch (RuntimeException e) {
+        // Um pedido com problema não pode travar a expiração dos outros do lote.
+        LOG.warn("Pedido {} não pôde ser expirado", p.getId(), e);
       }
     }
     return expirados;

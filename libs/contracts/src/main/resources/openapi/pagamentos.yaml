@@ -76,8 +76,14 @@ paths:
         Do lançamento mais recente para o mais antigo. Captura: débito em CAIXA_GATEWAY e crédito
         em RECEITA_TENANT. Estorno: débito em ESTORNOS e crédito em CAIXA_GATEWAY. O saldo é a
         receita líquida do tenant (créditos em RECEITA_TENANT menos débitos em ESTORNOS), em todas
-        as páginas.
+        as páginas, na moeda pedida: valores de moedas diferentes nunca são somados. Os itens
+        trazem lançamentos de todas as moedas.
       parameters:
+        - name: moeda
+          in: query
+          required: false
+          description: Moeda (ISO 4217) do saldo. Padrão BRL.
+          schema: { type: string, pattern: '^[A-Z]{3}$', default: BRL }
         - $ref: '_comum.yaml#/components/parameters/Cursor'
         - $ref: '_comum.yaml#/components/parameters/Limite'
       responses:

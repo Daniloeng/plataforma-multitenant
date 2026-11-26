@@ -21,8 +21,10 @@ o evento se o serviço cair entre um e outro.
   e `pagamento.*`, ADR-0003). Toda a decisão sobre dinheiro fica em Pagamentos:
   - Pagamentos guarda, por `(tenantId, pedidoId)`, se o pedido já foi cancelado. Se
     `pedido.cancelado` chega antes de `pedido.criado`, a marca é gravada e a cobrança nunca é feita.
-  - Se o cancelamento chega durante a captura, Pagamentos confere a marca logo após capturar e
-    estorna na hora.
+  - Se o cancelamento chega durante a captura, as duas transações disputam o índice único
+    `(tenantId, pedidoId)`: a que perde aborta e é refeita pelo consumidor. Se a cobrança venceu,
+    o cancelamento refeito encontra o pagamento APROVADO e estorna; se a marca venceu, a cobrança
+    refeita não cobra (ADR-0012).
   - Pedidos ignora `pagamento.aprovado` ou `pagamento.recusado` de um pedido que já está em estado
     terminal (CANCELADO): o estorno, quando necessário, é responsabilidade de Pagamentos.
 - **Outbox transacional:** a mudança de estado e o evento são gravados na mesma transação MongoDB

@@ -41,7 +41,7 @@ public class PagamentoDocument implements TenantOwned {
     return doc;
   }
 
-  /** Grava o resultado da cobrança (num documento novo ou na marca de cancelamento). */
+  /** Grava o resultado da cobrança num documento novo (a marca de cancelamento nunca é cobrada). */
   void cobrar(
       String pedidoId,
       String clienteId,
