@@ -2,7 +2,11 @@ import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import {
   ApiError,
+  MENSAGEM_TENANT_EM_MIGRACAO,
+  PROBLEMA_TENANT_EM_MIGRACAO,
   apiFetch,
+  falaDeMigracao,
+  isTenantEmMigracao,
   apiUrl,
   parseRetryAfter,
   readJson,
@@ -138,6 +142,38 @@ describe('Problem Details', () => {
     expect(erro.problemStrings('outros')).toBeNull();
     expect(erro.problemStrings('detail')).toBeNull();
     expect((await toApiError(Response.json(['x'], { status: 400 }))).problem).toBeNull();
+  });
+
+  it('troca o detail do 503 tenant-em-migracao pela mensagem única das telas de negócio', async () => {
+    const erro = await toApiError(
+      Response.json(
+        {
+          type: PROBLEMA_TENANT_EM_MIGRACAO,
+          title: 'Tenant em migração',
+          status: 503,
+          detail: "Os dados do tenant 'acme' estão migrando.",
+        },
+        { status: 503, headers: { 'Retry-After': '1' } },
+      ),
+    );
+    expect(erro.message).toBe(MENSAGEM_TENANT_EM_MIGRACAO);
+    expect(erro.message).toBe(
+      'Os dados deste tenant estão sendo migrados para outro nível; tente de novo em instantes.',
+    );
+    expect(erro.retryAfterSeconds).toBe(1);
+    expect(isTenantEmMigracao(erro)).toBe(true);
+    expect(isTenantEmMigracao(new ApiError('x', 503))).toBe(false);
+    expect(isTenantEmMigracao(new TypeError('Failed to fetch'))).toBe(false);
+  });
+
+  it('falaDeMigracao reconhece a mensagem, mesmo dentro de outra frase', () => {
+    expect(falaDeMigracao(MENSAGEM_TENANT_EM_MIGRACAO)).toBe(true);
+    expect(falaDeMigracao(`Não foi possível carregar mais: ${MENSAGEM_TENANT_EM_MIGRACAO}`)).toBe(
+      true,
+    );
+    expect(falaDeMigracao('Outra falha.')).toBe(false);
+    expect(falaDeMigracao(null)).toBe(false);
+    expect(falaDeMigracao(undefined)).toBe(false);
   });
 
   it('parseRetryAfter aceita só segundos', () => {

@@ -13,7 +13,7 @@ frontend lê os dois arquivos, então a documentação e o código não se separ
 | Tenant | Empresa que usa a plataforma para vender (um distribuidor, uma indústria). Cada tenant tem seus dados isolados. |
 | Cliente | Empresa compradora (B2B) que faz pedidos a um tenant. Existe dentro de um tenant. |
 | Plano | O que o tenant contratou: GRATUITO, PROFISSIONAL ou EMPRESARIAL. Define limites de uso (rate limit, volume). |
-| Nível de isolamento | Pool (coleções compartilhadas), Bridge (database e namespace próprios) ou Silo (instância própria). |
+| Nível de isolamento | Pool (coleções compartilhadas), Bridge (database e namespace próprios) ou Silo (instância própria). Hoje só o pedidos-service muda os dados de database; catálogo e pagamentos seguem no Pool, e Silo é tratado como Bridge (ADR-0014). |
 | Pedido | Compra de um cliente. Nasce PENDENTE e termina CONFIRMADO ou CANCELADO. |
 | Pagamento | Cobrança de um pedido no gateway simulado: autorização e captura em um passo. |
 | Estorno | Devolução de um pagamento capturado, quando o pedido é cancelado depois da captura. |
@@ -146,4 +146,6 @@ stateDiagram-v2
   (`precoUnitarioCentavos`); `preco.alterado` só afeta pedidos novos.
 - **Tenant suspenso ou promovido.** `tenant.alterado` chega ao gateway e a todos os serviços. Com
   `ativo = false` o gateway recusa requisições do tenant (Dia 4); pedidos em andamento terminam
-  normalmente. Mudança de nível (Pool → Bridge) atualiza o roteamento de dados (Dia 9).
+  normalmente. Promoção de nível (Pool → Bridge ou Silo) muda os dados do tenant de database no
+  pedidos-service: durante a migração (segundos) o tenant fica `MIGRANDO` e as APIs dele respondem
+  503 `tenant-em-migracao`, enquanto os consumidores esperam; os vizinhos não sentem (ADR-0014).

@@ -3,6 +3,7 @@
 import { http, HttpResponse } from 'msw';
 import {
   LIMITE_PADRAO,
+  NIVEIS_ISOLAMENTO,
   isNivelIsolamento,
   isPlano,
   validateNome,
@@ -10,7 +11,8 @@ import {
   type Problema,
   type Tenant,
 } from '../api/tenants';
-import { guard } from './gateway';
+import { guard, problemResponse } from './gateway';
+import { iniciarMigracao } from './isolamento';
 
 /** Tenants iniciais: empresas fictícias, com os três níveis de isolamento. */
 export const SEED_TENANTS: readonly Tenant[] = [
@@ -221,7 +223,7 @@ export const tenantHandlers = [
       // Como no tenant-service: trocar de nível é uma migração (Dia 9), não um PATCH.
       return problem(
         409,
-        `O nível de isolamento de '${id}' não muda por PATCH: a migração entre níveis chega no Dia 9.`,
+        `O nível de isolamento de '${id}' não muda por PATCH: use POST /api/v1/tenants/${id}/promocao.`,
         `/api/v1/tenants/${id}`,
         'Mudança de nível não suportada',
       );
@@ -229,6 +231,37 @@ export const tenantHandlers = [
     if (typeof body.nome === 'string') tenant.nome = body.nome.trim();
     if (isPlano(body.plano)) tenant.plano = body.plano;
     if (typeof body.ativo === 'boolean') tenant.ativo = body.ativo;
+    return HttpResponse.json({ ...tenant });
+  }),
+
+  // Dia 9 (ADR-0014): só sobe de nível; os serviços migram os dados ao receber tenant.alterado.
+  http.post('*/api/v1/tenants/:id/promocao', async ({ request, params }) => {
+    const denied = adminOnly(request);
+    if (denied) return denied;
+    const id = String(params.id);
+    const instance = `/api/v1/tenants/${id}/promocao`;
+    const tenant = store.find((t) => t.id === id);
+    if (!tenant) return problem(404, `Tenant '${id}' não encontrado.`, instance);
+    const body = await readBody(request);
+    if (!body) return problem(400, 'O corpo da requisição deve ser um objeto JSON.');
+    if (!isNivelIsolamento(body.nivelIsolamento)) {
+      return problem(400, 'nivelIsolamento é obrigatório. Use POOL, BRIDGE ou SILO.');
+    }
+    const novo = body.nivelIsolamento;
+    if (NIVEIS_ISOLAMENTO.indexOf(novo) <= NIVEIS_ISOLAMENTO.indexOf(tenant.nivelIsolamento)) {
+      return problemResponse(
+        409,
+        'nivel-invalido',
+        'Nível de isolamento inválido',
+        novo === tenant.nivelIsolamento
+          ? `O tenant '${id}' já está no nível ${novo}.`
+          : `O tenant '${id}' está no nível ${tenant.nivelIsolamento}: a promoção só sobe de nível (POOL → BRIDGE → SILO).`,
+        {},
+        { instance },
+      );
+    }
+    tenant.nivelIsolamento = novo;
+    iniciarMigracao(id);
     return HttpResponse.json({ ...tenant });
   }),
 ];

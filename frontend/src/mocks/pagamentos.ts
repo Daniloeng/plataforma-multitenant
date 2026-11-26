@@ -29,6 +29,7 @@ import {
 import { MOEDA_PADRAO } from '../api/catalogo';
 import type { Pedido } from '../api/pedidos';
 import { guard, problemResponse } from './gateway';
+import { respostaSeEmMigracao } from './isolamento';
 import {
   MOTIVO_RECUSA_LIMITE,
   aplicarEstorno,
@@ -259,6 +260,8 @@ function acesso(request: Request): Acesso {
   const result = guard(request, { rateLimit: true });
   if ('response' in result) return result;
   if (!result.tenant) return { response: invalida('O cabeçalho X-Tenant-Id é obrigatório.') };
+  const migrando = respostaSeEmMigracao(result.tenant.id);
+  if (migrando) return { response: migrando };
   if (!veFinanceiro(result.user.papeis)) {
     return {
       response: problemResponse(

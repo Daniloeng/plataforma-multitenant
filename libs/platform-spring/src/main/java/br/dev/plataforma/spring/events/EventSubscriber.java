@@ -40,7 +40,16 @@ public class EventSubscriber implements SmartLifecycle {
   private static final Logger LOG = LoggerFactory.getLogger(EventSubscriber.class);
 
   private record Registration<T extends SpecificRecord>(
-      Class<T> type, String name, Consumer<T> handler) {}
+      Class<T> type, String name, Consumer<T> handler, boolean waitForTenant) {}
+
+  /**
+   * Espera o tenant ficar disponível antes do efeito (ex.: migração de nível em andamento,
+   * ADR-0014); lança exceção se demorar, e a mensagem volta com nack.
+   */
+  @FunctionalInterface
+  public interface TenantAwaiter {
+    void awaitReady(TenantId tenant);
+  }
 
   private final PulsarClient pulsar;
   private final EventCatalog catalog;
@@ -53,6 +62,10 @@ public class EventSubscriber implements SmartLifecycle {
   private final List<org.apache.pulsar.client.api.Consumer<byte[]>> consumers =
       new CopyOnWriteArrayList<>();
   private volatile boolean running;
+  private volatile TenantAwaiter tenantAwaiter;
+
+  /** Filas por assinatura: cada assinatura tem as suas, uma por tenant. */
+  private final List<TenantLanes> lanes = new CopyOnWriteArrayList<>();
 
   public EventSubscriber(
       PulsarClient pulsar,
@@ -77,11 +90,28 @@ public class EventSubscriber implements SmartLifecycle {
    */
   public <T extends SpecificRecord> EventSubscriber on(
       Class<T> type, String name, Consumer<T> handler) {
+    return register(new Registration<>(type, name, handler, true));
+  }
+
+  /**
+   * Como {@link #on}, para consumidores da própria plataforma que não tocam dados de negócio do
+   * tenant (ex.: o que agenda a migração de nível): não esperam o tenant ficar disponível.
+   */
+  public <T extends SpecificRecord> EventSubscriber onPlatform(
+      Class<T> type, String name, Consumer<T> handler) {
+    return register(new Registration<>(type, name, handler, false));
+  }
+
+  /** Liga a espera pelo tenant disponível antes de cada efeito registrado com {@link #on}. */
+  public void setTenantAwaiter(TenantAwaiter awaiter) {
+    this.tenantAwaiter = awaiter;
+  }
+
+  private <T extends SpecificRecord> EventSubscriber register(Registration<T> registration) {
     if (service == null || service.isBlank()) {
       throw new IllegalStateException(
           "Defina plataforma.service: ele dá nome às assinaturas do consumidor.");
     }
-    Registration<T> registration = new Registration<>(type, name, handler);
     registrations.add(registration);
     if (running) {
       subscribe(registration);
@@ -103,6 +133,8 @@ public class EventSubscriber implements SmartLifecycle {
 
   private <T extends SpecificRecord> void subscribe(Registration<T> r) {
     String topic = catalog.of(r.type()).topic();
+    TenantLanes subscriptionLanes = new TenantLanes(r.name());
+    lanes.add(subscriptionLanes);
     try {
       consumers.add(
           pulsar
@@ -121,6 +153,10 @@ public class EventSubscriber implements SmartLifecycle {
                       .initialSubscriptionName(subscriptionName(r.name()) + "-reprocessar")
                       .build())
               .messageListener((consumer, msg) -> handle(consumer, msg, r))
+              // Uma fila por tenant nesta assinatura: esperar a migração de um tenant não segura
+              // os outros nem as outras assinaturas, e a ordem por chave (tenantId:agregado) se
+              // mantém.
+              .messageListenerExecutor(subscriptionLanes::execute)
               .subscribe());
       LOG.info("Consumindo {} como {}", topic, subscriptionName(r.name()));
     } catch (PulsarClientException e) {
@@ -154,6 +190,10 @@ public class EventSubscriber implements SmartLifecycle {
     GenericRecord generic = (GenericRecord) event;
     TenantId tenant = TenantId.of(String.valueOf(generic.get("tenantId")));
     String eventId = String.valueOf(generic.get("eventId"));
+    TenantAwaiter awaiter = tenantAwaiter;
+    if (r.waitForTenant() && awaiter != null) {
+      awaiter.awaitReady(tenant);
+    }
     Boolean done =
         tx.execute(
             status ->
@@ -186,6 +226,8 @@ public class EventSubscriber implements SmartLifecycle {
       }
     }
     consumers.clear();
+    lanes.forEach(TenantLanes::close);
+    lanes.clear();
   }
 
   @Override

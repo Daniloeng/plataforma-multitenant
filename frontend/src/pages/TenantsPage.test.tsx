@@ -40,7 +40,9 @@ describe('TenantsPage — lista', () => {
     const aurora = screen.getByRole('row', { name: 'distribuidora-aurora' });
     expect(aurora).toHaveTextContent('Distribuidora Aurora de Alimentos Ltda.');
     expect(aurora).toHaveTextContent('Profissional');
-    expect(within(aurora).getByText('Pool')).toHaveClass('pill--nivel-pool');
+    expect(
+      within(aurora).getByTitle('Pool: dados compartilhados, filtrados por tenant'),
+    ).toHaveClass('pill--nivel-pool');
     expect(within(aurora).getByText('Ativo')).toHaveClass('pill--up');
     // 18:42:10Z = 15:42:10 em Brasília.
     expect(within(aurora).getByText('25/11/2026, 15:42:10')).toHaveAttribute(
@@ -52,9 +54,11 @@ describe('TenantsPage — lista', () => {
     ).toBeEnabled();
 
     const silo = screen.getByRole('row', { name: 'metalurgica-serra-azul' });
-    expect(within(silo).getByText('Silo')).toHaveClass('pill--nivel-silo');
+    expect(within(silo).getByTitle('Silo: isolamento máximo')).toHaveClass('pill--nivel-silo');
     const bridge = screen.getByRole('row', { name: 'atacado-vale-verde' });
-    expect(within(bridge).getByText('Bridge')).toHaveClass('pill--nivel-bridge');
+    expect(within(bridge).getByTitle('Bridge: database e namespace Pulsar dedicados')).toHaveClass(
+      'pill--nivel-bridge',
+    );
 
     const suspenso = screen.getByRole('row', { name: 'ceramica-paraiba' });
     expect(within(suspenso).getByText('Suspenso')).toHaveClass('pill--down');
@@ -367,5 +371,93 @@ describe('TenantsPage — novo tenant', () => {
       'Não foi possível conectar ao tenant-service.',
     );
     expect(within(form).getByRole('button', { name: 'Criar tenant' })).toBeEnabled();
+  });
+});
+
+describe('TenantsPage — promoção de nível', () => {
+  it('Silo é o nível máximo: sem botão Promover', async () => {
+    await renderLoaded();
+    const silo = screen.getByRole('row', { name: 'metalurgica-serra-azul' });
+    expect(within(silo).getByText('Nível máximo')).toBeVisible();
+    expect(within(silo).queryByRole('button', { name: /Promover/ })).not.toBeInTheDocument();
+    const bridge = screen.getByRole('row', { name: 'atacado-vale-verde' });
+    expect(
+      within(bridge).getByRole('button', { name: 'Promover atacado-vale-verde' }),
+    ).toBeEnabled();
+  });
+
+  it('Cancelar fecha a escolha sem chamar a API', async () => {
+    const user = await renderLoaded();
+    const linha = screen.getByRole('row', { name: 'atacado-vale-verde' });
+    await user.click(within(linha).getByRole('button', { name: 'Promover atacado-vale-verde' }));
+    const select = within(linha).getByLabelText('Novo nível de atacado-vale-verde');
+    expect(
+      within(select)
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual(['Silo']);
+    await user.click(within(linha).getByRole('button', { name: 'Cancelar' }));
+    expect(within(linha).queryByRole('form')).not.toBeInTheDocument();
+    expect(tenantStoreSnapshot().find((t) => t.id === 'atacado-vale-verde')?.nivelIsolamento).toBe(
+      'BRIDGE',
+    );
+  });
+
+  it('pula de Pool para Silo e avisa que os serviços migram os dados em segundos', async () => {
+    const user = await renderLoaded();
+    const linha = screen.getByRole('row', { name: 'farmaceutica-boa-saude' });
+    await user.click(
+      within(linha).getByRole('button', { name: 'Promover farmaceutica-boa-saude' }),
+    );
+    await user.selectOptions(
+      within(linha).getByLabelText('Novo nível de farmaceutica-boa-saude'),
+      'SILO',
+    );
+    await user.click(within(linha).getByRole('button', { name: 'Confirmar' }));
+    expect(await within(linha).findByTitle('Silo: isolamento máximo')).toBeVisible();
+    expect(within(linha).getByText('Nível máximo')).toBeVisible();
+    expect(screen.getByText(/promovido para Silo/).closest('[role="status"]')).toHaveTextContent(
+      'farmaceutica-boa-saude promovido para Silo.',
+    );
+    expect(
+      tenantStoreSnapshot().find((t) => t.id === 'farmaceutica-boa-saude')?.nivelIsolamento,
+    ).toBe('SILO');
+  });
+
+  it('mostra o detail do 409 nivel-invalido e mantém a escolha aberta', async () => {
+    let resolver: (() => void) | null = null;
+    server.use(
+      http.post('*/api/v1/tenants/:id/promocao', async () => {
+        await new Promise<void>((r) => (resolver = r));
+        return HttpResponse.json(
+          {
+            type: 'https://plataforma.dev.br/problemas/nivel-invalido',
+            title: 'Nível de isolamento inválido',
+            status: 409,
+            detail: "O tenant 'distribuidora-aurora' já está no nível BRIDGE.",
+          },
+          { status: 409, headers: { 'Content-Type': 'application/problem+json' } },
+        );
+      }),
+    );
+    const user = await renderLoaded();
+    const linha = screen.getByRole('row', { name: 'distribuidora-aurora' });
+    await user.click(within(linha).getByRole('button', { name: 'Promover distribuidora-aurora' }));
+    await user.click(within(linha).getByRole('button', { name: 'Confirmar' }));
+    expect(within(linha).getByRole('button', { name: 'Promovendo…' })).toBeDisabled();
+    expect(
+      within(linha).getByRole('button', { name: 'Suspender distribuidora-aurora' }),
+    ).toBeDisabled();
+    await waitFor(() => expect(resolver).not.toBeNull());
+    resolver!();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Não foi possível promover 'distribuidora-aurora' para Bridge: O tenant 'distribuidora-aurora' já está no nível BRIDGE.",
+    );
+    expect(within(linha).getByRole('button', { name: 'Confirmar' })).toBeEnabled();
+    expect(
+      within(linha).getByTitle('Pool: dados compartilhados, filtrados por tenant'),
+    ).toBeVisible();
+    expect(screen.queryByText(/promovido para/)).not.toBeInTheDocument();
   });
 });

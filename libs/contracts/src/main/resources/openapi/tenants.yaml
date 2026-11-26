@@ -76,7 +76,8 @@ paths:
       summary: Altera nome, plano ou situação e publica tenant.alterado
       description: >-
         Campos ausentes não mudam; um PATCH sem mudança real não publica evento. O nível de
-        isolamento só é escolhido na criação: trocar de nível é uma migração (Dia 9) e responde 409.
+        isolamento não muda por PATCH (responde 409): subir de nível é uma migração, feita por
+        POST /api/v1/tenants/{tenantId}/promocao (ADR-0014).
       requestBody:
         required: true
         content:
@@ -85,6 +86,40 @@ paths:
       responses:
         '200':
           description: Tenant alterado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+        '400': { $ref: '_comum.yaml#/components/responses/RequisicaoInvalida' }
+        '404': { $ref: '_comum.yaml#/components/responses/NaoEncontrado' }
+        '409': { $ref: '_comum.yaml#/components/responses/Conflito' }
+  /api/v1/tenants/{tenantId}/promocao:
+    parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [tenants]
+      operationId: promoverTenant
+      summary: Promove o tenant a um nível de isolamento maior e publica tenant.alterado
+      description: >-
+        Só sobe de nível (POOL → BRIDGE → SILO; pode pular de POOL para SILO). Os serviços que
+        guardam dados do tenant migram ao receber o tenant.alterado: durante a migração, que leva
+        segundos, as APIs de negócio desse tenant respondem 503 `tenant-em-migracao` com
+        Retry-After. BRIDGE e SILO ganham namespace Pulsar próprio (plataforma/t-<id>) com quotas.
+        Rebaixar ou repetir o nível atual responde 409 `nivel-invalido` (ADR-0014).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nivelIsolamento]
+              properties:
+                nivelIsolamento: { $ref: '#/components/schemas/NivelIsolamento' }
+      responses:
+        '200':
+          description: Tenant com o nível novo.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Tenant' }

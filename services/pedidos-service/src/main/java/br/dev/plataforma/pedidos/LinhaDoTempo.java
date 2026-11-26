@@ -1,6 +1,7 @@
 package br.dev.plataforma.pedidos;
 
 import br.dev.plataforma.core.TenantId;
+import br.dev.plataforma.spring.isolation.TenantPlacements;
 import br.dev.plataforma.spring.tenancy.TenantContext;
 import br.dev.plataforma.spring.tenancy.TenantQueries;
 import com.mongodb.client.model.changestream.ChangeStreamDocument;
@@ -21,6 +22,7 @@ import java.util.function.Supplier;
 import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
@@ -168,7 +170,12 @@ public class LinhaDoTempo implements SmartLifecycle, HealthIndicator {
   private final AtomicInteger total = new AtomicInteger();
   private ScheduledExecutorService agenda;
   private MessageListenerContainer container;
-  private volatile Subscription changeStream;
+
+  /** Um change stream por database: a padrão e cada dedicada (ADR-0014). */
+  private final Map<String, Subscription> changeStreams = new ConcurrentHashMap<>();
+
+  private final ObjectProvider<TenantPlacements> placements;
+  private volatile String databasePadrao;
   private volatile boolean rodando;
 
   public LinhaDoTempo(
@@ -176,8 +183,10 @@ public class LinhaDoTempo implements SmartLifecycle, HealthIndicator {
       @Value("${plataforma.pedidos.linha-do-tempo.timeout:PT5M}") Duration timeout,
       @Value("${plataforma.pedidos.linha-do-tempo.batimento:PT15S}") Duration batimento,
       @Value("${plataforma.pedidos.linha-do-tempo.max-por-tenant:50}") int maxPorTenant,
-      @Value("${plataforma.pedidos.linha-do-tempo.max-por-replica:500}") int maxPorReplica) {
+      @Value("${plataforma.pedidos.linha-do-tempo.max-por-replica:500}") int maxPorReplica,
+      ObjectProvider<TenantPlacements> placements) {
     this.mongo = mongo;
+    this.placements = placements;
     this.timeout = timeout;
     this.batimento = batimento;
     this.maxPorTenant = maxPorTenant;
@@ -197,6 +206,11 @@ public class LinhaDoTempo implements SmartLifecycle, HealthIndicator {
       throw new Indisponivel();
     }
     reservar(tenantId);
+    TenantPlacements mapa = placements.getIfAvailable();
+    if (mapa != null) {
+      // Tenant recém-promovido: escuta a database nova já, sem esperar o batimento.
+      abrirChangeStream(mapa.of(TenantId.of(tenantId)).database());
+    }
     SseEmitter emitter = new SseEmitter(timeout.toMillis());
     Assinatura a = new Assinatura(emitter, tenantId, pedidoId, veMotivoRecusa);
     assinaturas
@@ -276,8 +290,8 @@ public class LinhaDoTempo implements SmartLifecycle, HealthIndicator {
         LOG.debug("Batimento de {} falhou: {}", e.getKey(), ex.toString());
       }
     }
-    if (rodando && (changeStream == null || !changeStream.isActive())) {
-      abrirChangeStream(); // caiu (eleição, restart do MongoDB): reabre
+    if (rodando) {
+      abrirChangeStreams(); // caiu (eleição, restart do MongoDB) ou database nova: abre
     }
   }
 
@@ -317,12 +331,30 @@ public class LinhaDoTempo implements SmartLifecycle, HealthIndicator {
     return doc.getVersion() == null ? 0 : doc.getVersion();
   }
 
-  private synchronized void abrirChangeStream() {
-    if (container == null || (changeStream != null && changeStream.isActive())) {
+  /** Databases a escutar: a padrão e as dedicadas dos tenants BRIDGE e SILO. */
+  Set<String> databases() {
+    Set<String> dbs = new java.util.TreeSet<>();
+    if (databasePadrao != null) {
+      dbs.add(databasePadrao);
+    }
+    TenantPlacements mapa = placements.getIfAvailable();
+    if (mapa != null) {
+      mapa.dedicated().forEach(p -> dbs.add(p.database()));
+    }
+    return dbs;
+  }
+
+  private void abrirChangeStreams() {
+    databases().forEach(this::abrirChangeStream);
+  }
+
+  private synchronized void abrirChangeStream(String database) {
+    Subscription atual = changeStreams.get(database);
+    if (container == null || (atual != null && atual.isActive())) {
       return;
     }
-    if (changeStream != null) {
-      container.remove(changeStream);
+    if (atual != null) {
+      container.remove(atual);
     }
     MessageListener<ChangeStreamDocument<Document>, PedidoDocument> ouvinte =
         message -> {
@@ -342,6 +374,7 @@ public class LinhaDoTempo implements SmartLifecycle, HealthIndicator {
         };
     ChangeStreamRequest<PedidoDocument> request =
         ChangeStreamRequest.builder(ouvinte)
+            .database(database)
             .collection(mongo.getCollectionName(PedidoDocument.class))
             .filter(
                 Aggregation.newAggregation(
@@ -349,30 +382,37 @@ public class LinhaDoTempo implements SmartLifecycle, HealthIndicator {
                         Criteria.where("operationType").in("insert", "update", "replace"))))
             .fullDocumentLookup(FullDocument.UPDATE_LOOKUP)
             .build();
-    changeStream =
+    changeStreams.put(
+        database,
         container.register(
             request,
             PedidoDocument.class,
             e ->
                 LOG.warn(
-                    "Change stream da linha do tempo caiu; reabre no batimento: {}", e.toString()));
+                    "Change stream da linha do tempo ({}) caiu; reabre no batimento: {}",
+                    database,
+                    e.toString())));
   }
 
   @Override
   public Health health() {
-    boolean ativo = changeStream != null && changeStream.isActive();
+    boolean ativo =
+        !changeStreams.isEmpty()
+            && changeStreams.values().stream().allMatch(Subscription::isActive);
     // Sem change stream a linha do tempo ainda funciona pelo batimento: avisa sem derrubar.
     return Health.up()
         .withDetail("changeStream", ativo ? "ativo" : "reabrindo")
+        .withDetail("databases", changeStreams.size())
         .withDetail("conexoes", total.get())
         .build();
   }
 
   @Override
   public void start() {
+    databasePadrao = mongo.getDb().getName(); // sem tenant no contexto: a padrão
     container = new DefaultMessageListenerContainer(mongo);
     container.start();
-    abrirChangeStream();
+    abrirChangeStreams();
     agenda =
         Executors.newSingleThreadScheduledExecutor(
             Thread.ofVirtual().name("linha-do-tempo-batimento").factory());
@@ -403,7 +443,7 @@ public class LinhaDoTempo implements SmartLifecycle, HealthIndicator {
     if (container != null) {
       container.stop();
     }
-    changeStream = null;
+    changeStreams.clear();
     assinaturas.values().forEach(lista -> lista.forEach(a -> a.emitter.complete()));
     assinaturas.clear();
     porTenant.clear();

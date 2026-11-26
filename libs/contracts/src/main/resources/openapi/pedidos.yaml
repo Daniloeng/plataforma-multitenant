@@ -85,6 +85,28 @@ paths:
                   proximoCursor: { type: [string, 'null'] }
         '400': { $ref: '_comum.yaml#/components/responses/RequisicaoInvalida' }
         '403': { $ref: '#/components/responses/SemPermissao' }
+        '503': { $ref: '_comum.yaml#/components/responses/TenantEmMigracao' }
+  /api/v1/isolamento/pedidos:
+    parameters:
+      - $ref: '_comum.yaml#/components/parameters/TenantId'
+    get:
+      tags: [isolamento]
+      operationId: isolamentoDosPedidos
+      parameters:
+        - $ref: '_comum.yaml#/components/parameters/ClienteIdOpcional'
+      summary: Onde o pedidos-service guarda os dados do tenant (nível, database e migração)
+      description: >-
+        Só gestor-tenant e plataforma-admin (comprador: 403). POOL usa a database compartilhada
+        `pedidos`; BRIDGE e SILO, a database dedicada `pedidos_t_<tenant>` (ADR-0014). Durante a
+        migração, esta rota continua respondendo, com `situacao` MIGRANDO, enquanto as demais APIs
+        do tenant respondem 503 `tenant-em-migracao`.
+      responses:
+        '200':
+          description: Posição dos dados do tenant.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Isolamento' }
+        '403': { $ref: '#/components/responses/SemPermissao' }
   /api/v1/pedidos/{pedidoId}:
     parameters:
       - $ref: '_comum.yaml#/components/parameters/TenantId'
@@ -105,6 +127,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Pedido' }
         '403': { $ref: '#/components/responses/SemPermissao' }
+        '503': { $ref: '_comum.yaml#/components/responses/TenantEmMigracao' }
         '404': { $ref: '_comum.yaml#/components/responses/NaoEncontrado' }
   /api/v1/pedidos/{pedidoId}/linha-do-tempo:
     parameters:
@@ -135,6 +158,7 @@ paths:
             text/event-stream:
               schema: { type: string }
         '403': { $ref: '#/components/responses/SemPermissao' }
+        '503': { $ref: '_comum.yaml#/components/responses/TenantEmMigracao' }
         '404': { $ref: '_comum.yaml#/components/responses/NaoEncontrado' }
   /api/v1/pedidos/{pedidoId}/cancelamento:
     parameters:
@@ -161,6 +185,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Pedido' }
         '403': { $ref: '#/components/responses/SemPermissao' }
+        '503': { $ref: '_comum.yaml#/components/responses/TenantEmMigracao' }
         '404': { $ref: '_comum.yaml#/components/responses/NaoEncontrado' }
         '409': { $ref: '_comum.yaml#/components/responses/Conflito' }
 components:
@@ -169,7 +194,9 @@ components:
       $ref: '_comum.yaml#/components/securitySchemes/jwt'
   responses:
     Indisponivel:
-      description: O banco de dados não respondeu; tente de novo em instantes (`indisponivel`).
+      description: >-
+        O banco de dados não respondeu (`indisponivel`) ou os dados do tenant estão migrando de nível
+        (`tenant-em-migracao`, com Retry-After); tente de novo em instantes.
       content:
         application/problem+json:
           schema: { $ref: '_comum.yaml#/components/schemas/Problema' }
@@ -205,6 +232,22 @@ components:
           minItems: 1
           maxItems: 200
           items: { $ref: '#/components/schemas/ItemPedido' }
+    Isolamento:
+      type: object
+      required: [tenantId, nivel, database, situacao]
+      properties:
+        tenantId: { type: string }
+        nivel: { type: string, enum: [POOL, BRIDGE, SILO] }
+        database:
+          type: string
+          description: Database MongoDB onde ficam os pedidos do tenant.
+        situacao:
+          type: string
+          enum: [PRONTO, MIGRANDO]
+        migradoEm:
+          type: [string, 'null']
+          format: date-time
+          description: Quando a última migração de nível terminou (null se o tenant nunca migrou).
     TipoMarco:
       type: string
       description: >-

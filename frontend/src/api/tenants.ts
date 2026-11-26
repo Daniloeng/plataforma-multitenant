@@ -161,6 +161,38 @@ export async function updateTenant(id: string, alteracao: AlteracaoTenant): Prom
   return readJson(response, isTenant);
 }
 
+/**
+ * Níveis para os quais o tenant pode ser promovido: só os acima do atual (POOL → BRIDGE → SILO,
+ * podendo pular para SILO). SILO não tem para onde subir.
+ */
+export function niveisAcima(atual: NivelIsolamento): NivelIsolamento[] {
+  return NIVEIS_ISOLAMENTO.slice(NIVEIS_ISOLAMENTO.indexOf(atual) + 1);
+}
+
+/** URL absoluta de POST /api/v1/tenants/{id}/promocao. */
+export function promocaoUrl(
+  id: string,
+  baseUrl: string = import.meta.env.BASE_URL,
+  origin: string = window.location.origin,
+): string {
+  return apiUrl(`api/v1/tenants/${encodeURIComponent(id)}/promocao`, baseUrl, origin);
+}
+
+/**
+ * POST /api/v1/tenants/{id}/promocao — sobe o tenant de nível (200 com o tenant no nível novo).
+ * Rebaixar ou repetir o nível responde 409 `nivel-invalido`. Os serviços migram os dados ao
+ * receber o tenant.alterado (ADR-0014).
+ */
+export async function promoteTenant(id: string, nivelIsolamento: NivelIsolamento): Promise<Tenant> {
+  const response = await apiFetch(promocaoUrl(id), {
+    tenant: false,
+    method: 'POST',
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ nivelIsolamento }),
+  });
+  return readJson(response, isTenant);
+}
+
 /** Mensagem legível em pt-BR para qualquer falha (rede vira "não foi possível conectar"). */
 export function describeTenantError(error: unknown): string {
   if (error instanceof ApiError) return error.message;

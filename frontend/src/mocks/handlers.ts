@@ -2,11 +2,12 @@ import { http, HttpResponse } from 'msw';
 import type { StatusComponent, StatusResponse } from '../api/status';
 import { catalogoHandlers } from './catalogo';
 import { gatewayHandlers } from './gateway';
+import { isolamentoHandlers } from './isolamento';
 import { pagamentosHandlers } from './pagamentos';
 import { pedidosHandlers } from './pedidos';
 import { tenantHandlers } from './tenants';
 
-export const DEMO_VERSION = '0.1.0-dia08';
+export const DEMO_VERSION = '0.1.0-dia09';
 
 type Random = () => number;
 
@@ -102,4 +103,5 @@ export const handlers = [
   ...catalogoHandlers,
   ...pedidosHandlers,
   ...pagamentosHandlers,
+  ...isolamentoHandlers,
 ];

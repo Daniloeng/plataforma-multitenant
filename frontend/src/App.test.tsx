@@ -141,7 +141,7 @@ describe('App', () => {
     await screen.findByTestId('overall-status');
     expect(screen.getByRole('heading', { name: 'Microsserviços' })).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Progresso' })).toBeVisible();
-    expect(screen.getByText('Dia 8 de 22')).toBeVisible();
+    expect(screen.getByText('Dia 9 de 22')).toBeVisible();
   });
 
   it('mostra o selo de demo apenas no modo demo', async () => {

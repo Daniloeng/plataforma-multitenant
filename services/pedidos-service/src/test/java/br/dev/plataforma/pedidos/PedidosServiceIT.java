@@ -107,6 +107,8 @@ class PedidosServiceIT {
   @Autowired MongoTemplate mongo;
   @Autowired PulsarClient pulsar;
   @Autowired ExpiracaoPedidos expiracao;
+  @Autowired com.mongodb.client.MongoClient mongoClient;
+  @Autowired br.dev.plataforma.spring.isolation.TenantPlacements placements;
 
   final HttpClient http = HttpClient.newHttpClient();
   final ObjectMapper json = new ObjectMapper();
@@ -562,6 +564,102 @@ class PedidosServiceIT {
             comoComprador("POST", "/api/v1/pedidos/" + antes + "/cancelamento", "loja-i", "cli-1")
                 .status())
         .isEqualTo(200);
+  }
+
+  void nivel(String tenant, NivelIsolamento nivel, long versao) throws Exception {
+    publicar(
+        TenantAlterado.newBuilder()
+            .setEventId(UUID.randomUUID())
+            .setTenantId(tenant)
+            .setOccurredAt(Instant.now().truncatedTo(ChronoUnit.MILLIS))
+            .setNome(tenant)
+            .setPlano(Plano.PROFISSIONAL)
+            .setNivelIsolamento(nivel)
+            .setAtivo(true)
+            .setVersao(versao)
+            .build(),
+        tenant,
+        tenant);
+  }
+
+  long contar(String database, String colecao, String tenant) {
+    return mongoClient
+        .getDatabase(database)
+        .getCollection(colecao)
+        .countDocuments(com.mongodb.client.model.Filters.eq("tenantId", tenant));
+  }
+
+  @Test
+  void promocaoParaBridgeMoveOsDadosParaADatabaseDoTenantESegueFuncionando() throws Exception {
+    catalogo("loja-m", "p", 100);
+    catalogo("vizinha-m", "p", 100);
+    String itens = "[" + item("p", 1) + "]";
+    String antes = comprar("loja-m", "cli-1", chave(), itens).corpo().get("id").asText();
+    comprar("vizinha-m", "cli-1", chave(), itens);
+    Resposta pool = comoGestor("GET", "/api/v1/isolamento/pedidos", "loja-m");
+    assertThat(pool.status()).isEqualTo(200);
+    assertThat(pool.corpo().get("nivel").asText()).isEqualTo("POOL");
+    assertThat(pool.corpo().get("database").asText()).isEqualTo("pedidos");
+    assertThat(pool.corpo().get("situacao").asText()).isEqualTo("PRONTO");
+    assertThat(comoComprador("GET", "/api/v1/isolamento/pedidos", "loja-m", "cli-1").status())
+        .isEqualTo(403);
+
+    nivel("loja-m", NivelIsolamento.BRIDGE, 1);
+    await()
+        .atMost(30, TimeUnit.SECONDS)
+        .untilAsserted(
+            () -> {
+              JsonNode iso = comoGestor("GET", "/api/v1/isolamento/pedidos", "loja-m").corpo();
+              assertThat(iso.get("nivel").asText()).isEqualTo("BRIDGE");
+              assertThat(iso.get("situacao").asText()).isEqualTo("PRONTO");
+              assertThat(iso.get("database").asText()).isEqualTo("pedidos_t_loja-m");
+              assertThat(iso.get("migradoEm").isNull()).isFalse();
+            });
+
+    // Pedido, cópia do catálogo e situação do tenant mudaram de database; a vizinha ficou.
+    assertThat(contar("pedidos_t_loja-m", "pedidos", "loja-m")).isEqualTo(1);
+    assertThat(contar("pedidos_t_loja-m", "produtos", "loja-m")).isEqualTo(1);
+    assertThat(contar("pedidos", "pedidos", "loja-m")).isZero();
+    assertThat(contar("pedidos", "produtos", "loja-m")).isZero();
+    assertThat(contar("pedidos", "pedidos", "vizinha-m")).isEqualTo(1);
+    List<String> indices = new java.util.ArrayList<>();
+    mongoClient
+        .getDatabase("pedidos_t_loja-m")
+        .getCollection("pedidos")
+        .listIndexes()
+        .forEach(d -> indices.add(d.getString("name")));
+    assertThat(indices).contains("ux_idempotencia", "ix_pendentes_expiracao");
+
+    // A API segue igual: o pedido antigo aparece, o novo nasce na database dedicada e o pagamento
+    // confirma pela linha do tempo, com o change stream da database nova.
+    assertThat(status("loja-m", antes)).isEqualTo("PENDENTE");
+    String depois = comprar("loja-m", "cli-1", chave(), itens).corpo().get("id").asText();
+    assertThat(contar("pedidos_t_loja-m", "pedidos", "loja-m")).isEqualTo(2);
+    var linhas = acompanhar("loja-m", "cli-1", depois);
+    esperarEvento(linhas, p -> p.get("status").asText().equals("PENDENTE"));
+    aprovado("loja-m", depois, "pag-m");
+    esperarEvento(linhas, p -> p.get("status").asText().equals("CONFIRMADO"));
+    assertThat(comoGestor("GET", "/api/v1/pedidos", "loja-m").corpo().get("itens").size())
+        .isEqualTo(2);
+  }
+
+  @Test
+  void duranteAMigracaoAsApisDoTenantRespondem503ComRetryAfter() throws Exception {
+    // Migração "presa": o mapa diz MIGRANDO e nenhum job roda (o lease é longo).
+    placements.observe(
+        br.dev.plataforma.core.TenantId.of("loja-n"),
+        br.dev.plataforma.core.IsolationLevel.BRIDGE,
+        99);
+    try {
+      Resposta r = comprar("loja-n", "cli-1", chave(), "[" + item("p", 1) + "]");
+      assertThat(r.status()).isEqualTo(503);
+      assertThat(r.corpo().get("type").asText()).endsWith("/tenant-em-migracao");
+      assertThat(r.http().headers().firstValue("Retry-After")).hasValue("1");
+      JsonNode iso = comoGestor("GET", "/api/v1/isolamento/pedidos", "loja-n").corpo();
+      assertThat(iso.get("situacao").asText()).isEqualTo("MIGRANDO");
+    } finally {
+      placements.markReady(br.dev.plataforma.core.TenantId.of("loja-n"));
+    }
   }
 
   void aprovado(String tenant, String pedidoId, String pagamentoId) throws Exception {

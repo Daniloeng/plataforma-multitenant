@@ -18,6 +18,9 @@ spring:
   pulsar:
     client:
       service-url: ${PULSAR_URL:pulsar://localhost:6650}
+    admin:
+      # Namespace próprio (plataforma/t-<id>) dos tenants BRIDGE e SILO (ADR-0014).
+      service-url: ${PULSAR_ADMIN_URL:http://localhost:8080}
 
 management:
   endpoints:

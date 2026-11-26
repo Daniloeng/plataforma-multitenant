@@ -7,6 +7,9 @@ import {
   isNivelIsolamento,
   isPlano,
   listTenants,
+  niveisAcima,
+  promocaoUrl,
+  promoteTenant,
   tenantsUrl,
   updateTenant,
   validateNome,
@@ -186,6 +189,49 @@ describe('updateTenant', () => {
     await expect(updateTenant('nao-existe', { ativo: false })).rejects.toThrow(
       "Tenant 'nao-existe' não encontrado.",
     );
+  });
+});
+
+describe('promoteTenant', () => {
+  it('monta a URL da promoção', () => {
+    expect(promocaoUrl('acme', '/plataforma-multitenant/', 'https://x.io')).toBe(
+      'https://x.io/plataforma-multitenant/api/v1/tenants/acme/promocao',
+    );
+  });
+
+  it('faz POST em /promocao com o nível novo, sem X-Tenant-Id, e devolve o tenant', async () => {
+    signInAs('admin', 'atacado-vale-verde');
+    let corpo: unknown = null;
+    let tenantHeader: string | null = 'nao-lido';
+    server.use(
+      http.post('*/api/v1/tenants/:id/promocao', async ({ request }) => {
+        corpo = await request.json();
+        tenantHeader = request.headers.get('X-Tenant-Id');
+        return HttpResponse.json({ ...tenant, nivelIsolamento: 'BRIDGE' });
+      }),
+    );
+    await expect(promoteTenant('acme', 'BRIDGE')).resolves.toMatchObject({
+      nivelIsolamento: 'BRIDGE',
+    });
+    expect(corpo).toEqual({ nivelIsolamento: 'BRIDGE' });
+    expect(tenantHeader).toBeNull();
+  });
+
+  it('lança ApiError com o detail do 409 nivel-invalido', async () => {
+    const erro: unknown = await promoteTenant('metalurgica-serra-azul', 'BRIDGE').catch(
+      (e: unknown) => e,
+    );
+    expect(erro).toBeInstanceOf(ApiError);
+    expect((erro as ApiError).httpStatus).toBe(409);
+    expect((erro as ApiError).problemType).toBe(
+      'https://plataforma.dev.br/problemas/nivel-invalido',
+    );
+  });
+
+  it('niveisAcima lista só os níveis maiores que o atual', () => {
+    expect(niveisAcima('POOL')).toEqual(['BRIDGE', 'SILO']);
+    expect(niveisAcima('BRIDGE')).toEqual(['SILO']);
+    expect(niveisAcima('SILO')).toEqual([]);
   });
 });
 

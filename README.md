@@ -10,19 +10,19 @@ ferramentas gratuitas.
 
 **Demo:** <https://daniloeng.github.io/plataforma-multitenant/> (frontend em modo demo, API simulada)
 
-## Estado atual: Dia 8 de 22
+## Estado atual: Dia 9 de 22
 
 | Componente | Situação |
 |---|---|
 | `status-service` | ✅ Ativo: saúde de MongoDB x4, Pulsar e serviços em `GET /api/status` |
 | Gateway + Keycloak | ✅ Ativo: única entrada (porta 8000), login OIDC, troca de tenant, rate limit por plano |
-| Tenants | ✅ Ativo: cadastro em `/api/v1/tenants` (só `plataforma-admin`), publica `tenant.criado` e `tenant.alterado` |
-| Biblioteca comum | ✅ `platform-spring`: contexto de tenant, outbox transacional, consumidor padrão de eventos (`EventSubscriber`), identidade do gateway (`Caller`) |
+| Tenants | ✅ Ativo: cadastro em `/api/v1/tenants` (só `plataforma-admin`), publica `tenant.criado` e `tenant.alterado`; promoção de nível (`POST /api/v1/tenants/{id}/promocao`) com namespace Pulsar próprio para Bridge e Silo |
+| Biblioteca comum | ✅ `platform-spring`: contexto de tenant, outbox transacional, consumidor padrão de eventos (`EventSubscriber`), identidade do gateway (`Caller`), database por tenant com migração online (ADR-0014) |
 | Catálogo | ✅ Ativo: produtos e preços por tenant em `/api/v1/produtos`, limite de produtos por plano, publica `produto.alterado` e `preco.alterado` |
-| Pedidos | ✅ Ativo: `/api/v1/pedidos` com preço da cópia local do catálogo, `Idempotency-Key`, cancelamento e histórico da saga; linha do tempo ao vivo (SSE) em `/api/v1/pedidos/{id}/linha-do-tempo` |
+| Pedidos | ✅ Ativo: `/api/v1/pedidos` com preço da cópia local do catálogo, `Idempotency-Key`, cancelamento e histórico da saga; linha do tempo ao vivo (SSE) em `/api/v1/pedidos/{id}/linha-do-tempo`; tenants Bridge e Silo em database própria (`pedidos_t_<tenant>`), visível em `/api/v1/isolamento/pedidos` |
 | Pagamentos | ✅ Ativo: cobra cada `pedido.criado` num gateway simulado (aprova até R$ 10.000,00), estorna pedidos cancelados, ledger de partida dobrada em `/api/v1/ledger/lancamentos`; Pedidos confirma, cancela recusados e expira PENDENTE após 15 min |
-| Contratos | 10 eventos Avro, 5 APIs OpenAPI, 13 ADRs ([arquitetura](docs/arquitetura/event-storming.md)) |
-| Cobertura (linhas) | `platform-core` 100% · `contracts` 100% · `platform-spring` 91,1% · `gateway` 91,3% · `catalogo-service` 94,2% · `pedidos-service` 94,1% · `pagamentos-service` 99,1% · `tenant-service` 97,4% · `status-service` 98,7% · frontend 99,9% (mínimo exigido: 80%) |
+| Contratos | 10 eventos Avro, 5 APIs OpenAPI, 14 ADRs ([arquitetura](docs/arquitetura/event-storming.md)) |
+| Cobertura (linhas) | `platform-core` 100% · `contracts` 100% · `platform-spring` 87,3% · `gateway` 91,3% · `catalogo-service` 94,2% · `pedidos-service` 94,2% · `pagamentos-service` 99,1% · `tenant-service` 96,1% · `status-service` 98,7% · frontend 99,7% (mínimo exigido: 80%) |
 
 ## Arquitetura (visão alvo)
 
@@ -112,6 +112,20 @@ CLAUDE.md                 regras e comandos para o Claude Code
 Cada dia equivale a ~10 h de trabalho executado pelo Claude Code e revisado pelo Danilo, e termina
 com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
 
+### Dia 9: níveis Pool, Bridge e Silo · [detalhes](docs/dias/09.md)
+
+- **Feito:** promoção de nível no tenant-service (`POST /api/v1/tenants/{id}/promocao`, só sobe)
+  com namespace Pulsar próprio e cotas pelo plano; na biblioteca comum, a database por tenant
+  (`TenantRoutingMongoDatabaseFactory`) e o job de migração online; o pedidos-service move os
+  dados de um tenant promovido para `pedidos_t_<tenant>` em segundos; ADR-0014. No frontend, o
+  selo do nível, o botão "Promover" e onde ficam os pedidos do tenant.
+- **Por quê:** um cliente que cresce precisa de mais isolamento sem perder dados e sem parar os
+  vizinhos.
+- **Como testar:** como `admin`, promova `globex` para Bridge na página Tenants; como `ana`, veja
+  em Pedidos "Migrando dados…" e, em seguida, a database dedicada.
+- **Claude Code:** frontend em paralelo por subagente a partir do contrato; revisão do
+  `arquiteto` focada em perda de dados na migração e vazamento entre tenants.
+
 ### Dia 8: saga completa e linha do tempo ao vivo · [detalhes](docs/dias/08.md)
 
 - **Feito:** cada pedido guarda o histórico da saga (criado, pago, recusado, cancelado,
@@ -136,7 +150,7 @@ com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
   meio da cobrança não podem cobrar duas vezes nem cobrar pedido cancelado.
 - **Como testar:** como `bruno`, faça um pedido e veja-o passar de "Aguardando o pagamento." a
   "Pago."; como `ana`, abra a aba Pagamentos. Os comandos com `curl` estão no diário.
-- **Cobertura:** `pagamentos-service` 99%, frontend 99,9% de linhas.
+- **Cobertura:** `pagamentos-service` 99%, frontend 99,7% de linhas.
 - **Claude Code:** frontend por subagente em background enquanto o backend era testado no Compose;
   revisão do `arquiteto` focada nas corridas da saga.
 
@@ -151,7 +165,7 @@ com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
   pedidos (nem duas cobranças no Dia 7), e o preço não pode vir do navegador.
 - **Como testar:** entre como `bruno`, monte o carrinho em acme e faça o pedido; entre como `ana`
   e veja os pedidos de todos os clientes. Os comandos com `curl` estão no diário.
-- **Cobertura:** `pedidos-service` 94%, frontend 99,9% de linhas.
+- **Cobertura:** `pedidos-service` 94%, frontend 99,7% de linhas.
 - **Claude Code:** a assinatura de eventos do PR do Dia 5 trouxe a falha do CI de volta à sessão,
   que corrigiu um conflito de transação real antes do merge; frontend feito por subagente em
   background; revisão do `arquiteto`.
@@ -168,7 +182,7 @@ com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
   Produtos trocando de tenant, ou como `bruno` para ver o catálogo só de leitura.
 - **Claude Code:** frontend em subagente de background a partir do contrato, revisão do
   `arquiteto`, `/code-review` e a skill `adr`.
-- **Cobertura:** `catalogo-service` 94,2%, `platform-spring` 91,1%, frontend 99,97% de linhas.
+- **Cobertura:** `catalogo-service` 94,2%, `platform-spring` 87,3%, frontend 99,97% de linhas.
 
 ### Dia 4: gateway, Keycloak e rate limit por tenant · [detalhes](docs/dias/04.md)
 
@@ -184,7 +198,7 @@ com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
   como `ana`/`senha123` e troque entre acme e globex. No Pages, escolha um usuário de demonstração.
 - **Claude Code:** subagente `arquiteto` revisando contrato e fronteiras, frontend em subagente de
   background, skill `adr` para o ADR-0009.
-- **Cobertura:** `gateway` 91,1%, `platform-spring` 91,8%, frontend 99,9% de linhas.
+- **Cobertura:** `gateway` 91,1%, `platform-spring` 91,8%, frontend 99,7% de linhas.
 
 ### Dia 3: tenant-service, outbox e isolamento por tenant · [detalhes](docs/dias/03.md)
 
@@ -196,7 +210,7 @@ com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
   nenhuma mudança fica sem evento, mesmo com o Pulsar fora do ar.
 - **Como testar:** suba o Compose, crie um tenant com `curl` (acima) ou pela aba Tenants e confira
   `tenant.criado` em `localhost:8080/admin/v2/persistent/plataforma/tenants/tenant.criado.v1/stats`.
-- **Cobertura:** `platform-spring` 91,0%, `tenant-service` 97,3%, frontend 99,9% de linhas.
+- **Cobertura:** `platform-spring` 91,0%, `tenant-service` 97,3%, frontend 99,7% de linhas.
 - **Claude Code:** subagente `testador`, hook `Stop` que roda os testes rápidos antes de o Claude
   encerrar, e o frontend feito por um subagente em background a partir do contrato.
 
@@ -209,7 +223,7 @@ com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
   uma mudança que quebraria um consumidor aparece como teste vermelho.
 - **Como testar:** abra a aba Arquitetura (no Pages ou com `npm run dev`); para ver a proteção,
   adicione um campo sem default em um `.avsc` e rode `mvn -B verify -pl libs/contracts -am`.
-- **Cobertura:** `contracts` 100%, frontend 99,9% de linhas.
+- **Cobertura:** `contracts` 100%, frontend 99,7% de linhas.
 - **Claude Code:** subagente de projeto `arquiteto` (achou 10 problemas, incluindo uma corrida
   entre tópicos que cobraria pedidos cancelados) e skill `adr`.
 
@@ -241,7 +255,7 @@ com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
 | 6 ✅ | Pedidos com outbox | Carrinho e pedido |
 | 7 ✅ | Pagamentos: autorização, captura, ledger | Pagamento e extrato |
 | 8 ✅ | Saga completa | Linha do tempo do pedido (SSE) |
-| 9 | Níveis Pool, Bridge e Silo | Selo e promoção de nível |
+| 9 ✅ | Níveis Pool, Bridge e Silo | Selo e promoção de nível |
 | 10 | Observabilidade (OpenTelemetry, Prometheus, Grafana) | Saúde por serviço |
 | 11 | Helm, kind, KEDA, Argo CD; **MVP1** | MVP1 completo |
 | 12 a 17 | Estratégia de QA, mutação, contratos, isolamento, E2E, consistência de eventos | Painéis de qualidade |

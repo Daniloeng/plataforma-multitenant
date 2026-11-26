@@ -1,1 +1,2 @@
 br.dev.plataforma.spring.PlatformAutoConfiguration
+br.dev.plataforma.spring.isolation.IsolationAutoConfiguration

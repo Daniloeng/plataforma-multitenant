@@ -12,6 +12,7 @@ import {
 } from '../../api/catalogo';
 import { ITENS_MAX, QUANTIDADE_MAX, QUANTIDADE_MIN, quantidadeValida } from '../../api/pedidos';
 import type { UseProdutos } from '../../hooks/useProdutos';
+import { ErroDeCarga } from '../ErroDeCarga';
 
 const COMPOSE_COMMAND = 'docker compose -f infra/docker-compose.yml up -d --build --wait';
 
@@ -71,14 +72,15 @@ export function ProdutoList({
       </div>
 
       {error ? (
-        <div className="alert" role="alert">
-          <strong>Não foi possível carregar o catálogo.</strong> {error}
-          <p>
-            Para dados reais, suba o ambiente com <code>{COMPOSE_COMMAND}</code> e rode o frontend
-            com <code>npm run dev</code>. Sem Docker, use o modo demo:{' '}
-            <code>VITE_DEMO=true npm run dev</code>.
-          </p>
-        </div>
+        <ErroDeCarga
+          titulo="Não foi possível carregar o catálogo."
+          mensagem={error}
+          onTentarDeNovo={() => void reload()}
+        >
+          Para dados reais, suba o ambiente com <code>{COMPOSE_COMMAND}</code> e rode o frontend com{' '}
+          <code>npm run dev</code>. Sem Docker, use o modo demo:{' '}
+          <code>VITE_DEMO=true npm run dev</code>.
+        </ErroDeCarga>
       ) : null}
 
       {actionError ? (

@@ -1,14 +1,19 @@
 package br.dev.plataforma.pedidos;
 
 import br.dev.plataforma.core.TenantId;
+import br.dev.plataforma.spring.isolation.TenantMigratingException;
+import br.dev.plataforma.spring.isolation.TenantPlacement;
+import br.dev.plataforma.spring.isolation.TenantPlacements;
 import br.dev.plataforma.spring.tenancy.TenantContext;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.domain.Sort;
@@ -40,16 +45,19 @@ public class ExpiracaoPedidos {
   private final PedidoService pedidos;
   private final Clock clock;
   private final Duration prazo;
+  private final ObjectProvider<TenantPlacements> placements;
 
   public ExpiracaoPedidos(
       MongoOperations mongo,
       PedidoService pedidos,
       Clock clock,
-      @Value("${plataforma.pedidos.expiracao:PT15M}") Duration prazo) {
+      @Value("${plataforma.pedidos.expiracao:PT15M}") Duration prazo,
+      ObjectProvider<TenantPlacements> placements) {
     this.mongo = mongo;
     this.pedidos = pedidos;
     this.clock = clock;
     this.prazo = prazo;
+    this.placements = placements;
   }
 
   @Scheduled(
@@ -62,8 +70,38 @@ public class ExpiracaoPedidos {
     }
   }
 
-  /** Expira um lote de pedidos vencidos; devolve quantos foram cancelados. */
+  /**
+   * Expira um lote de pedidos vencidos da database padrão e um de cada database dedicada
+   * (ADR-0014); devolve quantos foram cancelados.
+   */
   int expirarVencidos() {
+    TenantPlacements mapa = placements.getIfAvailable();
+    List<TenantPlacement> dedicados = mapa == null ? List.of() : mapa.dedicated();
+    // Na padrão, só os tenants do POOL: o que sobrou de um tenant migrando não é expirado ali.
+    Query daPadrao = vencidos();
+    if (!dedicados.isEmpty()) {
+      daPadrao.addCriteria(
+          Criteria.where("tenantId")
+              .nin(dedicados.stream().map(p -> p.tenantId().value()).toList()));
+    }
+    List<PedidoDocument> lote = new ArrayList<>(mongo.find(daPadrao, PedidoDocument.class));
+    for (TenantPlacement p : dedicados) {
+      if (p.migrating()) {
+        continue; // a próxima rodada pega, já na database nova
+      }
+      try {
+        lote.addAll(
+            TenantContext.callAsUnchecked(
+                p.tenantId(), () -> mongo.find(vencidos(), PedidoDocument.class)));
+      } catch (RuntimeException e) {
+        LOG.debug(
+            "Expiração do tenant {} fica para a próxima rodada: {}", p.tenantId(), e.toString());
+      }
+    }
+    return expirar(lote);
+  }
+
+  private Query vencidos() {
     Query vencidos =
         Query.query(
                 Criteria.where("status")
@@ -75,7 +113,10 @@ public class ExpiracaoPedidos {
             .with(Sort.by("criadoEm"))
             .limit(LOTE);
     vencidos.fields().include("_id", "tenantId");
-    List<PedidoDocument> lote = mongo.find(vencidos, PedidoDocument.class);
+    return vencidos;
+  }
+
+  private int expirar(List<PedidoDocument> lote) {
     int expirados = 0;
     for (PedidoDocument p : lote) {
       try {
@@ -83,7 +124,7 @@ public class ExpiracaoPedidos {
             TenantId.of(p.getTenantId()), () -> pedidos.expirar(p.getId()))) {
           expirados++;
         }
-      } catch (DataAccessException | TransactionException e) {
+      } catch (DataAccessException | TransactionException | TenantMigratingException e) {
         // Pagamento ou outra réplica mexeu no pedido ao mesmo tempo: a próxima rodada decide.
         LOG.debug("Pedido {} não expirou agora: {}", p.getId(), e.toString());
       } catch (RuntimeException e) {

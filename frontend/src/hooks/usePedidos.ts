@@ -36,8 +36,10 @@ function merge(current: Pedido[], incoming: Pedido[]): Pedido[] {
 /**
  * Pedidos do tenant selecionado (GET /api/v1/pedidos), do mais recente para o mais antigo,
  * paginados por cursor e filtrados por status. Recarrega quando o tenant ou o filtro mudam.
+ * Com `enabled` false a primeira carga espera (ex.: enquanto os dados do tenant migram de nível);
+ * quando ele vira true, a lista carrega.
  */
-export function usePedidos(tenantId: string, status?: StatusPedido): UsePedidos {
+export function usePedidos(tenantId: string, status?: StatusPedido, enabled = true): UsePedidos {
   const [state, setState] = useState<PedidosState>(INITIAL);
   const controllerRef = useRef<AbortController | null>(null);
 
@@ -112,9 +114,10 @@ export function usePedidos(tenantId: string, status?: StatusPedido): UsePedidos 
   );
 
   useEffect(() => {
+    if (!enabled) return;
     void reload();
     return () => controllerRef.current?.abort();
-  }, [reload]);
+  }, [reload, enabled]);
 
   return { ...state, reload, loadMore, replace };
 }

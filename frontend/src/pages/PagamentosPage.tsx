@@ -15,6 +15,7 @@ import {
   type StatusPagamento,
 } from '../api/pagamentos';
 import { useAuth } from '../auth/context';
+import { ErroDeCarga } from '../components/ErroDeCarga';
 import { LoginPrompt } from '../components/auth/LoginPrompt';
 import {
   ContaLabel,
@@ -83,15 +84,20 @@ export function PagamentosPage() {
   return <Financeiro key={auth.selectedTenant.id} tenant={auth.selectedTenant} />;
 }
 
-function ErroCarga({ titulo, mensagem }: { titulo: string; mensagem: string }) {
+function ErroCarga({
+  titulo,
+  mensagem,
+  onTentarDeNovo,
+}: {
+  titulo: string;
+  mensagem: string;
+  onTentarDeNovo: () => void;
+}) {
   return (
-    <div className="alert" role="alert">
-      <strong>{titulo}</strong> {mensagem}
-      <p>
-        Para dados reais, suba o ambiente com <code>{COMPOSE_COMMAND}</code>. Sem Docker, use o modo
-        demo: <code>VITE_DEMO=true npm run dev</code>.
-      </p>
-    </div>
+    <ErroDeCarga titulo={titulo} mensagem={mensagem} onTentarDeNovo={onTentarDeNovo}>
+      Para dados reais, suba o ambiente com <code>{COMPOSE_COMMAND}</code>. Sem Docker, use o modo
+      demo: <code>VITE_DEMO=true npm run dev</code>.
+    </ErroDeCarga>
   );
 }
 
@@ -214,6 +220,7 @@ function Financeiro({ tenant }: { tenant: TenantDoUsuario }) {
           <ErroCarga
             titulo="Não foi possível carregar os pagamentos."
             mensagem={pagamentos.error}
+            onTentarDeNovo={() => void pagamentos.reload()}
           />
         ) : null}
         {pagamentos.actionError ? (
@@ -313,7 +320,11 @@ function Financeiro({ tenant }: { tenant: TenantDoUsuario }) {
         </div>
 
         {extrato.error ? (
-          <ErroCarga titulo="Não foi possível carregar o extrato." mensagem={extrato.error} />
+          <ErroCarga
+            titulo="Não foi possível carregar o extrato."
+            mensagem={extrato.error}
+            onTentarDeNovo={() => void extrato.reload()}
+          />
         ) : null}
         {extrato.actionError ? (
           <div className="alert" role="alert">

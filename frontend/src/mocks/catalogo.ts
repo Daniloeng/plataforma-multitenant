@@ -16,6 +16,7 @@ import {
 import type { Tenant } from '../api/tenants';
 import type { DemoUser } from '../auth/demoUsers';
 import { guard, problemResponse } from './gateway';
+import { respostaSeEmMigracao } from './isolamento';
 
 type Seed = readonly [sku: string, nome: string, centavos: number, ativo?: boolean];
 
@@ -175,6 +176,8 @@ function acesso(request: Request, escrita = false): Acesso {
   if (!result.tenant) {
     return { response: invalida('O cabeçalho X-Tenant-Id é obrigatório.') };
   }
+  const migrando = respostaSeEmMigracao(result.tenant.id);
+  if (migrando) return { response: migrando };
   const gestor = podeGerirCatalogo(result.user.papeis);
   if (escrita && !gestor) {
     return {

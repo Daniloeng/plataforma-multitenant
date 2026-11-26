@@ -56,3 +56,10 @@ export const NIVEL_ISOLAMENTO_DESCRICAO: Record<NivelIsolamento, string> = {
   BRIDGE: 'database MongoDB e namespace Pulsar dedicados, na mesma infraestrutura.',
   SILO: 'instância MongoDB e namespace Kubernetes próprios (isolamento máximo).',
 };
+
+/** Texto do selo do nível (title e leitor de tela), no cabeçalho e na lista de tenants. */
+export const NIVEL_ISOLAMENTO_SELO: Record<NivelIsolamento, string> = {
+  POOL: 'Pool: dados compartilhados, filtrados por tenant',
+  BRIDGE: 'Bridge: database e namespace Pulsar dedicados',
+  SILO: 'Silo: isolamento máximo',
+};

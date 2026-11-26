@@ -60,6 +60,7 @@ class TenantServiceIT {
   static void propriedades(DynamicPropertyRegistry registry) {
     registry.add("spring.data.mongodb.uri", () -> MONGO.getReplicaSetUrl("tenants"));
     registry.add("spring.pulsar.client.service-url", PULSAR::getPulsarBrokerUrl);
+    registry.add("spring.pulsar.admin.service-url", PULSAR::getHttpServiceUrl);
   }
 
   @BeforeAll
@@ -77,6 +78,7 @@ class TenantServiceIT {
   @LocalServerPort int port;
   @Autowired MongoTemplate mongo;
   @Autowired PulsarClient pulsar;
+  @Autowired PulsarNamespaces namespaces;
 
   final HttpClient http = HttpClient.newHttpClient();
   final ObjectMapper json = new ObjectMapper();
@@ -90,9 +92,15 @@ class TenantServiceIT {
   record Resposta(int status, JsonNode corpo, HttpResponse<String> bruta) {}
 
   Resposta chamar(String metodo, String caminho, String corpo) throws Exception {
+    return chamar(metodo, caminho, corpo, "plataforma-admin");
+  }
+
+  Resposta chamar(String metodo, String caminho, String corpo, String papeis) throws Exception {
     HttpRequest.Builder req =
         HttpRequest.newBuilder(URI.create("http://localhost:" + port + caminho))
             .header("Content-Type", "application/json")
+            .header("X-Usuario", "teste")
+            .header("X-Papeis", papeis)
             .method(
                 metodo,
                 corpo == null
@@ -205,6 +213,113 @@ class TenantServiceIT {
     assertThat(r.corpo().get("title").asText()).isEqualTo("Mudança de nível não suportada");
     assertThat(mongo.findById("omega", TenantDocument.class).nivelIsolamento())
         .isEqualTo(NivelIsolamento.POOL);
+  }
+
+  @Test
+  void promocaoSobeONivelPublicaTenantAlteradoECriaONamespaceComCotas() throws Exception {
+    criar("rho", "PROFISSIONAL");
+    try (Consumer<byte[]> consumer =
+        pulsar
+            .newConsumer(Schema.BYTES)
+            .topic("persistent://plataforma/tenants/tenant.alterado.v1")
+            .subscriptionName("teste-" + UUID.randomUUID())
+            .subscriptionInitialPosition(SubscriptionInitialPosition.Latest)
+            .subscribe()) {
+      Resposta r =
+          chamar("POST", "/api/v1/tenants/rho/promocao", "{\"nivelIsolamento\":\"BRIDGE\"}");
+      assertThat(r.status()).isEqualTo(200);
+      assertThat(r.corpo().get("nivelIsolamento").asText()).isEqualTo("BRIDGE");
+      assertThat(r.corpo().get("versao").asLong()).isEqualTo(1);
+
+      Message<byte[]> msg = consumer.receive(30, TimeUnit.SECONDS);
+      assertThat(msg).isNotNull();
+      assertThat(msg.getKey()).isEqualTo("rho:rho");
+    }
+    try (PulsarAdmin admin =
+        PulsarAdmin.builder().serviceHttpUrl(PULSAR.getHttpServiceUrl()).build()) {
+      // O namespace é criado numa thread à parte, depois da resposta.
+      for (int i = 0;
+          i < 100 && !admin.namespaces().getNamespaces("plataforma").contains("plataforma/t-rho");
+          i++) {
+        Thread.sleep(200);
+      }
+      assertThat(admin.namespaces().getNamespaces("plataforma")).contains("plataforma/t-rho");
+      for (int i = 0; i < 50 && retencao(admin, "plataforma/t-rho") != 7 * 24 * 60; i++) {
+        Thread.sleep(200);
+      }
+      assertThat(admin.namespaces().getRetention("plataforma/t-rho").getRetentionTimeInMinutes())
+          .isEqualTo(7 * 24 * 60);
+      // As políticas do namespace propagam de forma assíncrona no broker.
+      var cotas = admin.namespaces().getBacklogQuotaMap("plataforma/t-rho");
+      for (int i = 0; i < 50 && cotas.isEmpty(); i++) {
+        Thread.sleep(200);
+        cotas = admin.namespaces().getBacklogQuotaMap("plataforma/t-rho");
+      }
+      assertThat(cotas.values())
+          .anySatisfy(q -> assertThat(q.getLimitSize()).isEqualTo(1024L * 1024 * 1024));
+    }
+
+    // Repetir ou rebaixar: 409 nivel-invalido, sem mudar nada.
+    for (String nivel : new String[] {"BRIDGE", "POOL"}) {
+      Resposta r =
+          chamar("POST", "/api/v1/tenants/rho/promocao", "{\"nivelIsolamento\":\"" + nivel + "\"}");
+      assertThat(r.status()).isEqualTo(409);
+      assertThat(r.corpo().get("type").asText()).endsWith("/nivel-invalido");
+    }
+    // Só plataforma-admin promove, mesmo que a requisição passe pelo gateway por engano.
+    Resposta gestor =
+        chamar(
+            "POST",
+            "/api/v1/tenants/rho/promocao",
+            "{\"nivelIsolamento\":\"SILO\"}",
+            "gestor-tenant");
+    assertThat(gestor.status()).isEqualTo(403);
+    assertThat(gestor.corpo().get("type").asText()).endsWith("/acesso-negado");
+    // Pular de BRIDGE para SILO pode; sem nível, 400; tenant inexistente, 404.
+    assertThat(
+            chamar("POST", "/api/v1/tenants/rho/promocao", "{\"nivelIsolamento\":\"SILO\"}")
+                .status())
+        .isEqualTo(200);
+    assertThat(chamar("POST", "/api/v1/tenants/rho/promocao", "{}").status()).isEqualTo(400);
+    assertThat(
+            chamar("POST", "/api/v1/tenants/nada/promocao", "{\"nivelIsolamento\":\"SILO\"}")
+                .status())
+        .isEqualTo(404);
+  }
+
+  private static int retencao(PulsarAdmin admin, String ns) throws Exception {
+    var r = admin.namespaces().getRetention(ns);
+    return r == null ? -1 : r.getRetentionTimeInMinutes();
+  }
+
+  @Test
+  void reconciliadorCriaONamespaceDeTenantDedicadoQueFicouSem() throws Exception {
+    mongo.insert(
+        new TenantDocument(
+            "sigma",
+            "Sigma",
+            Plano.GRATUITO,
+            NivelIsolamento.SILO,
+            true,
+            java.time.Instant.now(),
+            java.time.Instant.now(),
+            null));
+    namespaces.reconcile();
+    try (PulsarAdmin admin =
+        PulsarAdmin.builder().serviceHttpUrl(PULSAR.getHttpServiceUrl()).build()) {
+      assertThat(admin.namespaces().getNamespaces("plataforma")).contains("plataforma/t-sigma");
+      assertThat(admin.namespaces().getRetention("plataforma/t-sigma").getRetentionTimeInMinutes())
+          .isEqualTo(24 * 60);
+      // Mudado por fora: a próxima rodada conserta, mesmo já tendo aplicado o plano antes.
+      admin
+          .namespaces()
+          .setRetention(
+              "plataforma/t-sigma",
+              new org.apache.pulsar.common.policies.data.RetentionPolicies(5, 500));
+      namespaces.reconcile();
+      assertThat(admin.namespaces().getRetention("plataforma/t-sigma").getRetentionTimeInMinutes())
+          .isEqualTo(24 * 60);
+    }
   }
 
   @Test

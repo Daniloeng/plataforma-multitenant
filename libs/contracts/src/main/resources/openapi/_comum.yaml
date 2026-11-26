@@ -116,3 +116,13 @@ components:
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problema' }
+    TenantEmMigracao:
+      description: >-
+        Os dados do tenant estão migrando para outro nível de isolamento (ADR-0014); tente de novo
+        depois do Retry-After. Problem type `tenant-em-migracao`.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problema' }

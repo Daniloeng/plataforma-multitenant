@@ -1,5 +1,6 @@
 package br.dev.plataforma.pedidos;
 
+import br.dev.plataforma.spring.isolation.TenantMigratingException;
 import br.dev.plataforma.spring.web.ForbiddenException;
 import com.mongodb.MongoException;
 import java.net.URI;
@@ -40,6 +41,19 @@ public class ApiErrors extends ResponseEntityExceptionHandler {
   ProblemDetail muitasConexoes(LinhaDoTempo.MuitasConexoes e) {
     return problem(
         HttpStatus.TOO_MANY_REQUESTS, "muitas-conexoes", "Muitas conexões abertas", e.getMessage());
+  }
+
+  /** Promoção de nível em andamento (ADR-0014): leva segundos, o cliente tenta de novo. */
+  @ExceptionHandler(TenantMigratingException.class)
+  ResponseEntity<ProblemDetail> tenantEmMigracao(TenantMigratingException e) {
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+        .header(HttpHeaders.RETRY_AFTER, "1")
+        .body(
+            problem(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                "tenant-em-migracao",
+                "Tenant em migração",
+                e.getMessage()));
   }
 
   @ExceptionHandler(LinhaDoTempo.Indisponivel.class)

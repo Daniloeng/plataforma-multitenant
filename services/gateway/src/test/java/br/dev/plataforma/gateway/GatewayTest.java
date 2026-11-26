@@ -423,4 +423,18 @@ class GatewayTest {
           .containsEntry("X-Papeis", "gestor-tenant");
     }
   }
+
+  @Test
+  void isolamentoDosPedidosVaiParaOPedidosService() {
+    web.mutateWith(ANA)
+        .get()
+        .uri("/api/v1/isolamento/pedidos")
+        .header("X-Tenant-Id", "acme")
+        .exchange()
+        .expectStatus()
+        .isOk();
+    assertThat(BACKEND.lastHeaders)
+        .containsEntry("path", "/api/v1/isolamento/pedidos")
+        .containsEntry("X-Tenant-Id", "acme");
+  }
 }
