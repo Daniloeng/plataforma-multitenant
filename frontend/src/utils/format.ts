@@ -1,4 +1,5 @@
 import type { ComponentStatus, PlatformStatus } from '../api/status';
+import type { NivelIsolamento, Plano } from '../api/tenants';
 
 /** Fuso usado na exibição: o projeto é brasileiro, então mostramos o horário de Brasília. */
 export const DISPLAY_TIME_ZONE = 'America/Sao_Paulo';
@@ -35,4 +36,23 @@ export const PLATFORM_STATUS_LABEL: Record<PlatformStatus, string> = {
 export const COMPONENT_STATUS_LABEL: Record<ComponentStatus, string> = {
   UP: 'Disponível',
   DOWN: 'Indisponível',
+};
+
+export const PLANO_LABEL: Record<Plano, string> = {
+  GRATUITO: 'Gratuito',
+  PROFISSIONAL: 'Profissional',
+  EMPRESARIAL: 'Empresarial',
+};
+
+export const NIVEL_ISOLAMENTO_LABEL: Record<NivelIsolamento, string> = {
+  POOL: 'Pool',
+  BRIDGE: 'Bridge',
+  SILO: 'Silo',
+};
+
+/** Explicação curta de cada nível (ADR-0005). */
+export const NIVEL_ISOLAMENTO_DESCRICAO: Record<NivelIsolamento, string> = {
+  POOL: 'coleções e tópicos compartilhados, filtrados por tenantId (mais barato).',
+  BRIDGE: 'database MongoDB e namespace Pulsar dedicados, na mesma infraestrutura.',
+  SILO: 'instância MongoDB e namespace Kubernetes próprios (isolamento máximo).',
 };

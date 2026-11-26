@@ -1,4 +1,5 @@
 import type { StatusResponse } from '../api/status';
+import type { Tenant } from '../api/tenants';
 
 export function makeStatus(overrides: Partial<StatusResponse> = {}): StatusResponse {
   return {
@@ -38,4 +39,16 @@ export function makeStatus(overrides: Partial<StatusResponse> = {}): StatusRespo
     ],
     ...overrides,
   };
+}
+
+/** Gera `count` tenants com ids e datas distintos (mais recente primeiro). */
+export function makeTenants(count: number): Tenant[] {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `tenant-${String(i + 1).padStart(2, '0')}`,
+    nome: `Empresa ${i + 1}`,
+    plano: 'GRATUITO',
+    nivelIsolamento: 'POOL',
+    ativo: true,
+    criadoEm: new Date(Date.UTC(2026, 10, 26, 12, 0, 0) - i * 60_000).toISOString(),
+  }));
 }

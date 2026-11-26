@@ -1,0 +1,27 @@
+package br.dev.plataforma.tenants;
+
+/**
+ * Erros de negócio do cadastro de tenants, traduzidos em Problem Details pelo {@link ApiErrors}.
+ */
+final class TenantExceptions {
+
+  private TenantExceptions() {}
+
+  static final class NotFound extends RuntimeException {
+    NotFound(String id) {
+      super("Tenant '" + id + "' não encontrado.");
+    }
+  }
+
+  static final class AlreadyExists extends RuntimeException {
+    AlreadyExists(String id) {
+      super("Já existe um tenant com o id '" + id + "'.");
+    }
+  }
+
+  static final class InvalidRequest extends RuntimeException {
+    InvalidRequest(String message) {
+      super(message);
+    }
+  }
+}

@@ -1,7 +1,8 @@
 import { http, HttpResponse } from 'msw';
 import type { StatusComponent, StatusResponse } from '../api/status';
+import { tenantHandlers } from './tenants';
 
-export const DEMO_VERSION = '0.1.0-dia02';
+export const DEMO_VERSION = '0.1.0-dia03';
 
 type Random = () => number;
 
@@ -10,7 +11,7 @@ function jitter(base: number, spread: number, random: Random): number {
   return base + Math.round(random() * spread);
 }
 
-/** Monta uma resposta realista do status-service, com Mongo e Pulsar no ar. */
+/** Monta uma resposta realista do status-service, com Mongo, Pulsar e tenant-service no ar. */
 export function buildDemoStatus(
   random: Random = Math.random,
   now: Date = new Date(),
@@ -38,8 +39,19 @@ export function buildDemoStatus(
         latencyMs: jitter(10, 8, random),
         details: 'broker saudável',
       },
+      {
+        // Desde o Dia 3 o status-service também consulta a readiness do tenant-service.
+        name: 'tenant-service',
+        type: 'SERVICE',
+        status: 'UP',
+        latencyMs: jitter(6, 6, random),
+        details: 'readiness UP',
+      },
     ],
   };
 }
 
-export const handlers = [http.get('*/api/status', () => HttpResponse.json(buildDemoStatus()))];
+export const handlers = [
+  http.get('*/api/status', () => HttpResponse.json(buildDemoStatus())),
+  ...tenantHandlers,
+];

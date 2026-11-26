@@ -2,6 +2,12 @@ package br.dev.plataforma.status;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.sun.net.httpserver.HttpServer;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -30,8 +36,38 @@ class StatusServiceApplicationIT {
   static final PulsarContainer PULSAR =
       new PulsarContainer(DockerImageName.parse("apachepulsar/pulsar:4.0.7"));
 
+  /** Faz o papel do tenant-service: só a readiness do Actuator. */
+  static final HttpServer TENANT_SERVICE = iniciarTenantServiceFalso();
+
+  static HttpServer iniciarTenantServiceFalso() {
+    try {
+      HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+      server.createContext(
+          "/actuator/health/readiness",
+          exchange -> {
+            byte[] body = "{\"status\":\"UP\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+          });
+      server.start();
+      return server;
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
+  @AfterAll
+  static void pararTenantServiceFalso() {
+    TENANT_SERVICE.stop(0);
+  }
+
   @DynamicPropertySource
   static void propriedades(DynamicPropertyRegistry registry) {
+    registry.add("plataforma.status.services[0].name", () -> "tenant-service");
+    registry.add(
+        "plataforma.status.services[0].url",
+        () -> "http://127.0.0.1:" + TENANT_SERVICE.getAddress().getPort());
     String[] nomes = {"tenants", "catalogo", "pedidos", "pagamentos"};
     for (int i = 0; i < nomes.length; i++) {
       String nome = "mongo-" + nomes[i];
@@ -51,7 +87,11 @@ class StatusServiceApplicationIT {
     assertThat(resposta.getStatusCode()).isEqualTo(HttpStatus.OK);
     PlatformStatus status = resposta.getBody();
     assertThat(status).isNotNull();
-    assertThat(status.components()).hasSize(5);
+    assertThat(status.components()).hasSize(6);
+    assertThat(status.components())
+        .filteredOn(c -> c.type() == ComponentType.SERVICE)
+        .extracting(ComponentStatus::name)
+        .containsExactly("tenant-service");
     assertThat(status.components())
         .allSatisfy(c -> assertThat(c.status()).as(c.name()).isEqualTo(HealthState.UP));
     assertThat(status.status()).isEqualTo(HealthState.UP);

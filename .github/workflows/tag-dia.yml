@@ -9,10 +9,10 @@ on:
   workflow_dispatch:
     inputs:
       dia:
-        description: Número do dia (ex.: 1)
+        description: "Número do dia (ex.: 1)"
         required: true
       sha:
-        description: Commit a marcar (padrão: o último da main)
+        description: "Commit a marcar (padrão: o último da main)"
         required: false
 
 permissions:

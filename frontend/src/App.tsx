@@ -3,12 +3,32 @@ import { DemoBadge } from './components/DemoBadge';
 import { ROUTE_HASH, useHashRoute, type Route } from './hooks/useHashRoute';
 import { ArchitecturePage } from './pages/ArchitecturePage';
 import { StatusPage } from './pages/StatusPage';
+import { TenantsPage } from './pages/TenantsPage';
 import { isDemoMode } from './utils/demo';
 
-const PAGES: Record<Route, { tab: string; title: string }> = {
-  status: { tab: 'Status', title: 'Status da plataforma' },
-  arquitetura: { tab: 'Arquitetura', title: 'Arquitetura' },
+const PAGES: Record<Route, { tab: string; title: string; footer: string }> = {
+  status: {
+    tab: 'Status',
+    title: 'Status da plataforma',
+    footer: 'Atualização automática a cada 10 segundos.',
+  },
+  tenants: {
+    tab: 'Tenants',
+    title: 'Tenants',
+    footer: 'Dados do tenant-service (GET, POST e PATCH em /api/v1/tenants).',
+  },
+  arquitetura: {
+    tab: 'Arquitetura',
+    title: 'Arquitetura',
+    footer: 'Conteúdo gerado em build time a partir de libs/contracts e docs/.',
+  },
 };
+
+function CurrentPage({ route }: { route: Route }) {
+  if (route === 'arquitetura') return <ArchitecturePage />;
+  if (route === 'tenants') return <TenantsPage />;
+  return <StatusPage />;
+}
 
 export function App() {
   const route = useHashRoute();
@@ -39,12 +59,10 @@ export function App() {
           </a>
         ))}
       </nav>
-      <main>{route === 'arquitetura' ? <ArchitecturePage /> : <StatusPage />}</main>
-      <footer className="footer muted">
-        {route === 'status'
-          ? 'Atualização automática a cada 10 segundos.'
-          : 'Conteúdo gerado em build time a partir de libs/contracts e docs/.'}
-      </footer>
+      <main>
+        <CurrentPage route={route} />
+      </main>
+      <footer className="footer muted">{page.footer}</footer>
     </div>
   );
 }

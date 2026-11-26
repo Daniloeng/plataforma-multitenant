@@ -21,8 +21,10 @@ export default defineConfig({
       allow: [repositoryRoot],
     },
     proxy: {
-      // Em desenvolvimento, /api vai para o status-service (Spring Boot) local.
-      '/api': 'http://localhost:8090',
+      // Em desenvolvimento, cada API vai para o seu serviço local. A ordem importa: a primeira
+      // regra que casar vence, então as rotas específicas vêm antes do '/api' genérico.
+      '/api/v1/tenants': 'http://localhost:8081', // tenant-service
+      '/api': 'http://localhost:8090', // status-service
     },
   },
   test: {

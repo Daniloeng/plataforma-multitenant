@@ -21,7 +21,9 @@
   <modules>
     <module>libs/platform-core</module>
     <module>libs/contracts</module>
+    <module>libs/platform-spring</module>
     <module>services/status-service</module>
+    <module>services/tenant-service</module>
   </modules>
 
   <properties>
@@ -39,6 +41,16 @@
       <dependency>
         <groupId>br.dev.plataforma</groupId>
         <artifactId>platform-core</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>br.dev.plataforma</groupId>
+        <artifactId>contracts</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>br.dev.plataforma</groupId>
+        <artifactId>platform-spring</artifactId>
         <version>${project.version}</version>
       </dependency>
     </dependencies>

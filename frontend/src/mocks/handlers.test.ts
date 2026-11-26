@@ -2,7 +2,7 @@ import { fetchStatus } from '../api/status';
 import { DEMO_VERSION, buildDemoStatus } from './handlers';
 
 describe('buildDemoStatus', () => {
-  it('monta Mongo e Pulsar no ar com latência base quando random = 0', () => {
+  it('monta Mongo, Pulsar e tenant-service no ar com latência base quando random = 0', () => {
     const now = new Date('2026-11-26T12:00:00Z');
     const status = buildDemoStatus(() => 0, now);
     expect(status.status).toBe('UP');
@@ -14,10 +14,16 @@ describe('buildDemoStatus', () => {
       'mongo-pedidos',
       'mongo-pagamentos',
       'pulsar',
+      'tenant-service',
     ]);
     expect(status.components.every((c) => c.status === 'UP')).toBe(true);
-    expect(status.components.map((c) => c.latencyMs)).toEqual([2, 3, 3, 4, 10]);
+    expect(status.components.map((c) => c.latencyMs)).toEqual([2, 3, 3, 4, 10, 6]);
     expect(status.components[4]).toMatchObject({ type: 'PULSAR', details: 'broker saudável' });
+    expect(status.components[5]).toMatchObject({
+      type: 'SERVICE',
+      status: 'UP',
+      details: 'readiness UP',
+    });
     expect(status.components[0]).toMatchObject({
       type: 'MONGODB',
       details: 'replica set rs-tenants',
@@ -26,7 +32,7 @@ describe('buildDemoStatus', () => {
 
   it('varia a latência dentro de uma faixa pequena', () => {
     const status = buildDemoStatus(() => 1);
-    expect(status.components.map((c) => c.latencyMs)).toEqual([6, 7, 7, 8, 18]);
+    expect(status.components.map((c) => c.latencyMs)).toEqual([6, 7, 7, 8, 18, 12]);
   });
 
   it('usa Math.random e a hora atual por padrão', () => {
@@ -44,6 +50,6 @@ describe('handlers', () => {
   it('respondem /api/status dentro do contrato (servidor msw/node padrão)', async () => {
     const status = await fetchStatus();
     expect(status.status).toBe('UP');
-    expect(status.components).toHaveLength(5);
+    expect(status.components).toHaveLength(6);
   });
 });

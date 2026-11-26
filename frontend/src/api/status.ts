@@ -1,5 +1,10 @@
 // Cliente e tipos do contrato GET /api/status (implementado pelo status-service em Java).
 
+import { ApiError, apiUrl } from './http';
+
+// Mantido aqui por compatibilidade: quem já importava ApiError de './status' continua funcionando.
+export { ApiError };
+
 export type PlatformStatus = 'UP' | 'DEGRADED' | 'DOWN';
 export type ComponentStatus = 'UP' | 'DOWN';
 
@@ -18,17 +23,6 @@ export interface StatusResponse {
   components: StatusComponent[];
 }
 
-/** Erro de resposta da API (HTTP diferente de 2xx ou corpo fora do contrato). */
-export class ApiError extends Error {
-  readonly httpStatus: number | null;
-
-  constructor(message: string, httpStatus: number | null = null) {
-    super(message);
-    this.name = 'ApiError';
-    this.httpStatus = httpStatus;
-  }
-}
-
 const PLATFORM_STATUSES: readonly string[] = ['UP', 'DEGRADED', 'DOWN'];
 
 /** URL absoluta do endpoint, respeitando o BASE_URL do Vite ('/' ou '/plataforma-multitenant/'). */
@@ -36,8 +30,7 @@ export function statusUrl(
   baseUrl: string = import.meta.env.BASE_URL,
   origin: string = window.location.origin,
 ): string {
-  const base = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
-  return new URL(`${base}api/status`, origin).toString();
+  return apiUrl('api/status', baseUrl, origin);
 }
 
 function isStatusComponent(value: unknown): value is StatusComponent {

@@ -20,8 +20,9 @@ export const ROADMAP: readonly RoadmapService[] = [
   {
     name: 'Tenants',
     day: 3,
-    responsibility: 'Cadastra empresas clientes e isola os dados de cada tenant.',
-    situation: 'Planejado',
+    responsibility:
+      'Cadastra tenants, plano e nível de isolamento; publica tenant.criado e tenant.alterado pelo outbox.',
+    situation: 'Ativo',
   },
   {
     name: 'Catálogo',
@@ -43,6 +44,6 @@ export const ROADMAP: readonly RoadmapService[] = [
   },
 ];
 
-export const CURRENT_DAY = 2;
+export const CURRENT_DAY = 3;
 export const TOTAL_DAYS = 22;
 export const REPOSITORY_URL = 'https://github.com/Daniloeng/plataforma-multitenant';
