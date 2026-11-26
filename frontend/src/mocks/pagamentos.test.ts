@@ -118,6 +118,14 @@ describe('dados de exemplo', () => {
       moeda: 'BRL',
     });
     expect(saldoDe([])).toEqual({ centavos: 0, moeda: 'BRL' });
+    const usd: Lancamento = {
+      ...pagamentosSnapshot(FARMA).lancamentos[0]!,
+      conta: 'RECEITA_TENANT' as const,
+      natureza: 'CREDITO' as const,
+      valor: { centavos: 500, moeda: 'USD' },
+    };
+    expect(saldoDe([usd])).toEqual({ centavos: 0, moeda: 'BRL' });
+    expect(saldoDe([usd], 'USD')).toEqual({ centavos: 500, moeda: 'USD' });
     expect(pagamentosSnapshot('metalurgica-serra-azul')).toEqual({
       pagamentos: [],
       lancamentos: [],
@@ -281,6 +289,7 @@ describe('API e gateway', () => {
     const semTenant = await call('api/v1/ledger/lancamentos', { tenant: null });
     expect(semTenant.status).toBe(400);
     expect(semTenant.json.detail).toBe('O cabeçalho X-Tenant-Id é obrigatório.');
+    expect((await call('api/v1/ledger/lancamentos?moeda=real')).status).toBe(400);
     const ana = await call('api/v1/pagamentos', { usuario: 'ana', tenant: 'distribuidora-aurora' });
     expect(ana.status).toBe(200);
     expect((ana.json.itens as Pagamento[]).length).toBe(4);

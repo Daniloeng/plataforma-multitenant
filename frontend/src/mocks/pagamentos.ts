@@ -11,7 +11,8 @@
 //   motivo, sem lançamentos, e pedido CANCELADO por PAGAMENTO_RECUSADO.
 // - Pedido cancelado antes da cobrança nunca é cobrado; pedido CONFIRMADO cancelado é estornado:
 //   pagamento ESTORNADO e lançamentos de estorno (débito ESTORNOS + crédito CAIXA_GATEWAY).
-// - Saldo = créditos em RECEITA_TENANT − débitos em ESTORNOS (a receita líquida do tenant).
+// - Saldo = créditos em RECEITA_TENANT − débitos em ESTORNOS (a receita líquida do tenant), na
+//   moeda pedida (`moeda`, padrão BRL), como no backend: moedas diferentes nunca são somadas.
 // - Listas do mais recente para o mais antigo, cursor = id do último item da página.
 
 import { http, HttpResponse } from 'msw';
@@ -149,13 +150,17 @@ export function pagamentosSnapshot(tenantId: string): Livro {
 }
 
 /** Receita líquida: créditos em RECEITA_TENANT menos débitos em ESTORNOS. */
-export function saldoDe(lancamentos: readonly Lancamento[]): Lancamento['valor'] {
+export function saldoDe(
+  lancamentos: readonly Lancamento[],
+  moeda: string = MOEDA_PADRAO,
+): Lancamento['valor'] {
   let centavos = 0;
   for (const l of lancamentos) {
+    if (l.valor.moeda !== moeda) continue; // moedas diferentes nunca são somadas
     if (l.conta === 'RECEITA_TENANT' && l.natureza === 'CREDITO') centavos += l.valor.centavos;
     if (l.conta === 'ESTORNOS' && l.natureza === 'DEBITO') centavos -= l.valor.centavos;
   }
-  return { centavos, moeda: lancamentos[0]?.valor.moeda ?? MOEDA_PADRAO };
+  return { centavos, moeda };
 }
 
 /** Cobrança no gateway simulado: aprova até o limite, recusa acima. */
@@ -318,11 +323,16 @@ export const pagamentosHandlers = [
     const a = acesso(request);
     if ('response' in a) return a.response;
     const todos = livroDo(a.tenantId).lancamentos;
-    const pagina = paginar(new URL(request.url).searchParams, todos, todos);
+    const params = new URL(request.url).searchParams;
+    const moeda = params.get('moeda') ?? MOEDA_PADRAO;
+    if (!/^[A-Z]{3}$/.test(moeda)) {
+      return invalida('moeda deve ter 3 letras maiúsculas (ISO 4217).');
+    }
+    const pagina = paginar(params, todos, todos);
     if (pagina instanceof Response) return pagina;
     return HttpResponse.json({
       itens: pagina.itens.map((l) => ({ ...l, valor: { ...l.valor } })),
-      saldo: saldoDe(todos),
+      saldo: saldoDe(todos, moeda),
       proximoCursor: pagina.proximoCursor,
     });
   }),

@@ -1,6 +1,7 @@
 package br.dev.plataforma.pagamentos;
 
 import java.text.NumberFormat;
+import java.util.Currency;
 import java.util.Locale;
 import org.springframework.stereotype.Component;
 
@@ -20,12 +21,17 @@ public class GatewaySimulado implements GatewayPagamento {
   @Override
   public Resultado autorizarECapturar(String chaveIdempotencia, long centavos, String moeda) {
     if (centavos > limite) {
-      String reais =
-          NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pt-BR")).format(limite / 100.0);
+      NumberFormat formato = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pt-BR"));
+      try {
+        formato.setCurrency(Currency.getInstance(moeda));
+      } catch (IllegalArgumentException | NullPointerException e) {
+        // moeda desconhecida: fica o símbolo do real, o limite é o mesmo em centavos
+      }
+      String valor = formato.format(limite / 100.0);
       return new Resultado(
           false,
           "Valor acima do limite de aprovação do gateway simulado ("
-              + reais.replace(' ', ' ')
+              + valor.replace(' ', ' ')
               + ").");
     }
     return new Resultado(true, null);

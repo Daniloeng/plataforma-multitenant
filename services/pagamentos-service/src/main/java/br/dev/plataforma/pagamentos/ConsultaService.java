@@ -81,8 +81,10 @@ public class ConsultaService {
         p.itens().stream().map(Views.LancamentoView::of).toList(), saldo(moeda), p.proximo());
   }
 
-  /** Receita líquida: créditos em RECEITA_TENANT menos débitos em ESTORNOS, somados no banco. */
-  /** Receita líquida numa moeda: valores de moedas diferentes nunca são somados. */
+  /**
+   * Receita líquida numa moeda: créditos em RECEITA_TENANT menos débitos em ESTORNOS, somados no
+   * banco. Valores de moedas diferentes nunca são somados.
+   */
   Dinheiro saldo(String moeda) {
     String tenant = TenantContext.require().toString();
     Criteria receita =
