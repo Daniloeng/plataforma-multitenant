@@ -56,6 +56,7 @@ flowchart LR
   P3 -- estorna se já capturado --> PAG
   G1 -- confirma --> PED
   G2 -- cancela --> PED
+  G3 -- anota na linha do tempo --> PED
 ```
 
 ## Linha do tempo do pedido
@@ -76,6 +77,7 @@ Os eventos em ordem, com o comando que os causa e a política que reage a eles.
 | 6c | Job de expiração (pedido PENDENTE há mais de 15 min) | Expirar pedido | Pedidos | `pedido.cancelado` (EXPIRADO) |
 | 7 | Comprador | Cancelar pedido confirmado | Pedidos | `pedido.cancelado` |
 | 8 | Política: "pedido cancelado após captura → estornar" | Estornar | Pagamentos | `pagamento.estornado` |
+| 9 | Política: "pagamento estornado → anotar" (ADR-0013) | Registrar estorno na linha do tempo | Pedidos | (interno; o comprador vê ao vivo pelo SSE) |
 
 ## Saga do pedido
 

@@ -15,6 +15,7 @@ import {
   quantidadeValida,
   veTodosOsPedidos,
   type ItemPedido,
+  type MarcoPedido,
   type Pedido,
   type StatusPedido,
 } from '../api/pedidos';
@@ -88,6 +89,13 @@ const SEEDS: Record<string, readonly Seed[]> = {
   'atacado-vale-verde': [['cli-hotel-serra-verde', [['PAP-HIG-F30', 6]], 'pago']],
 };
 
+/**
+ * Motivo da recusa do gateway simulado (acima de R$ 10.000,00). Fica aqui, e não no pagamentos
+ * simulado, porque o histórico dos pedidos de exemplo também o cita (o pagamentos importa daqui).
+ */
+export const MOTIVO_RECUSA_LIMITE =
+  'Valor acima do limite de aprovação do gateway simulado (R$ 10.000,00).';
+
 /** Datas dos exemplos: antes do primeiro dia do pedidos-service; pedidos novos ficam no topo. */
 const SEED_DATE = Date.UTC(2026, 10, 25, 18, 0, 0);
 const HORA = 3_600_000;
@@ -129,20 +137,39 @@ function seedPedidos(tenantId: string): Pedido[] {
     const cancelado =
       situacao === 'estornado' || situacao === 'recusado' || situacao === 'cancelado';
     // Cobrança em segundos; cancelamento pelo cliente uma hora depois.
+    const cobradoEm = new Date(criado + 1200).toISOString();
+    const canceladoEm = new Date(criado + HORA).toISOString();
     const atualizadoEm =
       situacao === 'pendente'
         ? criadoEm
-        : new Date(
-            criado + (situacao === 'pago' || situacao === 'recusado' ? 1200 : HORA),
-          ).toISOString();
+        : situacao === 'pago' || situacao === 'recusado'
+          ? cobradoEm
+          : canceladoEm;
+    const pagamentoId = pagamentoIdDoExemplo(id);
+    // O histórico conta a mesma história da situação, do mais antigo ao mais recente.
+    const historico: MarcoPedido[] = [{ tipo: 'CRIADO', em: criadoEm, detalhe: null }];
+    if (situacao === 'pago' || situacao === 'estornado') {
+      historico.push({ tipo: 'PAGO', em: cobradoEm, detalhe: pagamentoId });
+    }
+    if (situacao === 'recusado') {
+      historico.push(
+        { tipo: 'RECUSADO', em: cobradoEm, detalhe: MOTIVO_RECUSA_LIMITE },
+        { tipo: 'CANCELADO', em: cobradoEm, detalhe: 'PAGAMENTO_RECUSADO' },
+      );
+    }
+    if (situacao === 'estornado' || situacao === 'cancelado') {
+      historico.push({ tipo: 'CANCELADO', em: canceladoEm, detalhe: 'SOLICITADO_PELO_CLIENTE' });
+    }
+    if (situacao === 'estornado') {
+      historico.push({ tipo: 'ESTORNADO', em: canceladoEm, detalhe: pagamentoId });
+    }
     return {
       id,
       clienteId,
       status: cancelado ? 'CANCELADO' : situacao === 'pago' ? 'CONFIRMADO' : 'PENDENTE',
       itens,
       total: totalDe(itens),
-      pagamentoId:
-        situacao === 'pago' || situacao === 'estornado' ? pagamentoIdDoExemplo(id) : null,
+      pagamentoId: situacao === 'pago' || situacao === 'estornado' ? pagamentoId : null,
       motivoCancelamento:
         situacao === 'recusado'
           ? 'PAGAMENTO_RECUSADO'
@@ -151,8 +178,15 @@ function seedPedidos(tenantId: string): Pedido[] {
             : null,
       criadoEm,
       atualizadoEm,
+      historico,
     };
   });
+}
+
+/** Anota um marco no histórico do pedido (cria o histórico se o pedido veio sem ele). */
+function anotar(pedido: Pedido, marco: MarcoPedido): void {
+  (pedido.historico ??= []).push(marco);
+  pedido.atualizadoEm = marco.em;
 }
 
 // ---- Integração com o pagamentos-service simulado ----
@@ -187,13 +221,14 @@ function sincronizar(): void {
 
 /**
  * pagamento.aprovado ou pagamento.recusado chegando ao pedidos-service: só um pedido PENDENTE muda
- * (aprovado → CONFIRMADO com o pagamentoId; recusado → CANCELADO por PAGAMENTO_RECUSADO).
- * Devolve false se o pedido não existe ou já saiu de PENDENTE.
+ * (aprovado → CONFIRMADO com o pagamentoId e o marco PAGO; recusado → marcos RECUSADO, com o motivo
+ * do gateway, e CANCELADO por PAGAMENTO_RECUSADO). Devolve false se o pedido não existe ou já saiu
+ * de PENDENTE.
  */
 export function aplicarPagamento(
   tenantId: string,
   pedidoId: string,
-  resultado: { aprovado: true; pagamentoId: string } | { aprovado: false },
+  resultado: { aprovado: true; pagamentoId: string } | { aprovado: false; motivo?: string | null },
   quando: string,
 ): boolean {
   const pedido = pedidosDo(tenantId).find((p) => p.id === pedidoId);
@@ -201,11 +236,31 @@ export function aplicarPagamento(
   if (resultado.aprovado) {
     pedido.status = 'CONFIRMADO';
     pedido.pagamentoId = resultado.pagamentoId;
+    anotar(pedido, { tipo: 'PAGO', em: quando, detalhe: resultado.pagamentoId });
   } else {
     pedido.status = 'CANCELADO';
     pedido.motivoCancelamento = 'PAGAMENTO_RECUSADO';
+    anotar(pedido, { tipo: 'RECUSADO', em: quando, detalhe: resultado.motivo ?? null });
+    anotar(pedido, { tipo: 'CANCELADO', em: quando, detalhe: 'PAGAMENTO_RECUSADO' });
   }
-  pedido.atualizadoEm = quando;
+  return true;
+}
+
+/**
+ * pagamento.estornado chegando ao pedidos-service: anota o marco ESTORNADO (com o id do pagamento)
+ * num pedido CANCELADO. Devolve false se o pedido não existe, não está cancelado ou já tem o
+ * estorno anotado (o evento pode chegar repetido).
+ */
+export function aplicarEstorno(
+  tenantId: string,
+  pedidoId: string,
+  pagamentoId: string,
+  quando: string,
+): boolean {
+  const pedido = pedidosDo(tenantId).find((p) => p.id === pedidoId);
+  if (pedido?.status !== 'CANCELADO') return false;
+  if (pedido.historico?.some((m) => m.tipo === 'ESTORNADO')) return false;
+  anotar(pedido, { tipo: 'ESTORNADO', em: quando, detalhe: pagamentoId });
   return true;
 }
 
@@ -220,8 +275,12 @@ let store = new Map<string, Pedido[]>();
 let chaves = new Map<string, Chave>();
 let sequence = 0;
 
-/** Volta aos pedidos iniciais; `initial` troca os pedidos de alguns tenants (testes). */
+/**
+ * Volta aos pedidos iniciais; `initial` troca os pedidos de alguns tenants (testes). Também fecha
+ * as linhas do tempo abertas, para nada ficar rodando entre os testes.
+ */
 export function resetPedidosStore(initial: Record<string, readonly Pedido[]> = {}): void {
+  for (const fechar of [...fluxosAbertos]) fechar();
   store = new Map(Object.entries(initial).map(([t, ps]) => [t, ps.map(copia)]));
   chaves = new Map();
   sequence = 0;
@@ -242,7 +301,7 @@ export function pedidosSnapshot(tenantId: string): Pedido[] {
 }
 
 function copia(pedido: Pedido): Pedido {
-  return {
+  const resultado: Pedido = {
     ...pedido,
     total: { ...pedido.total },
     itens: pedido.itens.map((i) => ({
@@ -250,6 +309,24 @@ function copia(pedido: Pedido): Pedido {
       precoUnitario: i.precoUnitario ? { ...i.precoUnitario } : undefined,
     })),
   };
+  if (pedido.historico) resultado.historico = pedido.historico.map((m) => ({ ...m }));
+  return resultado;
+}
+
+/**
+ * Cópia do pedido como quem pede pode vê-la: para o comprador (`clienteId` não nulo), o marco
+ * RECUSADO vai sem o motivo do gateway (`detalhe` null) — o motivo exato é só do gestor e do
+ * admin, como no pedidos-service (decisão do Dia 7). Vale para o GET, a listagem, o fluxo SSE e
+ * as respostas de criação e cancelamento.
+ */
+function visivel(pedido: Pedido, clienteId: string | null): Pedido {
+  const resultado = copia(pedido);
+  if (clienteId !== null && resultado.historico) {
+    resultado.historico = resultado.historico.map((m) =>
+      m.tipo === 'RECUSADO' ? { ...m, detalhe: null } : m,
+    );
+  }
+  return resultado;
 }
 
 /** Hash estável do corpo (itens na ordem enviada): FNV-1a de 32 bits sobre o JSON canônico. */
@@ -339,6 +416,103 @@ async function readItens(
   return lidos;
 }
 
+// ---- Linha do tempo (Server-Sent Events) ----
+
+/** De quanto em quanto tempo o fluxo simulado confere se o pedido mudou. */
+export const LINHA_DO_TEMPO_VERIFICACAO_MS = 300;
+/** Comentário `: ping` para manter a conexão viva. */
+export const LINHA_DO_TEMPO_PING_MS = 15_000;
+/** O servidor encerra o fluxo depois de 5 min; o cliente reconecta. */
+export const LINHA_DO_TEMPO_TIMEOUT_MS = 5 * 60_000;
+
+/** Funções que fecham os fluxos abertos (resetPedidosStore fecha todos). */
+const fluxosAbertos = new Set<() => void>();
+
+/** Quantas linhas do tempo estão abertas (testes). */
+export function linhasDoTempoAbertas(): number {
+  return fluxosAbertos.size;
+}
+
+/** Versão do pedido no fluxo (o `id` da mensagem SSE): um marco por mudança. */
+function versaoDe(pedido: Pedido): number {
+  return pedido.historico?.length ?? 0;
+}
+
+/** Mensagem SSE `pedido` com o pedido em JSON numa linha. */
+export function mensagemPedido(pedido: Pedido): string {
+  return `event: pedido\nid: ${versaoDe(pedido)}\ndata: ${JSON.stringify(pedido)}\n\n`;
+}
+
+/**
+ * Corpo text/event-stream da linha do tempo: envia o estado atual e, enquanto o fluxo estiver
+ * aberto, confere o pedido a cada 300 ms (entregando antes as cobranças vencidas, como faz cada
+ * requisição) e envia de novo quando a versão ou o `atualizadoEm` mudam. Comentário `: ping` a
+ * cada 15 s; o comprador recebe o RECUSADO sem o motivo (`visivel`). Fecha depois de 5 min, quando a requisição é abortada, quando o leitor cancela ou
+ * quando o pedido some (reset do store).
+ */
+function linhaDoTempo(
+  tenantId: string,
+  id: string,
+  clienteId: string | null,
+  signal: AbortSignal,
+): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  let fechar = () => {};
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      const inicio = Date.now();
+      let ultimoPing = inicio;
+      let ultimaMarca = '';
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let fechado = false;
+      fechar = () => {
+        if (fechado) return;
+        fechado = true;
+        clearTimeout(timer);
+        fluxosAbertos.delete(fechar);
+        signal.removeEventListener('abort', fechar);
+        try {
+          controller.close();
+        } catch {
+          // o leitor já cancelou
+        }
+      };
+      const enviar = (texto: string) => controller.enqueue(encoder.encode(texto));
+      const verificar = () => {
+        if (fechado) return;
+        sincronizar();
+        const pedido = encontra(tenantId, id, clienteId);
+        if (!pedido) {
+          fechar();
+          return;
+        }
+        const marca = `${versaoDe(pedido)}|${pedido.atualizadoEm ?? ''}`;
+        if (marca !== ultimaMarca) {
+          ultimaMarca = marca;
+          enviar(mensagemPedido(visivel(pedido, clienteId)));
+        }
+        const agora = Date.now();
+        if (agora - inicio >= LINHA_DO_TEMPO_TIMEOUT_MS) {
+          fechar();
+          return;
+        }
+        if (agora - ultimoPing >= LINHA_DO_TEMPO_PING_MS) {
+          ultimoPing = agora;
+          enviar(': ping\n\n');
+        }
+        timer = setTimeout(verificar, LINHA_DO_TEMPO_VERIFICACAO_MS);
+      };
+      fluxosAbertos.add(fechar);
+      signal.addEventListener('abort', fechar);
+      if (signal.aborted) fechar();
+      else verificar();
+    },
+    cancel() {
+      fechar();
+    },
+  });
+}
+
 export const pedidosHandlers = [
   http.post('*/api/v1/pedidos', async ({ request }) => {
     const a = acesso(request, true);
@@ -366,7 +540,7 @@ export const pedidosHandlers = [
         );
       }
       const pedido = encontra(a.tenant.id, anterior.pedidoId, clienteId)!;
-      return HttpResponse.json(copia(pedido), {
+      return HttpResponse.json(visivel(pedido, clienteId), {
         status: 200,
         headers: { 'Idempotent-Replayed': 'true' },
       });
@@ -406,11 +580,12 @@ export const pedidosHandlers = [
       motivoCancelamento: null,
       criadoEm: agora,
       atualizadoEm: agora,
+      historico: [{ tipo: 'CRIADO', em: agora, detalhe: null }],
     };
     pedidosDo(a.tenant.id).unshift(pedido);
     chaves.set(chaveId, { hash, pedidoId: pedido.id });
     for (const assinante of assinantes) assinante.pedidoCriado(a.tenant.id, copia(pedido));
-    return HttpResponse.json(copia(pedido), {
+    return HttpResponse.json(visivel(pedido, clienteId), {
       status: 201,
       headers: { Location: `/api/v1/pedidos/${pedido.id}` },
     });
@@ -450,7 +625,7 @@ export const pedidosHandlers = [
     const itens = filtrados.slice(inicio, inicio + limite);
     const temMais = inicio + limite < filtrados.length;
     return HttpResponse.json({
-      itens: itens.map(copia),
+      itens: itens.map((p) => visivel(p, a.clienteId)),
       proximoCursor: temMais ? (itens.at(-1)?.id ?? null) : null,
     });
   }),
@@ -461,7 +636,18 @@ export const pedidosHandlers = [
     sincronizar();
     const id = String(params.id);
     const pedido = encontra(a.tenant.id, id, a.clienteId);
-    return pedido ? HttpResponse.json(copia(pedido)) : naoEncontrado(id);
+    return pedido ? HttpResponse.json(visivel(pedido, a.clienteId)) : naoEncontrado(id);
+  }),
+
+  http.get('*/api/v1/pedidos/:id/linha-do-tempo', ({ request, params }) => {
+    const a = acesso(request);
+    if ('response' in a) return a.response;
+    sincronizar();
+    const id = String(params.id);
+    if (!encontra(a.tenant.id, id, a.clienteId)) return naoEncontrado(id);
+    return new HttpResponse(linhaDoTempo(a.tenant.id, id, a.clienteId, request.signal), {
+      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
+    });
   }),
 
   http.post('*/api/v1/pedidos/:id/cancelamento', ({ request, params }) => {
@@ -482,11 +668,11 @@ export const pedidosHandlers = [
     const anterior = pedido.status;
     pedido.status = 'CANCELADO';
     // Quem cancela entra no motivo, como no pedidos-service.
-    pedido.motivoCancelamento =
-      a.clienteId === null ? 'CANCELADO_PELO_TENANT' : 'SOLICITADO_PELO_CLIENTE';
-    pedido.atualizadoEm = new Date().toISOString();
+    const motivo = a.clienteId === null ? 'CANCELADO_PELO_TENANT' : 'SOLICITADO_PELO_CLIENTE';
+    pedido.motivoCancelamento = motivo;
+    anotar(pedido, { tipo: 'CANCELADO', em: new Date().toISOString(), detalhe: motivo });
     for (const assinante of assinantes)
       assinante.pedidoCancelado(a.tenant.id, copia(pedido), anterior);
-    return HttpResponse.json(copia(pedido));
+    return HttpResponse.json(visivel(pedido, a.clienteId));
   }),
 ];

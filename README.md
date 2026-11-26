@@ -10,7 +10,7 @@ ferramentas gratuitas.
 
 **Demo:** <https://daniloeng.github.io/plataforma-multitenant/> (frontend em modo demo, API simulada)
 
-## Estado atual: Dia 7 de 22
+## Estado atual: Dia 8 de 22
 
 | Componente | Situação |
 |---|---|
@@ -19,9 +19,9 @@ ferramentas gratuitas.
 | Tenants | ✅ Ativo: cadastro em `/api/v1/tenants` (só `plataforma-admin`), publica `tenant.criado` e `tenant.alterado` |
 | Biblioteca comum | ✅ `platform-spring`: contexto de tenant, outbox transacional, consumidor padrão de eventos (`EventSubscriber`), identidade do gateway (`Caller`) |
 | Catálogo | ✅ Ativo: produtos e preços por tenant em `/api/v1/produtos`, limite de produtos por plano, publica `produto.alterado` e `preco.alterado` |
-| Pedidos | ✅ Ativo: `/api/v1/pedidos` com preço da cópia local do catálogo, `Idempotency-Key`, cancelamento; publica `pedido.criado` e `pedido.cancelado` |
+| Pedidos | ✅ Ativo: `/api/v1/pedidos` com preço da cópia local do catálogo, `Idempotency-Key`, cancelamento e histórico da saga; linha do tempo ao vivo (SSE) em `/api/v1/pedidos/{id}/linha-do-tempo` |
 | Pagamentos | ✅ Ativo: cobra cada `pedido.criado` num gateway simulado (aprova até R$ 10.000,00), estorna pedidos cancelados, ledger de partida dobrada em `/api/v1/ledger/lancamentos`; Pedidos confirma, cancela recusados e expira PENDENTE após 15 min |
-| Contratos | 10 eventos Avro, 5 APIs OpenAPI, 12 ADRs ([arquitetura](docs/arquitetura/event-storming.md)) |
+| Contratos | 10 eventos Avro, 5 APIs OpenAPI, 13 ADRs ([arquitetura](docs/arquitetura/event-storming.md)) |
 | Cobertura (linhas) | `platform-core` 100% · `contracts` 100% · `platform-spring` 91,1% · `gateway` 91,3% · `catalogo-service` 94,2% · `pedidos-service` 94,1% · `pagamentos-service` 99,1% · `tenant-service` 97,4% · `status-service` 98,7% · frontend 99,9% (mínimo exigido: 80%) |
 
 ## Arquitetura (visão alvo)
@@ -84,7 +84,7 @@ O CI (GitHub Actions) roda backend, frontend e um teste do **Compose inteiro**: 
 containers, exige `UP` em `/api/status` pelo gateway, cria tenants com token do Keycloak, confere
 o `tenant.criado` no Pulsar, o `/api/v1/me`, os 403 de papel e de tenant, o limite do plano e
 uma compra com repetição pela mesma `Idempotency-Key` e a saga de pagamento (aprovação, recusa acima
-do limite e estorno). Nada entra na `main` com CI vermelho.
+do limite e estorno), com a linha do tempo do pedido chegando pelo SSE. Nada entra na `main` com CI vermelho.
 
 ## Estrutura
 
@@ -111,6 +111,19 @@ CLAUDE.md                 regras e comandos para o Claude Code
 
 Cada dia equivale a ~10 h de trabalho executado pelo Claude Code e revisado pelo Danilo, e termina
 com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
+
+### Dia 8: saga completa e linha do tempo ao vivo · [detalhes](docs/dias/08.md)
+
+- **Feito:** cada pedido guarda o histórico da saga (criado, pago, recusado, cancelado,
+  estornado); Pedidos passa a consumir `pagamento.estornado`; a linha do tempo do pedido chega ao
+  navegador por Server-Sent Events, alimentada por um change stream do MongoDB; ADR-0013. No
+  frontend, o detalhe do pedido mostra a linha do tempo "Ao vivo".
+- **Por quê:** depois do POST, o pedido muda sozinho por eventos de outro serviço. O comprador
+  precisa ver isso acontecer, e o histórico precisa explicar cada passo da saga.
+- **Como testar:** faça um pedido como `bruno` e abra o detalhe: "Pagamento aprovado" aparece
+  sozinho; cancele e veja "Valor estornado" chegar. Com `curl -N` no endpoint `linha-do-tempo`.
+- **Claude Code:** tela conferida com Playwright pelo subagente do frontend; revisão do
+  `arquiteto` focada em concorrência e vazamento entre tenants no SSE.
 
 ### Dia 7: pagamentos, ledger e a saga do pedido · [detalhes](docs/dias/07.md)
 
@@ -227,7 +240,7 @@ com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
 | 5 ✅ | Catálogo | Produtos por tenant |
 | 6 ✅ | Pedidos com outbox | Carrinho e pedido |
 | 7 ✅ | Pagamentos: autorização, captura, ledger | Pagamento e extrato |
-| 8 | Saga completa | Linha do tempo do pedido (SSE) |
+| 8 ✅ | Saga completa | Linha do tempo do pedido (SSE) |
 | 9 | Níveis Pool, Bridge e Silo | Selo e promoção de nível |
 | 10 | Observabilidade (OpenTelemetry, Prometheus, Grafana) | Saúde por serviço |
 | 11 | Helm, kind, KEDA, Argo CD; **MVP1** | MVP1 completo |

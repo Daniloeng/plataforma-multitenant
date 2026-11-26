@@ -4,28 +4,36 @@ import { ApiError } from '../api/http';
 import type { TenantDoUsuario } from '../api/me';
 import {
   MOTIVO_CANCELAMENTO_LABEL,
+  RECUSA_GENERICA,
   STATUS_PEDIDO,
   STATUS_PEDIDO_LABEL,
   describePedidoError,
   getPedido,
+  historicoDe,
   podeComprar,
   resumoItens,
   subtotal,
   veTodosOsPedidos,
   type Pedido,
   type StatusPedido,
+  type TipoMarco,
 } from '../api/pedidos';
 import { useAuth } from '../auth/context';
 import { LoginPrompt } from '../components/auth/LoginPrompt';
+import { LinhaDoTempo } from '../components/pedidos/LinhaDoTempo';
 import { CancelarPedido, StatusPedidoPill } from '../components/pedidos/PedidoParts';
 import { ROUTE_HASH, parsePedidoId, pedidoHash, useHash } from '../hooks/useHashRoute';
+import { usePedidoAoVivo, type ModoAoVivo } from '../hooks/usePedidoAoVivo';
 import { usePedidos } from '../hooks/usePedidos';
 import { describePagamentoError, listPagamentos } from '../api/pagamentos';
 import { formatDateTime } from '../utils/format';
 
 const COMPOSE_COMMAND = 'docker compose -f infra/docker-compose.yml up -d --build --wait';
 
-/** Poll do detalhe enquanto o pedido está PENDENTE: a cada 1,5 s, até 10 consultas. */
+/**
+ * Poll do detalhe enquanto o pedido está PENDENTE (só quando a linha do tempo em SSE não abre):
+ * a cada 1,5 s, até 10 consultas.
+ */
 export const POLL_INTERVALO_MS = 1500;
 export const POLL_TENTATIVAS = 10;
 
@@ -282,9 +290,32 @@ type Detalhe =
   | { estado: 'ok'; pedido: Pedido }
   | { estado: 'erro'; mensagem: string; naoEncontrado: boolean };
 
+/** Como a tela acompanha o pedido agora (mostrado na situação do pagamento). */
+type Acompanhamento = 'ao-vivo' | 'conectando' | 'poll' | 'parado';
+
+/**
+ * Pedido mais novo entre o da tela e o que chegou: uma mensagem SSE em trânsito não desfaz uma
+ * mudança que a tela já mostra (ex.: a resposta do cancelamento).
+ */
+function maisNovo(atual: Pedido, recebido: Pedido): Pedido {
+  if (atual.id !== recebido.id) return recebido;
+  const marcos = (p: Pedido) => p.historico?.length ?? 0;
+  if (marcos(recebido) !== marcos(atual))
+    return marcos(recebido) > marcos(atual) ? recebido : atual;
+  // Date.parse: o texto ISO pode vir com ou sem fração de segundo ("…:01Z" e "…:01.500Z").
+  if (
+    atual.atualizadoEm &&
+    recebido.atualizadoEm &&
+    Date.parse(recebido.atualizadoEm) < Date.parse(atual.atualizadoEm)
+  ) {
+    return atual;
+  }
+  return recebido;
+}
+
 function DetalhePedido({ id, gestor }: { id: string; gestor: boolean }) {
   const [detalhe, setDetalhe] = useState<Detalhe>({ estado: 'carregando' });
-  /** Consultas feitas pelo poll desde a última carga. */
+  /** Consultas feitas pelo poll (só sem SSE) desde a última carga. */
   const [tentativas, setTentativas] = useState(0);
 
   const carregar = useCallback(
@@ -312,10 +343,25 @@ function DetalhePedido({ id, gestor }: { id: string; gestor: boolean }) {
     return () => controller.abort();
   }, [carregar]);
 
-  // Enquanto PENDENTE, consulta de novo: o pagamentos-service cobra de forma assíncrona e a
-  // confirmação (ou o cancelamento por recusa) chega alguns instantes depois. Para ao sair da tela.
+  const mostrar = useCallback((pedido: Pedido) => {
+    setDetalhe((atual) =>
+      atual.estado === 'ok'
+        ? { estado: 'ok', pedido: maisNovo(atual.pedido, pedido) }
+        : { estado: 'ok', pedido },
+    );
+  }, []);
+
+  // Com o pedido na tela, assina a linha do tempo (SSE): cada evento substitui o pedido, e a
+  // assinatura dura enquanto a tela estiver aberta (um CONFIRMADO ainda pode ser cancelado e
+  // estornado). Sai da tela = aborta.
+  const carregado = detalhe.estado === 'ok';
+  const modo = usePedidoAoVivo(id, carregado, mostrar);
+
+  // Sem SSE (backend sem a linha do tempo, rede fora na primeira conexão), volta ao poll antigo:
+  // enquanto PENDENTE, consulta de novo a cada 1,5 s, até 10 vezes. Para ao sair da tela.
   const pendente = detalhe.estado === 'ok' && detalhe.pedido.status === 'PENDENTE';
-  const consultando = pendente && tentativas < POLL_TENTATIVAS;
+  const semSse = modo === 'indisponivel';
+  const consultando = semSse && pendente && tentativas < POLL_TENTATIVAS;
   useEffect(() => {
     if (!consultando) return;
     const controller = new AbortController();
@@ -336,6 +382,9 @@ function DetalhePedido({ id, gestor }: { id: string; gestor: boolean }) {
       controller.abort();
     };
   }, [consultando, tentativas, id]);
+
+  const acompanhamento: Acompanhamento =
+    modo === 'ao-vivo' ? 'ao-vivo' : semSse ? (consultando ? 'poll' : 'parado') : 'conectando';
 
   return (
     <section className="section" aria-label="Detalhe do pedido">
@@ -372,37 +421,79 @@ function DetalhePedido({ id, gestor }: { id: string; gestor: boolean }) {
         <PedidoCard
           pedido={detalhe.pedido}
           gestor={gestor}
-          consultando={consultando}
+          modo={modo}
+          acompanhamento={acompanhamento}
           onConsultar={() => setTentativas(0)}
-          onCancelado={(pedido) => setDetalhe({ estado: 'ok', pedido })}
+          onCancelado={mostrar}
         />
       ) : null}
     </section>
   );
 }
 
-/** Situação do pagamento do pedido, em linguagem do cliente. */
+/**
+ * Indicador discreto da conexão SSE: "Ao vivo" com o fluxo aberto, "Reconectando…" na queda. Sem
+ * role="status" de propósito: quem anuncia as mudanças é a situação do pagamento.
+ */
+function IndicadorAoVivo({ modo }: { modo: ModoAoVivo }) {
+  if (modo === 'ao-vivo') {
+    return (
+      <span
+        className="ao-vivo"
+        title="Conectado à linha do tempo: mudanças do pedido aparecem sozinhas."
+      >
+        <span className="ao-vivo__ponto" aria-hidden="true" />
+        Ao vivo
+      </span>
+    );
+  }
+  if (modo === 'reconectando') {
+    return (
+      <span className="ao-vivo ao-vivo--reconectando">
+        <span className="ao-vivo__ponto" aria-hidden="true" />
+        Reconectando…
+      </span>
+    );
+  }
+  return null;
+}
+
+/** Texto do pendente conforme a tela acompanha o pedido (SSE, poll ou parada). */
+const AGUARDANDO: Record<Exclude<Acompanhamento, 'parado'>, string> = {
+  'ao-vivo':
+    'O pagamentos-service cobra o pedido logo depois de criado; a confirmação aparece aqui sozinha.',
+  conectando: 'Conectando à linha do tempo do pedido…',
+  poll: 'O pagamentos-service cobra o pedido logo depois de criado; esta tela consulta de novo a cada 1,5 s.',
+};
+
+/** Situação do pagamento do pedido, em linguagem do cliente, derivada do histórico. */
 function SituacaoPagamento({
   pedido: p,
   gestor,
-  consultando,
+  acompanhamento,
   onConsultar,
 }: {
   pedido: Pedido;
   gestor: boolean;
-  consultando: boolean;
+  acompanhamento: Acompanhamento;
   onConsultar: () => void;
 }) {
+  const historico = historicoDe(p);
+  const marco = (tipo: TipoMarco) => historico.find((m) => m.tipo === tipo);
+  const pago = marco('PAGO');
+  const pagamentoId = pago?.detalhe ?? p.pagamentoId ?? null;
+  const recusa = marco('RECUSADO');
+
   if (p.status === 'PENDENTE') {
     return (
       <div className="pedido__pagamento pedido__pagamento--pendente" role="status">
         <strong>Aguardando o pagamento.</strong>{' '}
         <span className="muted">
-          {consultando
-            ? 'O pagamentos-service cobra o pedido logo depois de criado; esta tela consulta de novo a cada 1,5 s.'
-            : 'A confirmação ainda não chegou.'}
+          {acompanhamento === 'parado'
+            ? 'A confirmação ainda não chegou.'
+            : AGUARDANDO[acompanhamento]}
         </span>{' '}
-        {consultando ? null : (
+        {acompanhamento === 'parado' ? (
           <button
             type="button"
             className="button button--small button--secondary"
@@ -410,7 +501,7 @@ function SituacaoPagamento({
           >
             Consultar de novo
           </button>
-        )}
+        ) : null}
       </div>
     );
   }
@@ -420,10 +511,10 @@ function SituacaoPagamento({
         <strong>Pago.</strong>{' '}
         <span>
           Pagamento aprovado
-          {p.pagamentoId ? (
+          {pagamentoId ? (
             <>
               {' '}
-              <code>{p.pagamentoId}</code>
+              <code>{pagamentoId}</code>
             </>
           ) : null}
           ; o pedido está confirmado.
@@ -431,24 +522,36 @@ function SituacaoPagamento({
       </div>
     );
   }
-  if (p.motivoCancelamento === 'PAGAMENTO_RECUSADO') {
+  if (recusa || p.motivoCancelamento === 'PAGAMENTO_RECUSADO') {
     return (
       <div className="pedido__pagamento pedido__pagamento--recusado" role="status">
-        <strong>Pagamento recusado.</strong>{' '}
-        <span>
-          O gateway de pagamento recusou a cobrança e o pedido foi cancelado; nada foi cobrado.
-        </span>{' '}
-        {gestor ? <MotivoRecusa pedidoId={p.id} /> : null}
+        <strong>Pagamento recusado.</strong> <span>{RECUSA_GENERICA}</span>{' '}
+        {gestor ? (
+          recusa?.detalhe ? (
+            <span className="pedido__motivo-recusa">Motivo: {recusa.detalhe}</span>
+          ) : (
+            <MotivoRecusa pedidoId={p.id} />
+          )
+        ) : null}
       </div>
     );
   }
-  if (p.pagamentoId) {
+  const estorno = marco('ESTORNADO');
+  if (estorno || pagamentoId) {
+    const id = estorno?.detalhe ?? pagamentoId;
     return (
       <div className="pedido__pagamento pedido__pagamento--estornado" role="status">
-        <strong>Estornado.</strong>{' '}
+        <strong>{estorno ? 'Estornado.' : 'Estorno a caminho.'}</strong>{' '}
         <span>
-          O pedido foi pago (<code>{p.pagamentoId}</code>) e cancelado depois: o valor foi devolvido
-          ao cliente.
+          O pedido foi pago
+          {id ? (
+            <>
+              {' '}
+              (<code>{id}</code>)
+            </>
+          ) : null}{' '}
+          e cancelado depois:{' '}
+          {estorno ? 'o valor foi devolvido ao cliente.' : 'o valor será devolvido ao cliente.'}
         </span>
       </div>
     );
@@ -484,22 +587,27 @@ function MotivoRecusa({ pedidoId }: { pedidoId: string }) {
 function PedidoCard({
   pedido: p,
   gestor,
-  consultando,
+  modo,
+  acompanhamento,
   onConsultar,
   onCancelado,
 }: {
   pedido: Pedido;
   gestor: boolean;
-  consultando: boolean;
+  modo: ModoAoVivo;
+  acompanhamento: Acompanhamento;
   onConsultar: () => void;
   onCancelado: (pedido: Pedido) => void;
 }) {
   return (
     <article className="card pedido" aria-labelledby="pedido-title">
       <div className="section__head pedido__head">
-        <h2 id="pedido-title">
-          Pedido <code>{p.id}</code>
-        </h2>
+        <div className="pedido__titulo">
+          <h2 id="pedido-title">
+            Pedido <code>{p.id}</code>
+          </h2>
+          <IndicadorAoVivo modo={modo} />
+        </div>
         <StatusPedidoPill status={p.status} />
       </div>
       <dl className="summary pedido__resumo">
@@ -535,9 +643,10 @@ function PedidoCard({
       <SituacaoPagamento
         pedido={p}
         gestor={gestor}
-        consultando={consultando}
+        acompanhamento={acompanhamento}
         onConsultar={onConsultar}
       />
+      <LinhaDoTempo marcos={historicoDe(p)} gestor={gestor} />
 
       <div className="table-wrap pedido__itens">
         <table className="tenants">

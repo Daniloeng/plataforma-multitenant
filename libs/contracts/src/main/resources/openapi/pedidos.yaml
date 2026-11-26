@@ -106,6 +106,36 @@ paths:
               schema: { $ref: '#/components/schemas/Pedido' }
         '403': { $ref: '#/components/responses/SemPermissao' }
         '404': { $ref: '_comum.yaml#/components/responses/NaoEncontrado' }
+  /api/v1/pedidos/{pedidoId}/linha-do-tempo:
+    parameters:
+      - $ref: '_comum.yaml#/components/parameters/TenantId'
+      - name: pedidoId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [pedidos]
+      operationId: acompanharPedido
+      summary: Linha do tempo do pedido em tempo real (Server-Sent Events)
+      description: >-
+        Mantém a conexão aberta e envia o evento `pedido` (dados: o Pedido em JSON, com o
+        `historico`) ao conectar e a cada mudança do pedido, até `timeout` (padrão 5 minutos). A
+        cada 15 s chega um comentário `: ping` para manter a conexão viva. O cliente reconecta
+        quando quiser; o primeiro evento sempre traz o estado atual, então nenhuma mudança se perde.
+        Mesmas regras de acesso do GET do pedido (pedido de outro cliente: 404). Usa
+        `text/event-stream` com `fetch` (o EventSource do navegador não envia o Authorization).
+      parameters:
+        - $ref: '_comum.yaml#/components/parameters/ClienteIdOpcional'
+      responses:
+        '200':
+          description: >-
+            Fluxo SSE. Cada mensagem tem `event: pedido`, `id:` com a versão do pedido e `data:`
+            com o Pedido em JSON numa linha.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '403': { $ref: '#/components/responses/SemPermissao' }
+        '404': { $ref: '_comum.yaml#/components/responses/NaoEncontrado' }
   /api/v1/pedidos/{pedidoId}/cancelamento:
     parameters:
       - $ref: '_comum.yaml#/components/parameters/TenantId'
@@ -175,6 +205,24 @@ components:
           minItems: 1
           maxItems: 200
           items: { $ref: '#/components/schemas/ItemPedido' }
+    TipoMarco:
+      type: string
+      description: >-
+        CRIADO (pedido.criado), PAGO (pagamento.aprovado confirmou o pedido), RECUSADO
+        (pagamento.recusado), CANCELADO (pedido.cancelado, com o motivo), ESTORNADO
+        (pagamento.estornado devolveu o valor).
+      enum: [CRIADO, PAGO, RECUSADO, CANCELADO, ESTORNADO]
+    MarcoPedido:
+      type: object
+      required: [tipo, em]
+      properties:
+        tipo: { $ref: '#/components/schemas/TipoMarco' }
+        em: { type: string, format: date-time }
+        detalhe:
+          type: [string, 'null']
+          description: >-
+            PAGO e ESTORNADO: id do pagamento. RECUSADO: motivo do gateway. CANCELADO: o
+            MotivoCancelamento.
     Pedido:
       type: object
       required: [id, clienteId, status, itens, total, criadoEm]
@@ -195,3 +243,9 @@ components:
             - type: 'null'
         criadoEm: { type: string, format: date-time }
         atualizadoEm: { type: string, format: date-time }
+        historico:
+          type: array
+          description: >-
+            Marcos da saga, do mais antigo ao mais recente. Pedidos anteriores ao Dia 8 recebem um
+            histórico reconstruído a partir do status.
+          items: { $ref: '#/components/schemas/MarcoPedido' }

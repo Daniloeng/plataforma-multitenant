@@ -78,7 +78,7 @@ public class PedidoService {
       if (!existente.getRequestHash().equals(hash)) {
         throw new PedidosExceptions.ChaveReutilizada();
       }
-      return new PedidoView.Criacao(PedidoView.of(existente), true);
+      return new PedidoView.Criacao(PedidoView.of(existente, false), true);
     }
 
     Set<String> ids = new LinkedHashSet<>();
@@ -136,14 +136,20 @@ public class PedidoService {
                 moedas.iterator().next(),
                 agora));
     publicarCriado(salvo, agora);
-    return new PedidoView.Criacao(PedidoView.of(salvo), false);
+    return new PedidoView.Criacao(PedidoView.of(salvo, false), false);
   }
 
   /**
    * @param clienteId restringe ao cliente (comprador); null traz o pedido de qualquer cliente
    */
   public PedidoView obter(String id, String clienteId) {
-    return PedidoView.of(buscar(id, clienteId));
+    // Comprador (clienteId != null) não vê o motivo exato da recusa do gateway.
+    return PedidoView.of(buscar(id, clienteId), clienteId == null);
+  }
+
+  /** O pedido com a versão, para a linha do tempo (mesmas regras de acesso do {@link #obter}). */
+  public PedidoDocument documento(String id, String clienteId) {
+    return buscar(id, clienteId);
   }
 
   /**
@@ -162,7 +168,8 @@ public class PedidoService {
             doc,
             clienteId == null
                 ? MotivoCancelamento.CANCELADO_PELO_TENANT
-                : MotivoCancelamento.SOLICITADO_PELO_CLIENTE));
+                : MotivoCancelamento.SOLICITADO_PELO_CLIENTE),
+        clienteId == null);
   }
 
   /**
@@ -190,11 +197,25 @@ public class PedidoService {
         salvo.getId());
   }
 
-  /** pagamento.recusado: cancela o pedido PENDENTE com PAGAMENTO_RECUSADO. */
-  public void recusarPagamento(String pedidoId) {
+  /** pagamento.recusado: cancela o pedido PENDENTE com PAGAMENTO_RECUSADO e anota o motivo. */
+  public void recusarPagamento(String pedidoId, String motivo) {
     PedidoDocument doc = pendente(pedidoId);
     if (doc != null) {
+      doc.recusar(motivo, agora());
       cancelarEPublicar(doc, MotivoCancelamento.PAGAMENTO_RECUSADO);
+    }
+  }
+
+  /**
+   * pagamento.estornado: anota na linha do tempo que o valor voltou ao cliente. Não muda o status
+   * (o pedido já está CANCELADO) nem publica evento. Roda na transação do consumidor.
+   */
+  public void registrarEstorno(String pedidoId, String pagamentoId) {
+    PedidoDocument doc =
+        mongo.findOne(
+            TenantQueries.scoped(Criteria.where("_id").is(pedidoId)), PedidoDocument.class);
+    if (doc != null && doc.estornar(pagamentoId, agora())) {
+      mongo.save(doc);
     }
   }
 
@@ -278,7 +299,8 @@ public class PedidoService {
         temMais
             ? new Cursor(pagina.getLast().getCriadoEm(), pagina.getLast().getId()).codificar()
             : null;
-    return new PedidoView.Pagina(pagina.stream().map(PedidoView::of).toList(), proximo);
+    return new PedidoView.Pagina(
+        pagina.stream().map(p -> PedidoView.of(p, clienteId == null)).toList(), proximo);
   }
 
   /**

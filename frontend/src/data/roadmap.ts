@@ -57,10 +57,17 @@ export const ROADMAP: readonly RoadmapService[] = [
     day: 8,
     responsibility:
       'Fecha a saga coreografada de ponta a ponta e mostra a linha do tempo de cada pedido em tempo real (SSE).',
+    situation: 'Ativo',
+  },
+  {
+    name: 'Níveis de isolamento',
+    day: 9,
+    responsibility:
+      'Isola cada tenant no nível do plano (Pool, Bridge ou Silo) e promove o tenant de nível sem perder dados.',
     situation: 'Planejado',
   },
 ];
 
-export const CURRENT_DAY = 7;
+export const CURRENT_DAY = 8;
 export const TOTAL_DAYS = 22;
 export const REPOSITORY_URL = 'https://github.com/Daniloeng/plataforma-multitenant';

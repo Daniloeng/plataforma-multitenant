@@ -143,7 +143,8 @@ class EventCatalogTest {
             "produto.alterado",
             "preco.alterado",
             "pagamento.aprovado",
-            "pagamento.recusado");
+            "pagamento.recusado",
+            "pagamento.estornado");
     assertThat(catalogo.consumedBy("pagamentos"))
         .extracting(EventContract::event)
         .containsExactlyInAnyOrder(

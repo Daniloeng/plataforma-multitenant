@@ -7,7 +7,16 @@ import { pedidoHash } from '../hooks/useHashRoute';
 import { POLL_INTERVALO_MS, POLL_TENTATIVAS } from './PedidosPage';
 import type { Pedido } from '../api/pedidos';
 import { createDemoAuthClient } from '../auth/demo';
-import { pedidosSnapshot, resetPedidosStore } from '../mocks/pedidos';
+import { RECONEXAO_BASE_MS, RECONEXAO_FINAL_MS } from '../hooks/usePedidoAoVivo';
+import { COBRANCA_ATRASO_MS } from '../mocks/pagamentos';
+import {
+  LINHA_DO_TEMPO_VERIFICACAO_MS,
+  MOTIVO_RECUSA_LIMITE,
+  linhasDoTempoAbertas,
+  mensagemPedido,
+  pedidosSnapshot,
+  resetPedidosStore,
+} from '../mocks/pedidos';
 import { server } from '../mocks/server';
 
 type User = ReturnType<typeof userEvent.setup>;
@@ -431,7 +440,7 @@ describe('PedidosPage — gestor', () => {
   });
 });
 
-describe('PedidosPage — pagamento no detalhe', () => {
+describe('PedidosPage — pagamento e linha do tempo no detalhe', () => {
   /** Cria um pedido como bruno direto no pedidos-service simulado. */
   async function criarComoBruno(quantidade: number): Promise<Pedido> {
     const response = await fetch(apiUrl('api/v1/pedidos'), {
@@ -450,15 +459,20 @@ describe('PedidosPage — pagamento no detalhe', () => {
     return (await response.json()) as Pedido;
   }
 
-  /** GETs do detalhe de um pedido feitos pela tela. */
-  function contaGets(id: string): () => number {
+  /** Requisições da tela a um caminho (GET do pedido ou a linha do tempo). */
+  function conta(caminho: string): () => number {
     let n = 0;
     server.events.on('request:start', ({ request }) => {
-      if (request.method === 'GET' && new URL(request.url).pathname === `/api/v1/pedidos/${id}`) {
-        n += 1;
-      }
+      if (request.method === 'GET' && new URL(request.url).pathname === caminho) n += 1;
     });
     return () => n;
+  }
+  const contaGets = (id: string) => conta(`/api/v1/pedidos/${id}`);
+  const contaFluxos = (id: string) => conta(`/api/v1/pedidos/${id}/linha-do-tempo`);
+
+  /** Backend sem a linha do tempo (anterior ao Dia 8): a tela volta ao poll. */
+  function semSse(resposta: () => Response = () => new HttpResponse(null, { status: 404 })) {
+    server.use(http.get('*/api/v1/pedidos/:id/linha-do-tempo', resposta));
   }
 
   /** Avança o relógio falso (setTimeout e Date) e deixa as respostas chegarem. */
@@ -472,6 +486,22 @@ describe('PedidosPage — pagamento no detalhe', () => {
     return within(screen.getByRole('article')).getAllByRole('status')[0]!;
   }
 
+  /** Rótulos da linha do tempo, na ordem. */
+  function marcos() {
+    const linha = screen.getByRole('region', { name: 'Linha do tempo' });
+    return within(linha)
+      .getAllByRole('listitem')
+      .map((li) => li.querySelector('.marco__rotulo')!.textContent);
+  }
+
+  /** Abre o detalhe e espera o fluxo SSE abrir ("Ao vivo"). */
+  async function abrirAoVivo(nome: string, id: string, tenant?: string) {
+    const user = await abrir(nome, tenant, pedidoHash(id));
+    await screen.findByRole('heading', { name: `Pedido ${id}` });
+    expect(await screen.findByText('Ao vivo')).toBeVisible();
+    return user;
+  }
+
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout', 'Date'] });
   });
@@ -480,14 +510,150 @@ describe('PedidosPage — pagamento no detalhe', () => {
     vi.useRealTimers();
   });
 
-  it('depois de criar, consulta de novo a cada 1,5 s até a confirmação chegar (pago, com o pagamentoId)', async () => {
+  it('depois de criar, a linha do tempo ao vivo mostra "Pedido criado" e, sozinha, "Pagamento aprovado" (sem poll)', async () => {
+    const novo = await criarComoBruno(2);
+    const gets = contaGets(novo.id);
+    const fluxos = contaFluxos(novo.id);
+    await abrirAoVivo('Bruno Lima', novo.id);
+    expect(situacao()).toHaveTextContent('Aguardando o pagamento.');
+    expect(situacao()).toHaveTextContent('a confirmação aparece aqui sozinha');
+    expect(within(screen.getByRole('article')).getByText('Pendente')).toBeVisible();
+    expect(marcos()).toEqual(['Pedido criado']);
+
+    await avancar(COBRANCA_ATRASO_MS + LINHA_DO_TEMPO_VERIFICACAO_MS);
+    expect(await within(screen.getByRole('article')).findByText('Confirmado')).toHaveClass(
+      'pill--up',
+    );
+    expect(situacao()).toHaveTextContent(
+      'Pago. Pagamento aprovado pag-n00001; o pedido está confirmado.',
+    );
+    expect(marcos()).toEqual(['Pedido criado', 'Pagamento aprovado']);
+    const linha = screen.getByRole('region', { name: 'Linha do tempo' });
+    expect(within(linha).getByText('pag-n00001')).toBeVisible();
+
+    // Nada de poll: um GET (a carga) e um fluxo aberto, que continua aberto.
+    await avancar(POLL_INTERVALO_MS * 3);
+    expect(gets()).toBe(1);
+    expect(fluxos()).toBe(1);
+    expect(screen.getByText('Ao vivo')).toBeVisible();
+    expect(linhasDoTempoAbertas()).toBe(1);
+  });
+
+  it('cancelamento feito em outra tela (o gestor) chega pelo fluxo: "Cancelado pelo tenant" e "Valor estornado"', async () => {
+    await abrirAoVivo('Bruno Lima', 'ped-farmaceutica-0003');
+    expect(marcos()).toEqual(['Pedido criado', 'Pagamento aprovado']);
+    const response = await fetch(apiUrl('api/v1/pedidos/ped-farmaceutica-0003/cancelamento'), {
+      method: 'POST',
+      headers: { Authorization: 'Bearer demo-admin', 'X-Tenant-Id': FARMA },
+    });
+    expect(response.status).toBe(200);
+    await avancar(LINHA_DO_TEMPO_VERIFICACAO_MS);
+    expect(await screen.findByText('Valor estornado')).toBeVisible();
+    expect(marcos()).toEqual([
+      'Pedido criado',
+      'Pagamento aprovado',
+      'Cancelado pelo tenant',
+      'Valor estornado',
+    ]);
+    expect(situacao()).toHaveTextContent(
+      'Estornado. O pedido foi pago (pag-farmaceutica-0003) e cancelado depois: o valor foi devolvido ao cliente.',
+    );
+    expect(within(screen.getByRole('article')).getByText('Cancelado')).toHaveClass('pill--down');
+  });
+
+  it('cancelar no detalhe mostra "Cancelado pelo cliente" e "Valor estornado"; um evento atrasado não desfaz', async () => {
+    await abrirAoVivo('Bruno Lima', 'ped-farmaceutica-0003');
+    const antigo = pedidosSnapshot(FARMA).find((p) => p.id === 'ped-farmaceutica-0003')!;
+    act(() => {
+      screen.getByRole('button', { name: /Cancelar pedido/ }).click();
+    });
+    act(() => {
+      screen.getByRole('button', { name: 'Sim, cancelar' }).click();
+    });
+    expect(await screen.findByText('Cancelado pelo cliente')).toBeVisible();
+    expect(marcos()).toEqual([
+      'Pedido criado',
+      'Pagamento aprovado',
+      'Cancelado pelo cliente',
+      'Valor estornado',
+    ]);
+    // Uma mensagem velha (versão menor) que chegasse agora não volta o pedido para CONFIRMADO.
+    resetPedidosStore({
+      [FARMA]: pedidosSnapshot(FARMA).map((p) => (p.id === antigo.id ? antigo : p)),
+    });
+    // O reset fechou o fluxo; com o pedido em estado final, a reconexão espera 10 s.
+    await avancar(RECONEXAO_FINAL_MS + LINHA_DO_TEMPO_VERIFICACAO_MS);
+    await screen.findByText('Ao vivo');
+    expect(marcos()).toHaveLength(4);
+    expect(within(screen.getByRole('article')).getByText('Cancelado')).toBeVisible();
+  });
+
+  it('acima do limite, o fluxo mostra a recusa; o comprador não vê o motivo do gateway', async () => {
+    const novo = await criarComoBruno(50);
+    await abrirAoVivo('Bruno Lima', novo.id);
+    await avancar(COBRANCA_ATRASO_MS + LINHA_DO_TEMPO_VERIFICACAO_MS);
+    await waitFor(() =>
+      expect(situacao()).toHaveTextContent(
+        'Pagamento recusado. O gateway de pagamento recusou a cobrança e o pedido foi cancelado; nada foi cobrado.',
+      ),
+    );
+    expect(screen.getByText('Pagamento recusado', { selector: 'dd' })).toBeVisible();
+    expect(marcos()).toEqual(['Pedido criado', 'Pagamento recusado', 'Pagamento recusado']);
+    const linha = screen.getByRole('region', { name: 'Linha do tempo' });
+    // O motivo exato é só do gestor: o fluxo manda o RECUSADO com detalhe null para o comprador,
+    // e a linha do tempo mostra a explicação genérica.
+    expect(within(linha).queryByText(MOTIVO_RECUSA_LIMITE)).not.toBeInTheDocument();
+    expect(within(linha).getAllByRole('listitem')[1]).toHaveTextContent(
+      'O gateway de pagamento recusou a cobrança e o pedido foi cancelado; nada foi cobrado.',
+    );
+    expect(within(linha).getByText('Pedido cancelado pela recusa.')).toBeVisible();
+    // O comprador não consulta pagamentos (403): a situação não traz o "Motivo:".
+    expect(situacao()).not.toHaveTextContent('Motivo:');
+  });
+
+  it('o servidor encerra o fluxo: "Reconectando…" e, depois de 1 s, "Ao vivo" de novo', async () => {
+    const fluxos = contaFluxos('ped-farmaceutica-0008');
+    // A primeira conexão entrega o estado e termina (como o timeout de 5 min do servidor).
+    server.use(
+      http.get(
+        '*/api/v1/pedidos/:id/linha-do-tempo',
+        () =>
+          new HttpResponse(mensagemPedido(pedidosSnapshot(FARMA)[0]!), {
+            headers: { 'Content-Type': 'text/event-stream' },
+          }),
+        { once: true },
+      ),
+    );
+    await abrir('Bruno Lima', undefined, '#/pedidos/ped-farmaceutica-0008');
+    expect(await screen.findByText('Reconectando…')).toBeVisible();
+    expect(situacao()).toHaveTextContent('Aguardando o pagamento.');
+    await avancar(RECONEXAO_BASE_MS);
+    expect(await screen.findByText('Ao vivo')).toBeVisible();
+    expect(fluxos()).toBe(2);
+  });
+
+  it('ao sair da tela, o fluxo é abortado', async () => {
+    await abrirAoVivo('Bruno Lima', 'ped-farmaceutica-0008');
+    expect(linhasDoTempoAbertas()).toBe(1);
+    act(() => {
+      window.location.hash = '#/pedidos';
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    await tabela();
+    await waitFor(() => expect(linhasDoTempoAbertas()).toBe(0));
+  });
+
+  it('sem SSE (404), volta ao poll: consulta de novo a cada 1,5 s até a confirmação chegar', async () => {
+    semSse();
     const novo = await criarComoBruno(2);
     const gets = contaGets(novo.id);
     await abrir('Bruno Lima', undefined, pedidoHash(novo.id));
     await screen.findByRole('heading', { name: `Pedido ${novo.id}` });
+    await waitFor(() =>
+      expect(situacao()).toHaveTextContent('esta tela consulta de novo a cada 1,5 s'),
+    );
     expect(situacao()).toHaveTextContent('Aguardando o pagamento.');
-    expect(situacao()).toHaveTextContent('esta tela consulta de novo a cada 1,5 s');
-    expect(within(screen.getByRole('article')).getByText('Pendente')).toBeVisible();
+    expect(screen.queryByText('Ao vivo')).not.toBeInTheDocument();
     expect(gets()).toBe(1);
 
     await avancar(POLL_INTERVALO_MS);
@@ -496,29 +662,21 @@ describe('PedidosPage — pagamento no detalhe', () => {
     expect(situacao()).toHaveTextContent(
       'Pago. Pagamento aprovado pag-n00001; o pedido está confirmado.',
     );
+    expect(marcos()).toEqual(['Pedido criado', 'Pagamento aprovado']);
 
     // Confirmado: o poll para.
     await avancar(POLL_INTERVALO_MS * 3);
     expect(gets()).toBe(2);
   });
 
-  it('acima do limite, a consulta mostra o cancelamento por pagamento recusado', async () => {
-    const novo = await criarComoBruno(50);
-    await abrir('Bruno Lima', undefined, pedidoHash(novo.id));
-    await screen.findByRole('heading', { name: `Pedido ${novo.id}` });
-    await avancar(POLL_INTERVALO_MS);
-    expect(situacao()).toHaveTextContent(
-      'Pagamento recusado. O gateway de pagamento recusou a cobrança e o pedido foi cancelado; nada foi cobrado.',
-    );
-    expect(screen.getByText('Pagamento recusado', { selector: 'dd' })).toBeVisible();
-    // O comprador não consulta pagamentos (403): não aparece o motivo do gateway.
-    expect(situacao()).not.toHaveTextContent('Motivo:');
-  });
-
-  it('para depois de 10 consultas sem resposta; "Consultar de novo" recomeça; falha de rede conta como tentativa', async () => {
+  it('sem SSE (endpoint ausente): para depois de 10 consultas sem resposta; "Consultar de novo" recomeça; falha de rede conta como tentativa', async () => {
+    semSse(() => new HttpResponse(null, { status: 404 }));
     const gets = contaGets('ped-farmaceutica-0008');
     await abrir('Bruno Lima', undefined, '#/pedidos/ped-farmaceutica-0008');
     await screen.findByRole('heading', { name: 'Pedido ped-farmaceutica-0008' });
+    await waitFor(() =>
+      expect(situacao()).toHaveTextContent('esta tela consulta de novo a cada 1,5 s'),
+    );
     server.use(http.get('*/api/v1/pedidos/:id', () => HttpResponse.error(), { once: true }));
     for (let i = 0; i < POLL_TENTATIVAS; i++) await avancar(POLL_INTERVALO_MS);
     expect(gets()).toBe(1 + POLL_TENTATIVAS);
@@ -536,10 +694,14 @@ describe('PedidosPage — pagamento no detalhe', () => {
     expect(screen.queryByRole('button', { name: 'Consultar de novo' })).not.toBeInTheDocument();
   });
 
-  it('para de consultar ao sair da tela', async () => {
+  it('sem SSE, para de consultar ao sair da tela', async () => {
+    semSse();
     const gets = contaGets('ped-farmaceutica-0008');
     await abrir('Bruno Lima', undefined, '#/pedidos/ped-farmaceutica-0008');
     await screen.findByRole('heading', { name: 'Pedido ped-farmaceutica-0008' });
+    await waitFor(() =>
+      expect(situacao()).toHaveTextContent('esta tela consulta de novo a cada 1,5 s'),
+    );
     await avancar(POLL_INTERVALO_MS);
     expect(gets()).toBe(2);
     act(() => {
@@ -552,30 +714,63 @@ describe('PedidosPage — pagamento no detalhe', () => {
   });
 
   it('pedido pago e depois cancelado mostra o estorno; cancelado antes da cobrança, "Sem cobrança"', async () => {
-    await abrir('Administradora', FARMA, '#/pedidos/ped-farmaceutica-0005');
-    await screen.findByRole('heading', { name: 'Pedido ped-farmaceutica-0005' });
+    await abrirAoVivo('Administradora', 'ped-farmaceutica-0005', FARMA);
     expect(situacao()).toHaveTextContent(
       'Estornado. O pedido foi pago (pag-farmaceutica-0005) e cancelado depois: o valor foi devolvido ao cliente.',
     );
+    expect(marcos()).toEqual([
+      'Pedido criado',
+      'Pagamento aprovado',
+      'Cancelado pelo cliente',
+      'Valor estornado',
+    ]);
     act(() => {
       window.location.hash = '#/pedidos/ped-farmaceutica-0002';
       window.dispatchEvent(new HashChangeEvent('hashchange'));
     });
     await screen.findByRole('heading', { name: 'Pedido ped-farmaceutica-0002' });
+    await screen.findByText('Ao vivo');
     expect(situacao()).toHaveTextContent(
       'Sem cobrança. O pedido foi cancelado antes do pagamento.',
     );
+    expect(marcos()).toEqual(['Pedido criado', 'Cancelado pelo cliente']);
   });
 
-  it('o gestor vê o motivo da recusa do pagamentos-service (ou que ele está indisponível)', async () => {
-    await abrir('Administradora', FARMA, '#/pedidos/ped-farmaceutica-0004');
-    await screen.findByRole('heading', { name: 'Pedido ped-farmaceutica-0004' });
-    await waitFor(() =>
-      expect(situacao()).toHaveTextContent(
-        'Motivo: Valor acima do limite de aprovação do gateway simulado (R$ 10.000,00).',
-      ),
+  it('pago e cancelado, com o estorno ainda a caminho', async () => {
+    const [base] = pedidosSnapshot(FARMA);
+    resetPedidosStore({
+      [FARMA]: [
+        {
+          ...base!,
+          status: 'CANCELADO',
+          motivoCancelamento: 'CANCELADO_PELO_TENANT',
+          pagamentoId: 'pag-z',
+          historico: [
+            { tipo: 'CRIADO', em: base!.criadoEm },
+            { tipo: 'PAGO', em: base!.criadoEm, detalhe: 'pag-z' },
+            { tipo: 'CANCELADO', em: base!.criadoEm, detalhe: 'CANCELADO_PELO_TENANT' },
+          ],
+        },
+      ],
+    });
+    await abrirAoVivo('Administradora', base!.id, FARMA);
+    expect(situacao()).toHaveTextContent(
+      'Estorno a caminho. O pedido foi pago (pag-z) e cancelado depois: o valor será devolvido ao cliente.',
     );
+  });
 
+  it('o gestor vê o motivo da recusa pelo histórico ou, sem ele, pelo pagamentos-service (ou que ele está indisponível)', async () => {
+    await abrirAoVivo('Administradora', 'ped-farmaceutica-0004', FARMA);
+    expect(situacao()).toHaveTextContent(
+      'Motivo: Valor acima do limite de aprovação do gateway simulado (R$ 10.000,00).',
+    );
+    const linha = screen.getByRole('region', { name: 'Linha do tempo' });
+    expect(within(linha).getByText(MOTIVO_RECUSA_LIMITE)).toBeVisible();
+
+    // Resposta antiga, sem histórico: o motivo vem do pagamentos-service.
+    resetPedidosStore({
+      [FARMA]: pedidosSnapshot(FARMA).map((p) => ({ ...p, historico: undefined })),
+    });
     server.use(http.get('*/api/v1/pagamentos', () => HttpResponse.error(), { once: true }));
     act(() => {
       window.location.hash = '#/pedidos/ped-distribuidora-x';
@@ -586,11 +781,15 @@ describe('PedidosPage — pagamento no detalhe', () => {
       window.location.hash = '#/pedidos/ped-farmaceutica-0004';
       window.dispatchEvent(new HashChangeEvent('hashchange'));
     });
+    await screen.findByRole('heading', { name: 'Pedido ped-farmaceutica-0004' });
     await waitFor(() =>
       expect(situacao()).toHaveTextContent(
         'Motivo: Motivo indisponível: Não foi possível conectar ao pagamentos-service.',
       ),
     );
+    await screen.findByText('Ao vivo');
+    // A linha do tempo é reconstruída a partir do status.
+    expect(marcos()).toEqual(['Pedido criado', 'Pagamento recusado', 'Pagamento recusado']);
   });
 
   it('recusa sem pagamento no serviço e pedido confirmado sem pagamentoId', async () => {
@@ -618,8 +817,7 @@ describe('PedidosPage — pagamento no detalhe', () => {
     server.use(
       http.get('*/api/v1/pagamentos', () => HttpResponse.json({ itens: [], proximoCursor: null })),
     );
-    await abrir('Administradora', FARMA, '#/pedidos/ped-r');
-    await screen.findByRole('heading', { name: 'Pedido ped-r' });
+    await abrirAoVivo('Administradora', 'ped-r', FARMA);
     await waitFor(() =>
       expect(situacao()).toHaveTextContent('Motivo: O gateway não informou o motivo.'),
     );
@@ -628,6 +826,8 @@ describe('PedidosPage — pagamento no detalhe', () => {
       window.dispatchEvent(new HashChangeEvent('hashchange'));
     });
     await screen.findByRole('heading', { name: 'Pedido ped-c' });
+    await screen.findByText('Ao vivo');
     expect(situacao()).toHaveTextContent('Pago. Pagamento aprovado; o pedido está confirmado.');
+    expect(marcos()).toEqual(['Pedido criado', 'Pagamento aprovado']);
   });
 });

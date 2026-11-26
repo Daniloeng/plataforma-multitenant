@@ -6,7 +6,7 @@ import { pagamentosHandlers } from './pagamentos';
 import { pedidosHandlers } from './pedidos';
 import { tenantHandlers } from './tenants';
 
-export const DEMO_VERSION = '0.1.0-dia07';
+export const DEMO_VERSION = '0.1.0-dia08';
 
 type Random = () => number;
 

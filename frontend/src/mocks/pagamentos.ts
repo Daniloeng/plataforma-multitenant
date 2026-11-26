@@ -10,7 +10,8 @@
 //   RECEITA_TENANT) e pedido CONFIRMADO com o pagamentoId. Recusado: pagamento RECUSADO com o
 //   motivo, sem lançamentos, e pedido CANCELADO por PAGAMENTO_RECUSADO.
 // - Pedido cancelado antes da cobrança nunca é cobrado; pedido CONFIRMADO cancelado é estornado:
-//   pagamento ESTORNADO e lançamentos de estorno (débito ESTORNOS + crédito CAIXA_GATEWAY).
+//   pagamento ESTORNADO, lançamentos de estorno (débito ESTORNOS + crédito CAIXA_GATEWAY) e, como o
+//   evento pagamento.estornado, o marco ESTORNADO no histórico do pedido (`aplicarEstorno`).
 // - Saldo = créditos em RECEITA_TENANT − débitos em ESTORNOS (a receita líquida do tenant), na
 //   moeda pedida (`moeda`, padrão BRL), como no backend: moedas diferentes nunca são somadas.
 // - Listas do mais recente para o mais antigo, cursor = id do último item da página.
@@ -28,14 +29,20 @@ import {
 import { MOEDA_PADRAO } from '../api/catalogo';
 import type { Pedido } from '../api/pedidos';
 import { guard, problemResponse } from './gateway';
-import { aplicarPagamento, assinarPedidos, pedidosSnapshot } from './pedidos';
+import {
+  MOTIVO_RECUSA_LIMITE,
+  aplicarEstorno,
+  aplicarPagamento,
+  assinarPedidos,
+  pedidosSnapshot,
+} from './pedidos';
 
 /** Atraso entre o pedido.criado e a cobrança no gateway simulado. */
 export const COBRANCA_ATRASO_MS = 1200;
 /** O gateway simulado aprova até R$ 10.000,00 (em centavos) e recusa acima. */
 export const LIMITE_APROVACAO_CENTAVOS = 1_000_000;
-export const MOTIVO_RECUSA_LIMITE =
-  'Valor acima do limite de aprovação do gateway simulado (R$ 10.000,00).';
+/** Motivo da recusa acima do limite (definido no pedidos simulado, que o cita no histórico). */
+export { MOTIVO_RECUSA_LIMITE };
 
 interface Cobranca {
   tenantId: string;
@@ -101,7 +108,13 @@ function seedLivro(tenantId: string): Livro {
     if (!pedido.pagamentoId && !recusado) continue; // pendente ou cancelado antes da cobrança
     const id = pedido.pagamentoId ?? pedido.id.replace(/^ped-/, 'pag-');
     const cobradoEm = new Date(Date.parse(pedido.criadoEm) + COBRANCA_ATRASO_MS).toISOString();
-    const estornado = pedido.status === 'CANCELADO' && !recusado;
+    // Pago e cancelado: estornado se o histórico já tem o estorno (ou, sem histórico, sempre).
+    // Cancelado agora há pouco, ainda sem ESTORNADO, o pagamento segue APROVADO e o estorno vem do
+    // pedido.cancelado que está chegando (o livro é montado sob demanda, às vezes nesse momento).
+    const estornado =
+      pedido.status === 'CANCELADO' &&
+      !recusado &&
+      (pedido.historico?.some((m) => m.tipo === 'ESTORNADO') ?? true);
     const pagamento: Pagamento = {
       id,
       pedidoId: pedido.id,
@@ -181,7 +194,7 @@ function cobrar({ tenantId, pedido, venceEm }: Cobranca): void {
   // Só pedido PENDENTE é cobrado (no máximo uma vez): cancelado antes da cobrança nunca é.
   const resultado = aprovado
     ? ({ aprovado: true, pagamentoId: pagamento.id } as const)
-    : ({ aprovado: false } as const);
+    : ({ aprovado: false, motivo: MOTIVO_RECUSA_LIMITE } as const);
   if (!aplicarPagamento(tenantId, pedido.id, resultado, quando)) return;
   livro.pagamentos.unshift(pagamento);
   if (aprovado) {
@@ -201,6 +214,8 @@ function estornar(tenantId: string, pedidoId: string, agora: number = Date.now()
   pagamento.status = 'ESTORNADO';
   pagamento.atualizadoEm = quando;
   lancar(livro, pagamento, 'ESTORNOS', 'CAIXA_GATEWAY', quando, [novoId('lan'), novoId('lan')]);
+  // pagamento.estornado: o pedidos-service anota o marco ESTORNADO no histórico do pedido.
+  aplicarEstorno(tenantId, pedidoId, pagamento.id, quando);
 }
 
 /**

@@ -1,10 +1,12 @@
 package br.dev.plataforma.pedidos;
 
+import br.dev.plataforma.spring.tenancy.TenantContext;
 import br.dev.plataforma.spring.web.Caller;
 import br.dev.plataforma.spring.web.ForbiddenException;
 import jakarta.validation.Valid;
 import java.net.URI;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -14,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
  * API de pedidos (pedidos.yaml). O tenant vem do X-Tenant-Id, o cliente do X-Cliente-Id e os papéis
@@ -28,9 +31,11 @@ public class PedidoController {
   static final String REPLAYED = "Idempotent-Replayed";
 
   private final PedidoService service;
+  private final LinhaDoTempo linhaDoTempo;
 
-  public PedidoController(PedidoService service) {
+  public PedidoController(PedidoService service, LinhaDoTempo linhaDoTempo) {
     this.service = service;
+    this.linhaDoTempo = linhaDoTempo;
   }
 
   @PostMapping
@@ -63,6 +68,17 @@ public class PedidoController {
   @GetMapping("/{pedidoId}")
   public PedidoView obter(Caller caller, @PathVariable String pedidoId) {
     return service.obter(pedidoId, clienteDe(caller));
+  }
+
+  /** Linha do tempo em tempo real (SSE): o estado atual e cada mudança do pedido (ADR-0013). */
+  @GetMapping(path = "/{pedidoId}/linha-do-tempo", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+  public SseEmitter acompanhar(Caller caller, @PathVariable String pedidoId) {
+    String cliente = clienteDe(caller);
+    return linhaDoTempo.abrir(
+        TenantContext.require().toString(),
+        pedidoId,
+        cliente == null,
+        () -> service.documento(pedidoId, cliente));
   }
 
   @PostMapping("/{pedidoId}/cancelamento")

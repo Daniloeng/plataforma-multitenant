@@ -18,3 +18,11 @@ target/
 # Segredos
 .env
 *.env.local
+
+# Saídas do smoke do Compose (passos do CI rodados localmente)
+/headers.txt
+/me.json
+/ns.json
+/resp.json
+/sse.txt
+/status.json

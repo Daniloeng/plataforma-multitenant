@@ -36,6 +36,18 @@ public class ApiErrors extends ResponseEntityExceptionHandler {
     return problem(HttpStatus.NOT_FOUND, "nao-encontrado", "Pedido não encontrado", e.getMessage());
   }
 
+  @ExceptionHandler(LinhaDoTempo.MuitasConexoes.class)
+  ProblemDetail muitasConexoes(LinhaDoTempo.MuitasConexoes e) {
+    return problem(
+        HttpStatus.TOO_MANY_REQUESTS, "muitas-conexoes", "Muitas conexões abertas", e.getMessage());
+  }
+
+  @ExceptionHandler(LinhaDoTempo.Indisponivel.class)
+  ProblemDetail linhaIndisponivel(LinhaDoTempo.Indisponivel e) {
+    return problem(
+        HttpStatus.SERVICE_UNAVAILABLE, "indisponivel", "Serviço indisponível", e.getMessage());
+  }
+
   @ExceptionHandler(PedidosExceptions.ChaveReutilizada.class)
   ProblemDetail chaveReutilizada(PedidosExceptions.ChaveReutilizada e) {
     return problem(

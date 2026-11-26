@@ -7,6 +7,7 @@ import br.dev.plataforma.contracts.EventCatalog;
 import br.dev.plataforma.contracts.catalogo.PrecoAlterado;
 import br.dev.plataforma.contracts.catalogo.ProdutoAlterado;
 import br.dev.plataforma.contracts.pagamentos.PagamentoAprovado;
+import br.dev.plataforma.contracts.pagamentos.PagamentoEstornado;
 import br.dev.plataforma.contracts.pagamentos.PagamentoRecusado;
 import br.dev.plataforma.contracts.pedidos.PedidoCancelado;
 import br.dev.plataforma.contracts.pedidos.PedidoConfirmado;
@@ -83,6 +84,8 @@ class PedidosServiceIT {
     registry.add("spring.data.mongodb.uri", () -> MONGO.getReplicaSetUrl("pedidos"));
     registry.add("spring.pulsar.client.service-url", PULSAR::getPulsarBrokerUrl);
     registry.add("spring.pulsar.admin.service-url", PULSAR::getHttpServiceUrl);
+    registry.add("plataforma.pedidos.linha-do-tempo.batimento", () -> "PT1S");
+    registry.add("plataforma.pedidos.linha-do-tempo.max-por-tenant", () -> "3");
   }
 
   @BeforeAll
@@ -628,11 +631,175 @@ class PedidosServiceIT {
                 .get("motivoCancelamento")
                 .asText())
         .isEqualTo("PAGAMENTO_RECUSADO");
+    JsonNode historico = comoGestor("GET", "/api/v1/pedidos/" + recusado, "loja-j").corpo();
+    assertThat(tipos(historico)).containsExactly("CRIADO", "RECUSADO", "CANCELADO");
+    assertThat(historico.get("historico").get(1).get("detalhe").asText())
+        .isEqualTo("Valor acima do limite");
+    // O comprador não vê o motivo exato da recusa (é do tenant, Dia 7).
+    JsonNode doComprador =
+        comoComprador("GET", "/api/v1/pedidos/" + recusado, "loja-j", "cli-1").corpo();
+    assertThat(doComprador.get("historico").get(1).get("detalhe").isNull()).isTrue();
     // Cliente cancela um pedido já pago: vale (Pagamentos estorna ao receber o pedido.cancelado).
     assertThat(
             comoComprador("POST", "/api/v1/pedidos/" + pago + "/cancelamento", "loja-j", "cli-1")
                 .status())
         .isEqualTo(200);
+  }
+
+  volatile boolean pingRecebido;
+
+  /** Abre a linha do tempo e junta as linhas do fluxo SSE numa fila. */
+  java.util.concurrent.BlockingQueue<String> acompanhar(
+      String tenant, String cliente, String pedidoId) throws Exception {
+    java.util.concurrent.BlockingQueue<String> linhas =
+        new java.util.concurrent.LinkedBlockingQueue<>();
+    HttpRequest req =
+        HttpRequest.newBuilder(
+                URI.create(
+                    "http://localhost:" + port + "/api/v1/pedidos/" + pedidoId + "/linha-do-tempo"))
+            .header("Accept", "text/event-stream")
+            .header("X-Tenant-Id", tenant)
+            .header("X-Usuario", "teste")
+            .header("X-Papeis", "comprador")
+            .header("X-Cliente-Id", cliente)
+            .build();
+    HttpResponse<java.util.stream.Stream<String>> resp =
+        http.send(req, HttpResponse.BodyHandlers.ofLines());
+    assertThat(resp.statusCode()).isEqualTo(200);
+    assertThat(resp.headers().firstValue("Content-Type").orElse(""))
+        .startsWith("text/event-stream");
+    Thread.ofVirtual()
+        .start(
+            () ->
+                resp.body()
+                    .forEach(
+                        l -> {
+                          if (l.startsWith(":")) {
+                            pingRecebido = true;
+                          }
+                          linhas.add(l);
+                        }));
+    return linhas;
+  }
+
+  /** Espera um evento {@code pedido} cujo JSON satisfaz a condição; devolve o JSON. */
+  JsonNode esperarEvento(
+      java.util.concurrent.BlockingQueue<String> linhas,
+      java.util.function.Predicate<JsonNode> condicao)
+      throws Exception {
+    long limite = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+    while (System.nanoTime() < limite) {
+      String linha = linhas.poll(1, TimeUnit.SECONDS);
+      if (linha != null && linha.startsWith("data:")) {
+        JsonNode pedido = json.readTree(linha.substring(5));
+        if (condicao.test(pedido)) {
+          return pedido;
+        }
+      }
+    }
+    throw new AssertionError("evento esperado não chegou pela linha do tempo");
+  }
+
+  static List<String> tipos(JsonNode pedido) {
+    List<String> tipos = new java.util.ArrayList<>();
+    pedido.get("historico").forEach(m -> tipos.add(m.get("tipo").asText()));
+    return tipos;
+  }
+
+  @Test
+  void linhaDoTempoAoVivoDaCriacaoAoEstorno() throws Exception {
+    catalogo("loja-l", "p", 250);
+    String id =
+        comprar("loja-l", "cli-1", chave(), "[" + item("p", 2) + "]").corpo().get("id").asText();
+    var linhas = acompanhar("loja-l", "cli-1", id);
+
+    JsonNode inicial = esperarEvento(linhas, p -> true);
+    assertThat(inicial.get("status").asText()).isEqualTo("PENDENTE");
+    assertThat(tipos(inicial)).containsExactly("CRIADO");
+
+    aprovado("loja-l", id, "pag-9");
+    JsonNode pago = esperarEvento(linhas, p -> p.get("status").asText().equals("CONFIRMADO"));
+    assertThat(tipos(pago)).containsExactly("CRIADO", "PAGO");
+    assertThat(pago.get("historico").get(1).get("detalhe").asText()).isEqualTo("pag-9");
+
+    comoComprador("POST", "/api/v1/pedidos/" + id + "/cancelamento", "loja-l", "cli-1");
+    JsonNode cancelado = esperarEvento(linhas, p -> p.get("status").asText().equals("CANCELADO"));
+    assertThat(tipos(cancelado)).containsExactly("CRIADO", "PAGO", "CANCELADO");
+    assertThat(cancelado.get("historico").get(2).get("detalhe").asText())
+        .isEqualTo("SOLICITADO_PELO_CLIENTE");
+
+    for (int i = 0; i < 2; i++) { // o estorno repetido anota uma vez só
+      publicar(
+          PagamentoEstornado.newBuilder()
+              .setEventId(UUID.randomUUID())
+              .setTenantId("loja-l")
+              .setOccurredAt(Instant.now().truncatedTo(ChronoUnit.MILLIS))
+              .setPagamentoId("pag-9")
+              .setPedidoId(id)
+              .setValorCentavos(500)
+              .setMoeda("BRL")
+              .build(),
+          "loja-l",
+          id);
+    }
+    JsonNode estornado = esperarEvento(linhas, p -> tipos(p).contains("ESTORNADO"));
+    assertThat(estornado.get("status").asText()).isEqualTo("CANCELADO");
+    // O batimento chega como comentário.
+    await().atMost(10, TimeUnit.SECONDS).until(() -> pingRecebido);
+    assertThat(
+            tipos(comoComprador("GET", "/api/v1/pedidos/" + id, "loja-l", "cli-1").corpo()).stream()
+                .filter("ESTORNADO"::equals))
+        .hasSize(1);
+
+    // Pedido de outro cliente ou de outro tenant: 404 em Problem Details, mesmo pedindo SSE.
+    for (String[] quem : new String[][] {{"loja-l", "cli-2"}, {"loja-z", "cli-1"}}) {
+      HttpResponse<String> naoEncontrado =
+          http.send(
+              HttpRequest.newBuilder(
+                      URI.create(
+                          "http://localhost:" + port + "/api/v1/pedidos/" + id + "/linha-do-tempo"))
+                  .header("Accept", "text/event-stream")
+                  .header("X-Tenant-Id", quem[0])
+                  .header("X-Usuario", "teste")
+                  .header("X-Papeis", "comprador")
+                  .header("X-Cliente-Id", quem[1])
+                  .build(),
+              HttpResponse.BodyHandlers.ofString());
+      assertThat(naoEncontrado.statusCode()).isEqualTo(404);
+      assertThat(naoEncontrado.body()).contains("nao-encontrado");
+    }
+    // Comprador sem cliente: 403.
+    assertThat(
+            chamar(
+                    "GET",
+                    "/api/v1/pedidos/" + id + "/linha-do-tempo",
+                    "loja-l",
+                    "comprador",
+                    null,
+                    null,
+                    null)
+                .status())
+        .isEqualTo(403);
+    // Teto de conexões por tenant (3 no teste; esta já é a primeira): 429.
+    acompanhar("loja-l", "cli-1", id);
+    acompanhar("loja-l", "cli-1", id);
+    assertThat(
+            http.send(
+                    HttpRequest.newBuilder(
+                            URI.create(
+                                "http://localhost:"
+                                    + port
+                                    + "/api/v1/pedidos/"
+                                    + id
+                                    + "/linha-do-tempo"))
+                        .header("X-Tenant-Id", "loja-l")
+                        .header("X-Usuario", "teste")
+                        .header("X-Papeis", "comprador")
+                        .header("X-Cliente-Id", "cli-1")
+                        .build(),
+                    HttpResponse.BodyHandlers.ofString())
+                .statusCode())
+        .isEqualTo(429);
   }
 
   @Test
