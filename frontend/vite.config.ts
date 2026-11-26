@@ -1,13 +1,25 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
+import { fileURLToPath } from 'node:url';
 
 // Base pública: '/' localmente e '/plataforma-multitenant/' no GitHub Pages.
 const base = process.env.VITE_BASE ?? '/';
 
+// Raiz do repositório: a página Arquitetura lê libs/contracts e docs/ (fora de frontend/).
+const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
+
 export default defineConfig({
   base,
   plugins: [react()],
+  build: {
+    // O Mermaid (≈ 650 kB) e o cytoscape ficam em chunks carregados sob demanda, só na página
+    // Arquitetura; o limite evita o aviso por esses chunks, não pelo bundle inicial.
+    chunkSizeWarningLimit: 800,
+  },
   server: {
+    fs: {
+      allow: [repositoryRoot],
+    },
     proxy: {
       // Em desenvolvimento, /api vai para o status-service (Spring Boot) local.
       '/api': 'http://localhost:8090',

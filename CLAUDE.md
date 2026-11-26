@@ -9,16 +9,21 @@ multi-tenant de pedidos B2B + pagamentos em microsserviços. O plano de 22 dias 
 - Código de produção (classes, métodos, campos, variáveis) em inglês; comentários e Javadoc em
   português. Nos testes, nomes de métodos e variáveis locais podem ficar em português, para o
   teste ler como uma especificação (`rejeitaFormatosInvalidos`).
+- Linguagem do negócio em português nos contratos: eventos (`pedido.criado`), campos de eventos e
+  recursos da API (`/api/v1/pedidos`), como no event storming (ADR-0004).
 - Commits no formato Conventional Commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `ci:`).
 
 ## Estrutura
 ```
 libs/platform-core/       tipos compartilhados (TenantId, IsolationLevel), sem Spring
+libs/contracts/           contratos: eventos Avro (gera classes Java) e OpenAPI; EventCatalog
 services/status-service/  Spring Boot: saúde de MongoDB x4 e Pulsar em GET /api/status (porta 8090)
 frontend/                 React + Vite + TS; modo demo com MSW (GitHub Pages)
 infra/                    Docker Compose (MongoDB por serviço, Pulsar standalone) e scripts
 docs/dias/NN.md           diário detalhado de cada dia
-.claude/                  hooks e configurações do Claude Code versionadas
+docs/adr/                 decisões de arquitetura (ADRs)
+docs/arquitetura/         event storming e diagramas (Mermaid)
+.claude/                  hooks, subagentes (arquiteto) e skills (adr) do Claude Code
 ```
 Novos microsserviços entram em `services/<nome>-service`, como módulo do `pom.xml` raiz.
 
@@ -41,8 +46,15 @@ Novos microsserviços entram em `services/<nome>-service`, como módulo do `pom.
   Dia 4), nunca do corpo da requisição. Use `TenantId` (valida o formato) em vez de `String`.
 - **Banco por serviço**: um serviço nunca lê o MongoDB de outro; integração só por eventos Pulsar
   ou API.
-- **Eventos**: tópicos `persistent://plataforma/<dominio>/<entidade>.<evento>.v1`; todo evento
-  carrega `eventId`, `tenantId`, `occurredAt` e `traceparent`.
+- **Eventos**: um `.avsc` por evento em `libs/contracts/src/main/avro/<contexto>/`, com
+  `eventId`, `tenantId`, `occurredAt`, `traceparent` e as propriedades `x-evento`, `x-topico`,
+  `x-produtor`, `x-consumidores`. Tópico `persistent://plataforma/<produtor>/<entidade>.<evento>.v<n>`,
+  resolvido pelo `EventCatalog`, nunca por texto solto. Evolução BACKWARD: campo novo precisa de
+  default; enum com símbolo default; compatibilidade FULL; mudança incompatível vira tópico `.v2`. Dinheiro em centavos (`long`).
+- **APIs**: contract-first em `libs/contracts/src/main/resources/openapi/`; rotas `/api/v1/`;
+  `X-Tenant-Id` obrigatório nas APIs de negócio; erros em Problem Details (RFC 9457).
+- **Decisões**: decisão de arquitetura vira ADR (skill `adr`); peça revisão ao subagente `arquiteto`
+  antes de abrir PR que mude contratos ou fronteiras entre serviços.
 - **Custo zero até o Dia 10**: só ferramentas gratuitas; nada de serviços pagos.
 - **Formatação**: google-java-format (Spotless, conferido no `validate`) e Prettier no frontend.
   O hook `.claude/hooks/format.sh` formata cada arquivo que o Claude edita.

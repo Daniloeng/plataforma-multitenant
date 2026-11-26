@@ -1,0 +1,117 @@
+openapi: 3.1.0
+info:
+  title: Catálogo
+  version: 1.0.0
+  description: Produtos e preços por tenant.
+servers:
+  - url: http://localhost:8082
+security:
+  - jwt: []
+x-autorizacao: "Leitura: qualquer usuário do tenant. Escrita: papel gestor-tenant."
+tags:
+  - name: produtos
+paths:
+  /api/v1/produtos:
+    parameters:
+      - $ref: '_comum.yaml#/components/parameters/TenantId'
+    get:
+      tags: [produtos]
+      operationId: listarProdutos
+      parameters:
+        - $ref: '_comum.yaml#/components/parameters/Cursor'
+        - $ref: '_comum.yaml#/components/parameters/Limite'
+        - name: busca
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Página de produtos.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [itens]
+                properties:
+                  itens:
+                    type: array
+                    items: { $ref: '#/components/schemas/Produto' }
+                  proximoCursor: { type: [string, 'null'] }
+    post:
+      tags: [produtos]
+      operationId: criarProduto
+      summary: Cria um produto e publica produto.alterado e preco.alterado
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NovoProduto' }
+      responses:
+        '201':
+          description: Produto criado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Produto' }
+        '400': { $ref: '_comum.yaml#/components/responses/RequisicaoInvalida' }
+        '409': { $ref: '_comum.yaml#/components/responses/Conflito' }
+  /api/v1/produtos/{produtoId}:
+    parameters:
+      - $ref: '_comum.yaml#/components/parameters/TenantId'
+      - name: produtoId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [produtos]
+      operationId: obterProduto
+      responses:
+        '200':
+          description: Produto.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Produto' }
+        '404': { $ref: '_comum.yaml#/components/responses/NaoEncontrado' }
+  /api/v1/produtos/{produtoId}/preco:
+    parameters:
+      - $ref: '_comum.yaml#/components/parameters/TenantId'
+      - name: produtoId
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      tags: [produtos]
+      operationId: alterarPreco
+      summary: Altera o preço e publica preco.alterado
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '_comum.yaml#/components/schemas/Dinheiro' }
+      responses:
+        '200':
+          description: Produto com o novo preço.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Produto' }
+        '400': { $ref: '_comum.yaml#/components/responses/RequisicaoInvalida' }
+        '404': { $ref: '_comum.yaml#/components/responses/NaoEncontrado' }
+components:
+  securitySchemes:
+    jwt:
+      $ref: '_comum.yaml#/components/securitySchemes/jwt'
+  schemas:
+    NovoProduto:
+      type: object
+      required: [sku, nome, preco]
+      properties:
+        sku: { type: string, pattern: '^[A-Z0-9-]{3,32}$' }
+        nome: { type: string, minLength: 2, maxLength: 200 }
+        preco: { $ref: '_comum.yaml#/components/schemas/Dinheiro' }
+    Produto:
+      type: object
+      required: [id, sku, nome, preco, ativo]
+      properties:
+        id: { type: string }
+        sku: { type: string }
+        nome: { type: string }
+        preco: { $ref: '_comum.yaml#/components/schemas/Dinheiro' }
+        ativo: { type: boolean }

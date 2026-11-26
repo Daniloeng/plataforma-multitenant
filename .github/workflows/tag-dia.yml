@@ -1,0 +1,65 @@
+name: Tag do dia
+
+# Cria a tag dia-NN quando o PR de um dia (título "Dia N: ...") é mergeado na main,
+# com qualquer método de merge. Também pode ser disparado à mão para marcar um commit existente.
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dia:
+        description: Número do dia (ex.: 1)
+        required: true
+      sha:
+        description: Commit a marcar (padrão: o último da main)
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Descobrir o dia
+        id: dia
+        env:
+          INPUT_DIA: ${{ inputs.dia }}
+          INPUT_SHA: ${{ inputs.sha }}
+          TITULO_PR: ${{ github.event.pull_request.title }}
+          SHA_MERGE: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          if [ -n "$INPUT_DIA" ]; then
+            dia="$INPUT_DIA"
+            sha="${INPUT_SHA:-$GITHUB_SHA}"
+          else
+            dia=$(printf '%s' "$TITULO_PR" | sed -nE 's/^Dia ([0-9]+):.*/\1/p')
+            sha="$SHA_MERGE"
+          fi
+          if [ -z "$dia" ]; then
+            echo "PR não é de um dia; nada a marcar."
+            exit 0
+          fi
+          case "$dia" in *[!0-9]*) echo "Dia inválido: $dia" >&2; exit 1 ;; esac
+          # 10# evita que "08" seja lido como octal
+          printf 'tag=dia-%02d\nsha=%s\n' "$((10#$dia))" "$sha" >> "$GITHUB_OUTPUT"
+      - name: Criar a tag
+        if: steps.dia.outputs.tag != ''
+        env:
+          TAG: ${{ steps.dia.outputs.tag }}
+          SHA: ${{ steps.dia.outputs.sha }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "Tag $TAG já existe; nada a fazer."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "$TAG" "$SHA"
+          git push origin "$TAG"
+          echo "Tag $TAG criada em $SHA" >> "$GITHUB_STEP_SUMMARY"

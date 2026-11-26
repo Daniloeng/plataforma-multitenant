@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>br.dev.plataforma</groupId>
+    <artifactId>plataforma-multitenant</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>contracts</artifactId>
+  <name>contracts</name>
+  <description>Contratos entre serviços: eventos Avro (Pulsar) e APIs OpenAPI. Gera as classes Java dos eventos.</description>
+
+  <properties>
+    <avro.version>1.12.2</avro.version>
+    <swagger-parser.version>2.1.49</swagger-parser.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.apache.avro</groupId>
+      <artifactId>avro</artifactId>
+      <version>${avro.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>io.swagger.parser.v3</groupId>
+      <artifactId>swagger-parser</artifactId>
+      <version>${swagger-parser.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.avro</groupId>
+        <artifactId>avro-maven-plugin</artifactId>
+        <version>${avro.version}</version>
+        <executions>
+          <execution>
+            <phase>generate-sources</phase>
+            <goals>
+              <goal>schema</goal>
+            </goals>
+            <configuration>
+              <sourceDirectory>${project.basedir}/src/main/avro</sourceDirectory>
+              <outputDirectory>${project.build.directory}/generated-sources/avro</outputDirectory>
+              <!-- Tipos compartilhados primeiro, para os eventos poderem referenciá-los pelo nome -->
+              <imports>
+                <import>${project.basedir}/src/main/avro/tenants/Plano.avsc</import>
+                <import>${project.basedir}/src/main/avro/tenants/NivelIsolamento.avsc</import>
+              </imports>
+              <stringType>String</stringType>
+              <enableDecimalLogicalType>true</enableDecimalLogicalType>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <configuration>
+          <!-- Classes geradas pelo Avro não entram na cobertura -->
+          <excludes>
+            <exclude>br/dev/plataforma/contracts/tenants/**</exclude>
+            <exclude>br/dev/plataforma/contracts/catalogo/**</exclude>
+            <exclude>br/dev/plataforma/contracts/pedidos/**</exclude>
+            <exclude>br/dev/plataforma/contracts/pagamentos/**</exclude>
+          </excludes>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

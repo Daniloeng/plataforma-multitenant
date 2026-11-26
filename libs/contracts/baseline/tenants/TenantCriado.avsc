@@ -1,0 +1,62 @@
+{
+  "type": "record",
+  "name": "TenantCriado",
+  "namespace": "br.dev.plataforma.contracts.tenants",
+  "doc": "Um novo tenant foi cadastrado na plataforma.",
+  "x-evento": "tenant.criado",
+  "x-topico": "persistent://plataforma/tenants/tenant.criado.v1",
+  "x-produtor": "tenants",
+  "x-consumidores": [
+    "catalogo",
+    "pedidos",
+    "pagamentos",
+    "gateway"
+  ],
+  "fields": [
+    {
+      "name": "eventId",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      },
+      "doc": "Identificador único do evento; chave da deduplicação nos consumidores."
+    },
+    {
+      "name": "tenantId",
+      "type": "string",
+      "doc": "Tenant dono do agregado. Também compõe a chave da mensagem (tenantId:aggregateId)."
+    },
+    {
+      "name": "occurredAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      },
+      "doc": "Instante em que o fato aconteceu no serviço de origem (UTC)."
+    },
+    {
+      "name": "traceparent",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null,
+      "doc": "Contexto W3C Trace Context, para o trace atravessar o Pulsar."
+    },
+    {
+      "name": "nome",
+      "type": "string",
+      "doc": "Razão social ou nome fantasia."
+    },
+    {
+      "name": "plano",
+      "type": "br.dev.plataforma.contracts.tenants.Plano",
+      "doc": "Plano contratado; define limites de uso."
+    },
+    {
+      "name": "nivelIsolamento",
+      "type": "br.dev.plataforma.contracts.tenants.NivelIsolamento",
+      "doc": "Como os dados do tenant ficam isolados."
+    }
+  ]
+}

@@ -99,7 +99,10 @@ jobs:
       - name: Conferir namespaces Pulsar
         run: |
           curl -fsS http://localhost:8080/admin/v2/namespaces/plataforma | tee ns.json
-          for ns in tenants catalogo pedidos pagamentos; do grep -q "plataforma/$ns" ns.json; done
+          for ns in tenants catalogo pedidos pagamentos; do
+            grep -q "plataforma/$ns" ns.json
+            test "$(curl -fsS http://localhost:8080/admin/v2/namespaces/plataforma/$ns/schemaCompatibilityStrategy)" = '"FULL"'
+          done
       - name: Logs em caso de falha
         if: failure()
         run: docker compose -f infra/docker-compose.yml logs --tail 200

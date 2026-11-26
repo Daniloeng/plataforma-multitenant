@@ -1,0 +1,12 @@
+{
+  "type": "enum",
+  "name": "NivelIsolamento",
+  "symbols": [
+    "POOL",
+    "BRIDGE",
+    "SILO"
+  ],
+  "namespace": "br.dev.plataforma.contracts.tenants",
+  "doc": "Pool: coleções compartilhadas; Bridge: database e namespace próprios; Silo: instância própria.",
+  "default": "POOL"
+}

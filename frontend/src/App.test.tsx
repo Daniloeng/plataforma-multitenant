@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { App } from './App';
@@ -9,7 +9,10 @@ function mockApi(body: JsonBodyType) {
   server.use(http.get('*/api/status', () => HttpResponse.json(body)));
 }
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  window.location.hash = '';
+});
 
 describe('App', () => {
   it('mostra carregamento e depois a plataforma operacional', async () => {
@@ -137,7 +140,7 @@ describe('App', () => {
     await screen.findByTestId('overall-status');
     expect(screen.getByRole('heading', { name: 'Microsserviços' })).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Progresso' })).toBeVisible();
-    expect(screen.getByText('Dia 1 de 22')).toBeVisible();
+    expect(screen.getByText('Dia 2 de 22')).toBeVisible();
   });
 
   it('mostra o selo de demo apenas no modo demo', async () => {
@@ -151,5 +154,44 @@ describe('App', () => {
     render(<App />);
     await screen.findByTestId('overall-status');
     expect(screen.getByText('Modo demo (API simulada)')).toBeVisible();
+  });
+
+  it('navega entre Status e Arquitetura pelas abas (roteamento por hash)', async () => {
+    const user = userEvent.setup();
+    mockApi(makeStatus());
+    render(<App />);
+    await screen.findByTestId('overall-status');
+    const nav = screen.getByRole('navigation', { name: 'Páginas' });
+    const status = within(nav).getByRole('link', { name: 'Status' });
+    const arquitetura = within(nav).getByRole('link', { name: 'Arquitetura' });
+    expect(status).toHaveAttribute('href', '#/');
+    expect(status).toHaveAttribute('aria-current', 'page');
+    expect(arquitetura).toHaveAttribute('href', '#/arquitetura');
+    expect(arquitetura).not.toHaveAttribute('aria-current');
+    expect(document.title).toBe('Status da plataforma');
+
+    await user.click(arquitetura);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Arquitetura' })).toBeVisible();
+    expect(window.location.hash).toBe('#/arquitetura');
+    expect(arquitetura).toHaveAttribute('aria-current', 'page');
+    expect(document.title).toBe('Arquitetura');
+    expect(screen.getByRole('heading', { name: 'Catálogo de eventos' })).toBeVisible();
+    // O catálogo vem dos schemas Avro reais de libs/contracts.
+    expect(screen.getByRole('listitem', { name: 'pedido.criado' })).toBeVisible();
+    expect(screen.queryByTestId('overall-status')).not.toBeInTheDocument();
+    expect(screen.getByText(/gerado em build time/)).toBeVisible();
+
+    await user.click(status);
+    expect(await screen.findByTestId('overall-status')).toHaveTextContent('Operacional');
+    expect(screen.getByRole('heading', { level: 1, name: 'Status da plataforma' })).toBeVisible();
+  });
+
+  it('abre direto na Arquitetura quando a URL já tem #/arquitetura', async () => {
+    window.location.hash = '#/arquitetura';
+    render(<App />);
+    expect(screen.getByRole('heading', { level: 1, name: 'Arquitetura' })).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Matriz produtor × consumidor' })).toBeVisible();
+    // Os diagramas reais de docs/ terminam de renderizar (Mermaid mockado).
+    await waitFor(() => expect(screen.queryByText('Carregando diagrama…')).not.toBeInTheDocument());
   });
 });

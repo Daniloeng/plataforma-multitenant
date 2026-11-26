@@ -1,7 +1,7 @@
 #!/bin/sh
 # Cria a hierarquia Pulsar do plano: tenant "plataforma" e um namespace por domínio, com retenção
-# de 3 dias. Usa a API REST de admin (curl), que é bem mais rápida que abrir uma JVM do
-# pulsar-admin por comando. Idempotente: 409 (já existe) conta como sucesso.
+# de 3 dias e compatibilidade de schema FULL. Usa a API REST de admin (curl), bem mais rápida que
+# abrir uma JVM do pulsar-admin por comando. Idempotente: 409 (já existe) conta como sucesso.
 set -eu
 
 ADMIN="${PULSAR_ADMIN_URL:-http://localhost:8080}/admin/v2"
@@ -20,6 +20,8 @@ call PUT tenants/plataforma '{"allowedClusters":["standalone"],"adminRoles":[]}'
 for ns in tenants catalogo pedidos pagamentos; do
   call PUT "namespaces/plataforma/$ns" '{}'
   call POST "namespaces/plataforma/$ns/retention" '{"retentionTimeInMinutes":4320,"retentionSizeInMB":1024}'
+  # Schemas evoluem com compatibilidade FULL (ADR-0004).
+  call PUT "namespaces/plataforma/$ns/schemaCompatibilityStrategy" '"FULL"'
 done
 
 echo "namespaces: $(curl -s "$ADMIN/namespaces/plataforma")"
