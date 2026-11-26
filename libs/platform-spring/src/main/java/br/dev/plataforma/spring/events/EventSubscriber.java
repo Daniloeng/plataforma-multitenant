@@ -116,6 +116,9 @@ public class EventSubscriber implements SmartLifecycle {
                   DeadLetterPolicy.builder()
                       .maxRedeliverCount(maxRedeliveries)
                       .deadLetterTopic(deadLetterTopic(r.name()))
+                      // Assinatura criada junto com o tópico: retém as mensagens até alguém
+                      // reprocessar, em vez de perdê-las na retenção do namespace.
+                      .initialSubscriptionName(subscriptionName(r.name()) + "-reprocessar")
                       .build())
               .messageListener((consumer, msg) -> handle(consumer, msg, r))
               .subscribe());
@@ -132,7 +135,7 @@ public class EventSubscriber implements SmartLifecycle {
     try {
       process(msg, r);
       consumer.acknowledgeAsync(msg);
-    } catch (RuntimeException e) {
+    } catch (Throwable e) { // Error também: sem nack, a mensagem ficaria pendente para sempre
       LOG.warn(
           "Falha ao processar {} ({}), tentativa {}: {}",
           msg.getTopicName(),

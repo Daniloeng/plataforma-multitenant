@@ -6,6 +6,7 @@ import {
   type FiltroProdutos,
   type Produto,
 } from '../api/catalogo';
+import type { Plano } from '../api/tenants';
 
 export interface ProdutosState {
   /** Produtos carregados até agora (páginas acumuladas). */
@@ -14,6 +15,8 @@ export interface ProdutosState {
   /** Produtos que atendem ao filtro, em todas as páginas (null até a primeira resposta). */
   total: number | null;
   limitePlano: number | null;
+  /** Plano que o catálogo usou para o limite (null até a primeira resposta). */
+  plano: Plano | null;
   usados: number | null;
   loading: boolean;
   loadingMore: boolean;
@@ -41,6 +44,7 @@ const INITIAL: ProdutosState = {
   nextCursor: null,
   total: null,
   limitePlano: null,
+  plano: null,
   usados: null,
   loading: true,
   loadingMore: false,
@@ -88,6 +92,7 @@ export function useProdutos(tenantId: string, filtro: FiltroProdutos): UseProdut
         nextCursor: page.proximoCursor,
         total: page.total,
         limitePlano: page.limitePlano,
+        plano: page.plano,
         usados: page.usados,
         loading: false,
       }));
@@ -122,6 +127,7 @@ export function useProdutos(tenantId: string, filtro: FiltroProdutos): UseProdut
         nextCursor: page.proximoCursor,
         total: page.total,
         limitePlano: page.limitePlano,
+        plano: page.plano,
         usados: page.usados,
         loadingMore: false,
       }));
@@ -158,33 +164,44 @@ export function useProdutos(tenantId: string, filtro: FiltroProdutos): UseProdut
     }));
   }, []);
 
-  const setActive = useCallback(async (id: string, ativoNovo: boolean) => {
-    setState((prev) => ({
-      ...prev,
-      actionError: null,
-      pendingIds: new Set(prev.pendingIds).add(id),
-    }));
-    const done = (pendingIds: ReadonlySet<string>) => {
-      const next = new Set(pendingIds);
-      next.delete(id);
-      return next;
-    };
-    try {
-      const updated = await updateProduto(id, { ativo: ativoNovo });
+  const setActive = useCallback(
+    async (id: string, ativoNovo: boolean) => {
       setState((prev) => ({
         ...prev,
-        items: prev.items.map((p) => (p.id === id ? updated : p)),
-        pendingIds: done(prev.pendingIds),
+        actionError: null,
+        pendingIds: new Set(prev.pendingIds).add(id),
       }));
-    } catch (err) {
-      const acao = ativoNovo ? 'ativar' : 'desativar';
-      setState((prev) => ({
-        ...prev,
-        pendingIds: done(prev.pendingIds),
-        actionError: `Não foi possível ${acao} o produto: ${describeProdutoError(err)}`,
-      }));
-    }
-  }, []);
+      const done = (pendingIds: ReadonlySet<string>) => {
+        const next = new Set(pendingIds);
+        next.delete(id);
+        return next;
+      };
+      try {
+        const updated = await updateProduto(id, { ativo: ativoNovo });
+        setState((prev) => {
+          // Com o filtro "Ativos" ou "Inativos", o produto que mudou de situação sai da lista.
+          const sai =
+            !matchesFilter(updated, { busca, ativo }) && prev.items.some((p) => p.id === id);
+          return {
+            ...prev,
+            items: sai
+              ? prev.items.filter((p) => p.id !== id)
+              : prev.items.map((p) => (p.id === id ? updated : p)),
+            total: sai && prev.total !== null ? prev.total - 1 : prev.total,
+            pendingIds: done(prev.pendingIds),
+          };
+        });
+      } catch (err) {
+        const acao = ativoNovo ? 'ativar' : 'desativar';
+        setState((prev) => ({
+          ...prev,
+          pendingIds: done(prev.pendingIds),
+          actionError: `Não foi possível ${acao} o produto: ${describeProdutoError(err)}`,
+        }));
+      }
+    },
+    [busca, ativo],
+  );
 
   useEffect(() => {
     void reload();

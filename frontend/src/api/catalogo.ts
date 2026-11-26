@@ -6,6 +6,7 @@
 
 import { ApiError, PROBLEM_BASE, apiFetch, apiUrl, readJson } from './http';
 import type { Papel } from './me';
+import { isPlano, type Plano } from './tenants';
 
 /** Dinheiro do _comum.yaml: valor em centavos (inteiro) e moeda ISO 4217. */
 export interface Dinheiro {
@@ -43,6 +44,8 @@ export interface PaginaProdutos {
   total: number;
   /** Máximo de produtos do plano do tenant (ativos e inativos). */
   limitePlano: number;
+  /** Plano que o catálogo usou para o limite (a cópia local dele, ADR-0010). */
+  plano: Plano;
   /** Produtos cadastrados no tenant, ativos e inativos. */
   usados: number;
 }
@@ -204,6 +207,7 @@ function isPaginaProdutos(value: unknown): value is PaginaProdutos {
     optionalString(p.proximoCursor) &&
     Number.isInteger(p.total) &&
     Number.isInteger(p.limitePlano) &&
+    isPlano(p.plano) &&
     Number.isInteger(p.usados)
   );
 }

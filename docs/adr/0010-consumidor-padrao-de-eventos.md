@@ -28,9 +28,14 @@ deixou como dívida o "consumidor padrão com cache de schemas".
 - **A ordem por agregado vale enquanto nada falha.** Uma mensagem com nack volta depois de 1 s, e
   as seguintes da mesma chave já podem ter sido processadas. Por isso **todo evento de estado
   carrega `versao`** (o `@Version` do documento) e o consumidor ignora versão menor ou igual à
-  que já tem. `produto.alterado` e `preco.alterado` ganharam o campo (default 0, compatível).
+  que já tem **no mesmo tópico** (cada evento traz só parte do estado, e eventos de tópicos
+  diferentes podem compartilhar o contador). `produto.alterado` e `preco.alterado` ganharam o
+  campo (default 0, compatível).
 - **Tópicos `tenant.*` com retenção infinita.** Um consumidor novo, ou com o banco recriado,
-  reconstrói a cópia local lendo desde o início; os outros namespaces seguem com 3 dias.
+  reconstrói a cópia local lendo desde o início; os outros namespaces seguem com 3 dias. O dead
+  letter nasce com a assinatura `<assinatura>-reprocessar`, que retém as mensagens até alguém
+  tratá-las. Num ambiente local criado antes do Dia 5, recrie o volume do Pulsar
+  (`docker compose down -v`) para o catálogo receber os tenants antigos.
 - **Cópia local mínima.** O consumidor guarda só o que usa (o catálogo guarda plano, situação e
   `versao` de cada tenant) e aplica a regra de versão do ADR-0008: versão menor ou igual é
   ignorada.

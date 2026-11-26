@@ -188,7 +188,7 @@ describe('cliente do catálogo (contra o mock)', () => {
   it('proximoCursor ausente vira null', async () => {
     server.use(
       http.get('*/api/v1/produtos', () =>
-        HttpResponse.json({ itens: [], total: 0, limitePlano: 20, usados: 0 }),
+        HttpResponse.json({ itens: [], total: 0, limitePlano: 20, plano: 'GRATUITO', usados: 0 }),
       ),
     );
     expect(await listProdutos()).toEqual({
@@ -196,6 +196,7 @@ describe('cliente do catálogo (contra o mock)', () => {
       proximoCursor: null,
       total: 0,
       limitePlano: 20,
+      plano: 'GRATUITO',
       usados: 0,
     });
   });

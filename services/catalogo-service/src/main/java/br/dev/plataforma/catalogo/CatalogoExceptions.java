@@ -24,7 +24,7 @@ final class CatalogoExceptions {
               + plano
               + " permite até "
               + limite
-              + " produtos. Desative ou mude de plano para cadastrar mais.");
+              + " produtos, ativos e inativos. Mude para um plano maior para cadastrar mais.");
     }
   }
 

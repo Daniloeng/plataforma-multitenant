@@ -239,6 +239,7 @@ class CatalogoServiceIT {
 
     Resposta lista = chamar("GET", "/api/v1/produtos", "loja-limite", "gestor-tenant", null);
     assertThat(lista.corpo().get("limitePlano").asInt()).isEqualTo(500);
+    assertThat(lista.corpo().get("plano").asText()).isEqualTo("PROFISSIONAL");
     assertThat(lista.corpo().get("usados").asInt()).isEqualTo(4);
 
     // Reentrega do mesmo evento não reprocessa; versão antiga fora de ordem é ignorada.

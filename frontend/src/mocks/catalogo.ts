@@ -241,6 +241,7 @@ export const catalogoHandlers = [
       proximoCursor: temMais ? (itens.at(-1)?.id ?? null) : null,
       total: filtrados.length,
       limitePlano: LIMITE_PRODUTOS_POR_PLANO[a.tenant.plano],
+      plano: a.tenant.plano,
       usados: todos.length,
     });
   }),

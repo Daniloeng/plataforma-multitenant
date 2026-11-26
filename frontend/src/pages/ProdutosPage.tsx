@@ -99,7 +99,7 @@ function Catalogo({ tenant, gestor }: { tenant: TenantDoUsuario; gestor: boolean
           </p>
         </div>
         <PlanoUso
-          plano={PLANO_LABEL[tenant.plano]}
+          plano={PLANO_LABEL[produtos.plano ?? tenant.plano]}
           usados={produtos.usados}
           limite={produtos.limitePlano}
         />

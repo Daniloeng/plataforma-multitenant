@@ -1,5 +1,6 @@
 package br.dev.plataforma.catalogo;
 
+import br.dev.plataforma.contracts.tenants.Plano;
 import java.time.Instant;
 import java.util.List;
 
@@ -29,8 +30,14 @@ public record ProdutoView(
    *
    * @param total produtos que atendem ao filtro, em todas as páginas
    * @param limitePlano máximo de produtos do plano do tenant
+   * @param plano plano usado no limite (a cópia local do catálogo)
    * @param usados produtos do tenant, ativos e inativos
    */
   public record Pagina(
-      List<ProdutoView> itens, String proximoCursor, long total, int limitePlano, long usados) {}
+      List<ProdutoView> itens,
+      String proximoCursor,
+      long total,
+      int limitePlano,
+      Plano plano,
+      long usados) {}
 }

@@ -393,6 +393,41 @@ describe('ProdutosPage — gestor: preço, nome e situação', () => {
   });
 });
 
+describe('ProdutosPage — filtro de situação e plano do catálogo', () => {
+  it('com o filtro "Ativos", desativar tira o produto da lista e do total', async () => {
+    const user = await abrir('Ana Souza', 'distribuidora-aurora');
+    await tabela();
+    await user.selectOptions(screen.getByLabelText('Situação'), 'ativos');
+    await waitFor(() => expect(linha('CAF-TOR-500')).toBeInTheDocument());
+    const antes = screen.getByText(/com o filtro/).textContent ?? '';
+    const n = Number(antes.match(/\d+/)?.[0]);
+    await user.click(screen.getByRole('button', { name: 'Desativar CAF-TOR-500' }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: 'Desativar CAF-TOR-500' }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText(/com o filtro/).textContent).toContain(String(n - 1));
+  });
+
+  it('mostra o plano que o catálogo usou para o limite', async () => {
+    server.use(
+      http.get('*/api/v1/produtos', () =>
+        HttpResponse.json({
+          itens: [],
+          proximoCursor: null,
+          total: 0,
+          limitePlano: 20,
+          plano: 'GRATUITO',
+          usados: 0,
+        }),
+      ),
+    );
+    await abrir('Ana Souza', 'distribuidora-aurora');
+    expect(await screen.findByText(/0 de 20 produtos do plano Gratuito/)).toBeInTheDocument();
+  });
+});
+
 describe('ProdutosPage — busca, filtro e paginação', () => {
   it('busca por nome ou SKU com debounce (uma requisição só por termo)', async () => {
     const user = await abrir('Ana Souza', 'distribuidora-aurora');

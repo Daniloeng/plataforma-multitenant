@@ -3,6 +3,7 @@ package br.dev.plataforma.catalogo;
 import br.dev.plataforma.contracts.tenants.TenantAlterado;
 import br.dev.plataforma.contracts.tenants.TenantCriado;
 import br.dev.plataforma.spring.events.EventSubscriber;
+import br.dev.plataforma.spring.tenancy.TenantQueries;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -44,14 +45,15 @@ public class TenantEventos {
 
   /** Grava se for novo ou mais recente que o guardado. Roda na transação do consumidor. */
   static void aplicar(MongoOperations mongo, TenantPlano novo) {
-    TenantPlano atual = mongo.findById(novo.getId(), TenantPlano.class);
+    Query doTenant = TenantQueries.scoped(Criteria.where("_id").is(novo.getId()));
+    TenantPlano atual = mongo.findOne(doTenant, TenantPlano.class);
     if (atual != null && atual.getVersao() >= novo.getVersao()) {
       return;
     }
     if (atual == null) {
       mongo.insert(novo);
     } else {
-      mongo.findAndReplace(Query.query(Criteria.where("_id").is(novo.getId())), novo);
+      mongo.findAndReplace(doTenant, novo);
     }
   }
 }

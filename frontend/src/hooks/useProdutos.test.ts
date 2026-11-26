@@ -41,6 +41,7 @@ describe('useProdutos', () => {
               proximoCursor: null,
               total: 1,
               limitePlano: 500,
+              plano: 'PROFISSIONAL',
               usados: 1,
             });
           },

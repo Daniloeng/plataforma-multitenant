@@ -152,8 +152,8 @@ public class ProdutoService {
     List<ProdutoView> itens = docs.stream().limit(limite).map(ProdutoView::of).toList();
     String proximo = temMais ? codificarCursor(itens.getLast().sku()) : null;
     long usados = mongo.count(TenantQueries.scoped(), ProdutoDocument.class);
-    return new ProdutoView.Pagina(
-        itens, proximo, total, props.limiteDe(planoDe(tenantLocal())), usados);
+    Plano plano = planoDe(tenantLocal());
+    return new ProdutoView.Pagina(itens, proximo, total, props.limiteDe(plano), plano, usados);
   }
 
   /**

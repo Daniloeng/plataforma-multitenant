@@ -63,7 +63,7 @@
       "name": "versao",
       "type": "long",
       "default": 0,
-      "doc": "Versão do produto (@Version do documento). Consumidores ignoram versão menor ou igual à que já têm: reentregas e tópicos diferentes podem chegar fora de ordem."
+      "doc": "Versão do produto (@Version do documento). Consumidores comparam por tópico: ignoram versão menor ou igual à última recebida neste tópico para o produto. produto.alterado e preco.alterado compartilham o contador, então a mesma versão pode aparecer nos dois."
     }
   ]
 }

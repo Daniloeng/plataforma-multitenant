@@ -39,7 +39,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [itens, total, limitePlano, usados]
+                required: [itens, total, limitePlano, plano, usados]
                 properties:
                   itens:
                     type: array
@@ -51,6 +51,12 @@ paths:
                   limitePlano:
                     type: integer
                     description: Máximo de produtos do plano do tenant (ativos e inativos).
+                  plano:
+                    type: string
+                    enum: [GRATUITO, PROFISSIONAL, EMPRESARIAL]
+                    description: >-
+                      Plano usado no limite: a cópia local do catálogo, que pode estar um instante
+                      atrás do cadastro de tenants (GRATUITO até o tenant.criado chegar).
                   usados:
                     type: integer
                     description: Produtos cadastrados no tenant, ativos e inativos.
