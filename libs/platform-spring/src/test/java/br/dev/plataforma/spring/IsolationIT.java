@@ -88,6 +88,7 @@ class IsolationIT {
   @Autowired MongoClient client;
   @Autowired MongoDatabaseFactory factory;
   @Autowired TenantPlacements placements;
+  @Autowired io.micrometer.core.instrument.MeterRegistry metricas;
   @Autowired Outbox outbox;
   @Autowired PlatformTransactionManager txManager;
 
@@ -197,6 +198,10 @@ class IsolationIT {
     // Quem está no meio da migração e recebe outra mudança continua migrando.
     assertThat(placements.observe(lento, IsolationLevel.SILO, 6)).isEmpty();
     assertThat(placements.of(lento).migrating()).isTrue();
+    assertThat(metricas.get("plataforma.isolamento.migrando").gauge().value())
+        .isGreaterThanOrEqualTo(1);
+    assertThat(metricas.get("plataforma.isolamento.tentativas").gauge().value()).isZero();
+    assertThat(metricas.get("plataforma.isolamento.falhas").functionCounter().count()).isZero();
 
     // Ninguém migra esse tenant nesta réplica: depois do lease, outra réplica assume (uma só).
     TenantPlacement parado = placements.of(lento);

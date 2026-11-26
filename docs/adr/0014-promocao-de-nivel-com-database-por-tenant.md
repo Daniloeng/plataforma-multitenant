@@ -46,7 +46,7 @@ réplicas. O custo continua zero: nada de instância MongoDB nova por tenant at�
   desligamento o lease é solto na hora. Cada migração roda na sua thread virtual: promover dois
   tenants não deixa um esperando o outro. Falhas contam em `attempts` e a próxima tentativa espera
   um tempo que dobra a cada falha (10 s, 20 s, 40 s... até 5 min); a partir de 3 o log acusa erro a
-  cada rodada (alerta de verdade com métricas no Dia 10).
+  cada rodada (métricas e alertas `MigracaoDeNivelFalhando` e `MigracaoDeNivelDemorada` no Dia 10, ADR-0015).
 - **Consumo sem travar vizinhos.** O `EventSubscriber` executa cada mensagem numa fila serial por
   assinatura e por tenant (thread virtual, ordem por chave preservada): um consumidor que espera
   não segura os outros tenants nem as outras assinaturas do mesmo tenant. Durante a migração, o

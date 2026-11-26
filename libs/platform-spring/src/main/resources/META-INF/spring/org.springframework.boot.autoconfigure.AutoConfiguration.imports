@@ -1,2 +1,3 @@
 br.dev.plataforma.spring.PlatformAutoConfiguration
 br.dev.plataforma.spring.isolation.IsolationAutoConfiguration
+br.dev.plataforma.spring.observability.ObservabilityAutoConfiguration

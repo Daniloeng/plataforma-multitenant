@@ -4,6 +4,9 @@ import br.dev.plataforma.contracts.EventCatalog;
 import br.dev.plataforma.core.TenantId;
 import br.dev.plataforma.spring.idempotency.IdempotentConsumer;
 import br.dev.plataforma.spring.tenancy.TenantContext;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
+import io.micrometer.observation.transport.ReceiverContext;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
@@ -32,12 +35,18 @@ import org.springframework.transaction.support.TransactionTemplate;
  *   <li>roda o efeito numa transação MongoDB, com o tenant do evento no contexto, pelo {@link
  *       IdempotentConsumer} (reentrega não repete o efeito);
  *   <li>ack depois do commit; em erro, nack e nova tentativa em 1 s; depois de {@code
- *       maxRedeliveries} tentativas a mensagem vai para o tópico de dead letter da assinatura.
+ *       maxRedeliveries} tentativas a mensagem vai para o tópico de dead letter da assinatura;
+ *   <li>cada processamento é uma observação {@value #OBSERVATION} (ADR-0015): vira timer com as
+ *       tags {@code assinatura}, {@code evento} e {@code resultado} (processado, duplicado, falha,
+ *       dead-letter) e, com tracing, um span filho do {@code traceparent} da mensagem.
  * </ul>
  */
 public class EventSubscriber implements SmartLifecycle {
 
   private static final Logger LOG = LoggerFactory.getLogger(EventSubscriber.class);
+
+  /** Nome da observação de consumo (métrica {@code plataforma_eventos_consumo_seconds}). */
+  public static final String OBSERVATION = "plataforma.eventos.consumo";
 
   private record Registration<T extends SpecificRecord>(
       Class<T> type, String name, Consumer<T> handler, boolean waitForTenant) {}
@@ -63,6 +72,8 @@ public class EventSubscriber implements SmartLifecycle {
       new CopyOnWriteArrayList<>();
   private volatile boolean running;
   private volatile TenantAwaiter tenantAwaiter;
+
+  private volatile ObservationRegistry observations = ObservationRegistry.NOOP;
 
   /** Filas por assinatura: cada assinatura tem as suas, uma por tenant. */
   private final List<TenantLanes> lanes = new CopyOnWriteArrayList<>();
@@ -100,6 +111,11 @@ public class EventSubscriber implements SmartLifecycle {
   public <T extends SpecificRecord> EventSubscriber onPlatform(
       Class<T> type, String name, Consumer<T> handler) {
     return register(new Registration<>(type, name, handler, false));
+  }
+
+  /** Liga métricas e tracing do consumo (sem registro, nada é medido). */
+  public void setObservationRegistry(ObservationRegistry registry) {
+    this.observations = registry == null ? ObservationRegistry.NOOP : registry;
   }
 
   /** Liga a espera pelo tenant disponível antes de cada efeito registrado com {@link #on}. */
@@ -168,10 +184,26 @@ public class EventSubscriber implements SmartLifecycle {
       org.apache.pulsar.client.api.Consumer<byte[]> consumer,
       Message<byte[]> msg,
       Registration<T> r) {
-    try {
-      process(msg, r);
+    // O traceparent da mensagem (gravado no outbox) vira o pai do span do consumo.
+    ReceiverContext<Message<byte[]>> context = new ReceiverContext<>(Message::getProperty);
+    context.setCarrier(msg);
+    context.setRemoteServiceName("pulsar");
+    String event = msg.getProperty("event") == null ? "desconhecido" : msg.getProperty("event");
+    Observation observation =
+        Observation.createNotStarted(OBSERVATION, () -> context, observations)
+            .contextualName("consumir " + event)
+            .lowCardinalityKeyValue("assinatura", r.name())
+            .lowCardinalityKeyValue("evento", event)
+            .start();
+    try (Observation.Scope scope = observation.openScope()) {
+      boolean processed = process(msg, r);
+      observation.lowCardinalityKeyValue("resultado", processed ? "processado" : "duplicado");
       consumer.acknowledgeAsync(msg);
     } catch (Throwable e) { // Error também: sem nack, a mensagem ficaria pendente para sempre
+      // Pulsar manda para o dead letter a falha da entrega de número maxRedeliveries.
+      boolean deadLetter = maxRedeliveries > 0 && msg.getRedeliveryCount() >= maxRedeliveries;
+      observation.lowCardinalityKeyValue("resultado", deadLetter ? "dead-letter" : "falha");
+      observation.error(e);
       LOG.warn(
           "Falha ao processar {} ({}), tentativa {}: {}",
           msg.getTopicName(),
@@ -179,6 +211,8 @@ public class EventSubscriber implements SmartLifecycle {
           msg.getRedeliveryCount() + 1,
           e.toString());
       consumer.negativeAcknowledge(msg);
+    } finally {
+      observation.stop();
     }
   }
 

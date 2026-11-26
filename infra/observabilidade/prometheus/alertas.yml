@@ -1,0 +1,96 @@
+# Alertas da plataforma (ADR-0015). Cada alerta tem um runbook em docs/runbooks/ com o que olhar e
+# o que fazer; os testes ficam em alertas.test.yml (promtool test rules, no CI).
+groups:
+  - name: plataforma
+    rules:
+      - alert: ServicoFora
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critica
+        annotations:
+          summary: "{{ $labels.job }} não responde às métricas há 1 min"
+          runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/servico-fora.md
+
+      - alert: LatenciaP99Alta
+        # Meta do projeto: p99 < 3 s. Sem as chamadas do Actuator.
+        expr: >
+          histogram_quantile(0.99,
+            sum by (job, le) (rate(http_server_requests_seconds_bucket{uri!~"/actuator.*"}[5m]))
+          ) > 3
+        for: 5m
+        labels:
+          severity: critica
+        annotations:
+          summary: "p99 de {{ $labels.job }} acima de 3 s há 5 min"
+          runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/latencia-p99-alta.md
+
+      - alert: TaxaDeErrosAlta
+        expr: >
+          sum by (job) (rate(http_server_requests_seconds_count{status=~"5..",uri!~"/actuator.*"}[5m]))
+          /
+          sum by (job) (rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[5m]))
+          > 0.01
+        for: 5m
+        labels:
+          severity: alta
+        annotations:
+          summary: "Mais de 1% de respostas 5xx em {{ $labels.job }}"
+          runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/taxa-de-erros-alta.md
+
+      - alert: OutboxAtrasado
+        # Evento pendente há mais de 1 min: relay parado, sem líder ou Pulsar fora (ADR-0008).
+        expr: max by (job) (plataforma_outbox_atraso_seconds) > 60
+        for: 2m
+        labels:
+          severity: alta
+        annotations:
+          summary: "Outbox de {{ $labels.job }} com evento pendente há mais de 1 min"
+          runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/outbox-atrasado.md
+
+      - alert: RelaySemLider
+        expr: sum by (job) (plataforma_outbox_relay_lider) == 0
+        for: 1m
+        labels:
+          severity: alta
+        annotations:
+          summary: "Nenhuma réplica de {{ $labels.job }} publica o outbox"
+          runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/relay-sem-lider.md
+
+      - alert: RelayComDoisLideres
+        expr: sum by (job) (plataforma_outbox_relay_lider) > 1
+        for: 1m
+        labels:
+          severity: alta
+        annotations:
+          summary: "Mais de uma réplica de {{ $labels.job }} publica o outbox"
+          runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/relay-sem-lider.md
+
+      - alert: EventoNoDeadLetter
+        expr: >
+          sum by (job, assinatura) (
+            increase(plataforma_eventos_consumo_seconds_count{resultado="dead-letter"}[10m])
+          ) > 0
+        labels:
+          severity: alta
+        annotations:
+          summary: "Evento foi para o dead letter da assinatura {{ $labels.assinatura }} em {{ $labels.job }}"
+          runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/evento-no-dead-letter.md
+
+      - alert: MigracaoDeNivelFalhando
+        # ADR-0014: a partir de 3 falhas o tenant segue com 503 até alguém olhar.
+        expr: max by (job) (plataforma_isolamento_tentativas) >= 3
+        labels:
+          severity: critica
+        annotations:
+          summary: "Migração de nível em {{ $labels.job }} já falhou 3 vezes"
+          runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/migracao-de-nivel.md
+
+      - alert: MigracaoDeNivelDemorada
+        expr: max by (job) (plataforma_isolamento_migrando) > 0
+        for: 10m
+        labels:
+          severity: alta
+        annotations:
+          summary: "Migração de nível em {{ $labels.job }} há mais de 10 min"
+          runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/migracao-de-nivel.md

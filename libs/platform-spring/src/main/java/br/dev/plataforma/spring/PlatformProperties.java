@@ -27,7 +27,7 @@ public record PlatformProperties(
   public PlatformProperties {
     events = events == null ? new Events(0) : events;
     tenancy = tenancy == null ? new Tenancy(null, null) : tenancy;
-    outbox = outbox == null ? new OutboxProps(null, null, null, 0) : outbox;
+    outbox = outbox == null ? new OutboxProps(null, null, null, 0, null) : outbox;
     idempotency = idempotency == null ? new Idempotency(null) : idempotency;
     isolation = isolation == null ? new Isolation(false, null, null, null, null, null) : isolation;
   }
@@ -83,10 +83,12 @@ public record PlatformProperties(
    * @param interval intervalo entre ciclos do relay (padrão: 200 ms)
    * @param sendTimeout tempo máximo de uma publicação (padrão: 5 s)
    * @param batchSize mensagens por ciclo (padrão: 100)
+   * @param lease validade do lease do relay entre réplicas (padrão: 10 s; ADR-0015)
    */
   public record OutboxProps(
-      Boolean enabled, Duration interval, Duration sendTimeout, int batchSize) {
+      Boolean enabled, Duration interval, Duration sendTimeout, int batchSize, Duration lease) {
     public OutboxProps {
+      lease = lease == null ? Duration.ofSeconds(10) : lease;
       enabled = enabled == null ? Boolean.TRUE : enabled;
       interval = interval == null ? Duration.ofMillis(200) : interval;
       sendTimeout = sendTimeout == null ? Duration.ofSeconds(5) : sendTimeout;

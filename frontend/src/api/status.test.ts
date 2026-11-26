@@ -42,6 +42,43 @@ describe('fetchStatus', () => {
     await expect(fetchStatus()).rejects.toThrow('não é JSON');
   });
 
+  it('aceita metrics completas, nulas, ausentes ou com campos opcionais omitidos (Dia 10)', async () => {
+    const base = makeStatus();
+    const body = {
+      ...base,
+      components: [
+        { ...base.components[0], metrics: null },
+        base.components[1],
+        {
+          name: 'pedidos-service',
+          type: 'SERVICE',
+          status: 'UP',
+          latencyMs: 5,
+          details: 'readiness UP',
+          metrics: {
+            requests: 1234,
+            errorRate: 0.012,
+            p99Ms: 180,
+            outboxPending: 0,
+            outboxLagSeconds: 0,
+            eventsConsumed: 50,
+            eventsFailed: 1,
+          },
+        },
+        {
+          name: 'gateway',
+          type: 'SERVICE',
+          status: 'UP',
+          latencyMs: 4,
+          details: null,
+          metrics: { requests: 0, errorRate: 0, p99Ms: null },
+        },
+      ],
+    };
+    server.use(http.get('*/api/status', () => HttpResponse.json(body)));
+    await expect(fetchStatus()).resolves.toEqual(body);
+  });
+
   it.each([
     ['nulo', null],
     ['status desconhecido', { ...makeStatus(), status: 'MAYBE' }],
@@ -69,6 +106,26 @@ describe('fetchStatus', () => {
       },
     ],
   ])('lança ApiError quando o corpo está fora do contrato (%s)', async (_, body) => {
+    server.use(http.get('*/api/status', () => HttpResponse.json(body)));
+    await expect(fetchStatus()).rejects.toThrow('fora do contrato');
+  });
+
+  it.each([
+    ['metrics não objeto', 'muitas'],
+    ['metrics sem requests', { errorRate: 0, p99Ms: 1 }],
+    ['errorRate textual', { requests: 1, errorRate: '0', p99Ms: 1 }],
+    ['p99Ms textual', { requests: 1, errorRate: 0, p99Ms: '1' }],
+    ['outboxPending textual', { requests: 1, errorRate: 0, p99Ms: 1, outboxPending: '0' }],
+    ['outboxLagSeconds textual', { requests: 1, errorRate: 0, p99Ms: 1, outboxLagSeconds: 'x' }],
+    ['eventsConsumed textual', { requests: 1, errorRate: 0, p99Ms: 1, eventsConsumed: 'x' }],
+    ['eventsFailed textual', { requests: 1, errorRate: 0, p99Ms: 1, eventsFailed: false }],
+  ])('lança ApiError quando as métricas estão fora do contrato (%s)', async (_, metrics) => {
+    const body = {
+      ...makeStatus(),
+      components: [
+        { name: 's', type: 'SERVICE', status: 'UP', latencyMs: 1, details: null, metrics },
+      ],
+    };
     server.use(http.get('*/api/status', () => HttpResponse.json(body)));
     await expect(fetchStatus()).rejects.toThrow('fora do contrato');
   });

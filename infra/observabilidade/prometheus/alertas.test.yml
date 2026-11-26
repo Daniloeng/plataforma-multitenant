@@ -1,0 +1,165 @@
+# Testes dos alertas: promtool test rules alertas.test.yml (o CI roda). Cada alerta tem um caso que
+# dispara e um que não.
+rule_files:
+  - alertas.yml
+
+evaluation_interval: 15s
+
+tests:
+  - name: serviço fora por mais de 1 min
+    interval: 15s
+    input_series:
+      - series: 'up{job="pedidos-service",instance="pedidos-service:8083"}'
+        values: "1 0x8"
+      - series: 'up{job="catalogo-service",instance="catalogo-service:8082"}'
+        values: "1 0 0 1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 30s
+        alertname: ServicoFora
+      - eval_time: 2m
+        alertname: ServicoFora
+        exp_alerts:
+          - exp_labels: { severity: critica, job: pedidos-service, instance: "pedidos-service:8083" }
+            exp_annotations:
+              summary: "pedidos-service não responde às métricas há 1 min"
+              runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/servico-fora.md
+
+  - name: p99 acima de 3 s por 5 min
+    interval: 1m
+    input_series:
+      # 10 req/min: 9 abaixo de 0,1 s e 1 acima de 5 s (p99 = além do maior balde finito, 5 s).
+      - series: 'http_server_requests_seconds_bucket{job="pedidos-service",uri="/api/v1/pedidos",le="0.1"}'
+        values: "0+9x20"
+      - series: 'http_server_requests_seconds_bucket{job="pedidos-service",uri="/api/v1/pedidos",le="5"}'
+        values: "0+9x20"
+      - series: 'http_server_requests_seconds_bucket{job="pedidos-service",uri="/api/v1/pedidos",le="+Inf"}'
+        values: "0+10x20"
+      # O Actuator lento não conta.
+      - series: 'http_server_requests_seconds_bucket{job="catalogo-service",uri="/actuator/prometheus",le="0.1"}'
+        values: "0x20"
+      - series: 'http_server_requests_seconds_bucket{job="catalogo-service",uri="/actuator/prometheus",le="+Inf"}'
+        values: "0+10x20"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: LatenciaP99Alta
+      - eval_time: 12m
+        alertname: LatenciaP99Alta
+        exp_alerts:
+          - exp_labels: { severity: critica, job: pedidos-service }
+            exp_annotations:
+              summary: "p99 de pedidos-service acima de 3 s há 5 min"
+              runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/latencia-p99-alta.md
+
+  - name: mais de 1% de erros
+    interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{job="pagamentos-service",status="200",uri="/api/v1/pagamentos"}'
+        values: "0+95x20"
+      - series: 'http_server_requests_seconds_count{job="pagamentos-service",status="503",uri="/api/v1/pagamentos"}'
+        values: "0+5x20"
+      - series: 'http_server_requests_seconds_count{job="pedidos-service",status="200",uri="/api/v1/pedidos"}'
+        values: "0+1000x20"
+      - series: 'http_server_requests_seconds_count{job="pedidos-service",status="500",uri="/api/v1/pedidos"}'
+        values: "0+1x20"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: TaxaDeErrosAlta
+        exp_alerts:
+          - exp_labels: { severity: alta, job: pagamentos-service }
+            exp_annotations:
+              summary: "Mais de 1% de respostas 5xx em pagamentos-service"
+              runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/taxa-de-erros-alta.md
+
+  - name: outbox atrasado
+    interval: 1m
+    input_series:
+      - series: 'plataforma_outbox_atraso_seconds{job="catalogo-service"}'
+        values: "0 30 90 150 210 270"
+      - series: 'plataforma_outbox_atraso_seconds{job="pedidos-service"}'
+        values: "0 0 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: OutboxAtrasado
+      - eval_time: 5m
+        alertname: OutboxAtrasado
+        exp_alerts:
+          - exp_labels: { severity: alta, job: catalogo-service }
+            exp_annotations:
+              summary: "Outbox de catalogo-service com evento pendente há mais de 1 min"
+              runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/outbox-atrasado.md
+
+  - name: relay sem líder e com dois líderes
+    interval: 15s
+    input_series:
+      - series: 'plataforma_outbox_relay_lider{job="pedidos-service",instance="a"}'
+        values: "0x8"
+      - series: 'plataforma_outbox_relay_lider{job="pedidos-service",instance="b"}'
+        values: "0x8"
+      - series: 'plataforma_outbox_relay_lider{job="catalogo-service",instance="a"}'
+        values: "1x8"
+      - series: 'plataforma_outbox_relay_lider{job="catalogo-service",instance="b"}'
+        values: "1x8"
+      - series: 'plataforma_outbox_relay_lider{job="tenant-service",instance="a"}'
+        values: "1x8"
+      - series: 'plataforma_outbox_relay_lider{job="tenant-service",instance="b"}'
+        values: "0x8"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: RelaySemLider
+        exp_alerts:
+          - exp_labels: { severity: alta, job: pedidos-service }
+            exp_annotations:
+              summary: "Nenhuma réplica de pedidos-service publica o outbox"
+              runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/relay-sem-lider.md
+      - eval_time: 2m
+        alertname: RelayComDoisLideres
+        exp_alerts:
+          - exp_labels: { severity: alta, job: catalogo-service }
+            exp_annotations:
+              summary: "Mais de uma réplica de catalogo-service publica o outbox"
+              runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/relay-sem-lider.md
+
+  - name: evento no dead letter
+    interval: 1m
+    input_series:
+      - series: 'plataforma_eventos_consumo_seconds_count{job="pedidos-service",assinatura="pagamentos",resultado="dead-letter"}'
+        values: "0 0 1 1 1"
+      - series: 'plataforma_eventos_consumo_seconds_count{job="pedidos-service",assinatura="pagamentos",resultado="falha"}'
+        values: "0 5 10 15 20"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: EventoNoDeadLetter
+      - eval_time: 3m
+        alertname: EventoNoDeadLetter
+        exp_alerts:
+          - exp_labels: { severity: alta, job: pedidos-service, assinatura: pagamentos }
+            exp_annotations:
+              summary: "Evento foi para o dead letter da assinatura pagamentos em pedidos-service"
+              runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/evento-no-dead-letter.md
+
+  - name: migração de nível
+    interval: 1m
+    input_series:
+      - series: 'plataforma_isolamento_tentativas{job="pedidos-service"}'
+        values: "0 1 2 3 3"
+      - series: 'plataforma_isolamento_migrando{job="pedidos-service"}'
+        values: "1x12"
+      - series: 'plataforma_isolamento_migrando{job="catalogo-service"}'
+        values: "1 1 0x10"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: MigracaoDeNivelFalhando
+      - eval_time: 3m
+        alertname: MigracaoDeNivelFalhando
+        exp_alerts:
+          - exp_labels: { severity: critica, job: pedidos-service }
+            exp_annotations:
+              summary: "Migração de nível em pedidos-service já falhou 3 vezes"
+              runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/migracao-de-nivel.md
+      - eval_time: 11m
+        alertname: MigracaoDeNivelDemorada
+        exp_alerts:
+          - exp_labels: { severity: alta, job: pedidos-service }
+            exp_annotations:
+              summary: "Migração de nível em pedidos-service há mais de 10 min"
+              runbook_url: https://github.com/Daniloeng/plataforma-multitenant/blob/main/docs/runbooks/migracao-de-nivel.md

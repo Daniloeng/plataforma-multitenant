@@ -94,6 +94,18 @@ class GatewayTest {
   static final JwtMutator ADMIN = usuario("admin", "plataforma-admin", List.of(), null);
 
   @Test
+  void metricasNaoSaemPelaPortaPublica() {
+    // As métricas têm nomes de tenants: ficam na porta interna do actuator (8001), não na 8000.
+    web.get().uri("/actuator/prometheus").exchange().expectStatus().is4xxClientError();
+    web.get()
+        .uri("/actuator/prometheus")
+        .headers(h -> h.setBearerAuth("x"))
+        .exchange()
+        .expectStatus()
+        .is4xxClientError();
+  }
+
+  @Test
   void statusEPublicoESemCabecalhosDeIdentidade() {
     web.get()
         .uri("/api/status")

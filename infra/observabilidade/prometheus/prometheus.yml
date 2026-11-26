@@ -1,0 +1,30 @@
+# Prometheus do perfil "observabilidade" do Compose (ADR-0015). Raspa o /actuator/prometheus de cada
+# serviço pela rede interna e avalia os alertas de alertas.yml.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - alertas.yml
+
+scrape_configs:
+  - job_name: gateway
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["gateway:8001"]
+  - job_name: tenant-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["tenant-service:8081"]
+  - job_name: catalogo-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["catalogo-service:8082"]
+  - job_name: pedidos-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["pedidos-service:8083"]
+  - job_name: pagamentos-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["pagamentos-service:8084"]

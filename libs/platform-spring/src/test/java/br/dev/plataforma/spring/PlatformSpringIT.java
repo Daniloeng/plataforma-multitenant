@@ -16,6 +16,7 @@ import br.dev.plataforma.spring.outbox.EventPublisher;
 import br.dev.plataforma.spring.outbox.Outbox;
 import br.dev.plataforma.spring.outbox.OutboxMessage;
 import br.dev.plataforma.spring.outbox.OutboxRelay;
+import br.dev.plataforma.spring.outbox.RelayLease;
 import br.dev.plataforma.spring.tenancy.CrossTenantAccessException;
 import br.dev.plataforma.spring.tenancy.MissingTenantException;
 import br.dev.plataforma.spring.tenancy.TenantContext;
@@ -317,6 +318,30 @@ class PlatformSpringIT {
             tx,
             "teste-" + UUID.randomUUID().toString().substring(0, 8),
             5);
+    // Métricas e o traceparent que chega ao consumidor (o tracing de verdade fica com o serviço).
+    var metricas = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+    var observacoes = io.micrometer.observation.ObservationRegistry.create();
+    observacoes
+        .observationConfig()
+        .observationHandler(
+            new io.micrometer.core.instrument.observation.DefaultMeterObservationHandler(metricas));
+    List<String> traceparents = new java.util.concurrent.CopyOnWriteArrayList<>();
+    observacoes
+        .observationConfig()
+        .observationHandler(
+            new io.micrometer.observation.ObservationHandler<
+                io.micrometer.observation.transport.ReceiverContext<Object>>() {
+              @Override
+              public void onStart(io.micrometer.observation.transport.ReceiverContext<Object> ctx) {
+                traceparents.add(ctx.getGetter().get(ctx.getCarrier(), "traceparent"));
+              }
+
+              @Override
+              public boolean supportsContext(io.micrometer.observation.Observation.Context c) {
+                return c instanceof io.micrometer.observation.transport.ReceiverContext;
+              }
+            });
+    subscriber.setObservationRegistry(observacoes);
     java.util.concurrent.atomic.AtomicInteger tentativas =
         new java.util.concurrent.atomic.AtomicInteger();
     subscriber.on(
@@ -343,10 +368,122 @@ class PlatformSpringIT {
       assertThat(nota.getTenantId()).isEqualTo("acme"); // tenant do evento no contexto
       assertThat(tentativas.get()).isEqualTo(2);
       assertThat(mongo.count(new Query(), ProcessedEvent.class)).isEqualTo(1);
+      org.awaitility.Awaitility.await()
+          .atMost(java.time.Duration.ofSeconds(5))
+          .untilAsserted(
+              () -> {
+                assertThat(
+                        metricas
+                            .get(br.dev.plataforma.spring.events.EventSubscriber.OBSERVATION)
+                            .tags("assinatura", "notas", "evento", "tenant.criado")
+                            .tag("resultado", "falha")
+                            .timer()
+                            .count())
+                    .isEqualTo(1);
+                assertThat(
+                        metricas
+                            .get(br.dev.plataforma.spring.events.EventSubscriber.OBSERVATION)
+                            .tag("resultado", "processado")
+                            .timer()
+                            .count())
+                    .isEqualTo(1);
+              });
+      assertThat(traceparents).contains(evento.getTraceparent().toString());
     } finally {
       subscriber.stop();
     }
     assertThat(subscriber.isRunning()).isFalse();
+  }
+
+  @Test
+  void outboxGravaOTraceAtualQuandoOEventoNaoTraz() {
+    String trace = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
+    Outbox comTrace = new Outbox(mongo, EventCatalog.defaultCatalog(), "tenants", () -> trace);
+    TenantCriado semTrace = evento("acme");
+    semTrace.setTraceparent(null);
+    TenantCriado comProprio = evento("globex");
+
+    tx.executeWithoutResult(
+        s -> {
+          comTrace.append(semTrace, "acme");
+          comTrace.append(comProprio, "globex");
+        });
+
+    assertThat(mongo.findById(semTrace.getEventId().toString(), OutboxMessage.class).traceparent())
+        .isEqualTo(trace);
+    assertThat(
+            mongo.findById(comProprio.getEventId().toString(), OutboxMessage.class).traceparent())
+        .isEqualTo(comProprio.getTraceparent().toString());
+  }
+
+  @Test
+  void leaseDoRelayDeixaUmaReplicaPublicarPorVez() throws Exception {
+    var colecao =
+        mongo.getCollection("lease_teste_" + UUID.randomUUID().toString().substring(0, 8));
+    var ttl = java.time.Duration.ofMillis(600);
+    RelayLease a = new RelayLease(colecao, Clock.systemUTC(), ttl);
+    RelayLease b = new RelayLease(colecao, Clock.systemUTC(), ttl);
+
+    assertThat(a.tryAcquire()).isTrue();
+    assertThat(a.isLeader()).isTrue();
+    assertThat(b.tryAcquire()).isFalse();
+    assertThat(b.isLeader()).isFalse();
+    // b, sem lease, não publica nada.
+    tx.executeWithoutResult(s -> outbox.append(evento("acme"), "acme"));
+    AtomicInteger publicadasPorB = new AtomicInteger();
+    var relayB =
+        new OutboxRelay(mongo, m -> publicadasPorB.incrementAndGet(), Clock.systemUTC(), 10, b);
+    assertThat(relayB.publishPending()).isZero();
+    assertThat(relayB.isLeader()).isFalse();
+
+    // a para de renovar (caiu): depois da validade, b assume e a perde.
+    Thread.sleep(ttl.toMillis() + 100);
+    assertThat(b.tryAcquire()).isTrue();
+    assertThat(relayB.publishPending()).isEqualTo(1);
+    assertThat(relayB.publishedCount()).isEqualTo(1);
+    assertThat(a.tryAcquire()).isFalse();
+    assertThat(a.isLeader()).isFalse();
+
+    // Desligamento de b solta o lease na hora.
+    relayB.close();
+    assertThat(a.tryAcquire()).isTrue();
+    a.release();
+    a.release(); // sem lease: nada a fazer
+  }
+
+  @Test
+  void metricasDoOutboxContamPendentesEAtraso() {
+    tx.executeWithoutResult(
+        s -> {
+          outbox.append(evento("acme"), "acme");
+          outbox.append(evento("globex"), "globex");
+        });
+    var registro = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+    AtomicInteger falhar = new AtomicInteger(1);
+    var relayLocal =
+        new OutboxRelay(
+            mongo,
+            m -> {
+              if (falhar.getAndDecrement() > 0) {
+                throw new java.io.IOException("fora do ar");
+              }
+            },
+            Clock.systemUTC(),
+            10);
+    new br.dev.plataforma.spring.observability.PlatformMetrics(
+            mongo, relayLocal, null, null, Clock.systemUTC())
+        .bindTo(registro);
+
+    assertThat(registro.get("plataforma.outbox.pendentes").gauge().value()).isEqualTo(2);
+    assertThat(registro.get("plataforma.outbox.atraso").gauge().value()).isGreaterThanOrEqualTo(0);
+    assertThat(registro.get("plataforma.outbox.relay.lider").gauge().value()).isEqualTo(1);
+
+    relayLocal.publishPending(); // falha no primeiro
+    relayLocal.publishPending(); // publica os dois
+    assertThat(registro.get("plataforma.outbox.falhas").functionCounter().count()).isEqualTo(1);
+    assertThat(registro.get("plataforma.outbox.publicados").functionCounter().count()).isEqualTo(2);
+    // A contagem fica em cache por alguns segundos: não vai ao MongoDB a cada raspagem.
+    assertThat(registro.get("plataforma.outbox.pendentes").gauge().value()).isEqualTo(2);
   }
 
   @Test

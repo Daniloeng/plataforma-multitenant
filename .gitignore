@@ -28,3 +28,6 @@ target/
 /status.json
 /dbs.txt
 /retencao.json
+/status-metricas.json
+/traces.json
+/trace.json

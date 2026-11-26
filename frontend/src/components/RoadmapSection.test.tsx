@@ -3,10 +3,10 @@ import { ROADMAP } from '../data/roadmap';
 import { RoadmapSection } from './RoadmapSection';
 
 describe('RoadmapSection', () => {
-  it('lista do status-service aos níveis de isolamento ativos e a observabilidade planejada', () => {
+  it('lista do status-service à observabilidade ativos e o Kubernetes planejado', () => {
     render(<RoadmapSection />);
     const items = screen.getAllByRole('listitem');
-    expect(items).toHaveLength(9);
+    expect(items).toHaveLength(10);
 
     const status = screen.getByRole('listitem', { name: 'status-service' });
     expect(status).toHaveTextContent('Dia 1');
@@ -56,8 +56,13 @@ describe('RoadmapSection', () => {
 
     const observabilidade = screen.getByRole('listitem', { name: 'Observabilidade' });
     expect(observabilidade).toHaveTextContent('Dia 10');
-    expect(within(observabilidade).getByText('Planejado')).toHaveClass('pill--planned');
+    expect(within(observabilidade).getByText('Ativo')).toHaveClass('pill--up');
     expect(observabilidade).toHaveTextContent('OpenTelemetry, Prometheus e Grafana');
+
+    const kubernetes = screen.getByRole('listitem', { name: 'Kubernetes e MVP1' });
+    expect(kubernetes).toHaveTextContent('Dia 11');
+    expect(within(kubernetes).getByText('Planejado')).toHaveClass('pill--planned');
+    expect(kubernetes).toHaveTextContent('Helm');
   });
 
   it('cada serviço tem responsabilidade em uma frase', () => {

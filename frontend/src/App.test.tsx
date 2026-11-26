@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { App } from './App';
 import { createDemoAuthClient } from './auth/demo';
+import { buildDemoStatus } from './mocks/handlers';
 import { server } from './mocks/server';
 import { makeStatus } from './test/fixtures';
 
@@ -135,13 +136,36 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: 'Atualizar agora' })).toBeEnabled();
   });
 
+  it('mostra métricas por serviço e o painel de alertas (Dia 10)', async () => {
+    mockApi(buildDemoStatus(() => 0, new Date('2026-11-26T12:00:00Z')) as unknown as JsonBodyType);
+    render(<App />);
+    await screen.findByTestId('overall-status');
+
+    const alertas = screen.getByRole('region', { name: 'Alertas' });
+    expect(within(alertas).getByRole('list', { name: 'Alertas ativos' })).toHaveTextContent(
+      'pagamentos-service: 1,4% de erros 5xx, acima de 1%',
+    );
+
+    const pagamentos = screen.getByRole('listitem', { name: 'pagamentos-service' });
+    expect(within(pagamentos).getByText('Requisições')).toBeVisible();
+    expect(pagamentos).toHaveTextContent('1.352 consumidos · 3 falhas');
+    expect(pagamentos.querySelector('.metrica--atencao')).not.toBeNull();
+
+    const gateway = screen.getByRole('listitem', { name: 'gateway' });
+    expect(within(gateway).queryByText('Outbox')).not.toBeInTheDocument();
+    expect(within(gateway).queryByText('Eventos')).not.toBeInTheDocument();
+
+    const pulsar = screen.getByRole('listitem', { name: 'pulsar' });
+    expect(within(pulsar).queryByText('Requisições')).not.toBeInTheDocument();
+  });
+
   it('renderiza roadmap e progresso', async () => {
     mockApi(makeStatus());
     render(<App />);
     await screen.findByTestId('overall-status');
     expect(screen.getByRole('heading', { name: 'Microsserviços' })).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Progresso' })).toBeVisible();
-    expect(screen.getByText('Dia 9 de 22')).toBeVisible();
+    expect(screen.getByText('Dia 10 de 22')).toBeVisible();
   });
 
   it('mostra o selo de demo apenas no modo demo', async () => {

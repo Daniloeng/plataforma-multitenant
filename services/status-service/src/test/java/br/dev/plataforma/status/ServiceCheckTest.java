@@ -126,19 +126,80 @@ class ServiceCheckTest {
   void aceitaCaminhoDeSaudeProprio() {
     assertThat(
             new ServiceCheck(
-                    "keycloak", URI.create("http://keycloak:9000"), "health/ready", TIMEOUT)
+                    "keycloak", URI.create("http://keycloak:9000"), "health/ready", null, TIMEOUT)
                 .healthUri())
         .hasToString("http://keycloak:9000/health/ready");
+    assertThat(
+            new ServiceCheck("keycloak", URI.create("http://keycloak:9000"), "h", null, TIMEOUT)
+                .metricsUri())
+        .isNull();
   }
 
   @Test
   void alvoSemCaminhoUsaAReadinessDoActuator() {
     URI url = URI.create("http://x:1");
-    assertThat(new StatusProperties.ServiceTarget("x", url, null).healthPath())
+    assertThat(new StatusProperties.ServiceTarget("x", url, null, null).healthPath())
         .isEqualTo(ServiceCheck.HEALTH_PATH);
-    assertThat(new StatusProperties.ServiceTarget("x", url, " ").healthPath())
+    assertThat(new StatusProperties.ServiceTarget("x", url, " ", null).healthPath())
         .isEqualTo(ServiceCheck.HEALTH_PATH);
-    assertThat(new StatusProperties.ServiceTarget("x", url, "health/ready").healthPath())
+    assertThat(new StatusProperties.ServiceTarget("x", url, "health/ready", null).healthPath())
         .isEqualTo("health/ready");
+    assertThat(new StatusProperties.ServiceTarget("x", url, null, null).metricsPath())
+        .isEqualTo(ServiceCheck.METRICS_PATH);
+    assertThat(new StatusProperties.ServiceTarget("x", url, null, "none").metricsPath()).isNull();
+    assertThat(new StatusProperties.ServiceTarget("x", url, null, "m").metricsPath())
+        .isEqualTo("m");
+  }
+
+  @Test
+  void servicoProntoTrazAsMetricasDoActuator() {
+    server.createContext(
+        "/actuator/prometheus",
+        exchange -> {
+          byte[] body =
+              ("http_server_requests_seconds_count{method=\"GET\",status=\"200\",uri=\"/api\"} 9\n"
+                      + "http_server_requests_seconds_count{method=\"GET\",status=\"500\",uri=\"/api\"} 1\n")
+                  .getBytes(StandardCharsets.UTF_8);
+          exchange.sendResponseHeaders(200, body.length);
+          exchange.getResponseBody().write(body);
+          exchange.close();
+        });
+
+    ComponentStatus status = new ServiceCheck("pedidos-service", adminUrl(), TIMEOUT).check();
+
+    assertThat(status.metrics()).isNotNull();
+    assertThat(status.metrics().requests()).isEqualTo(10);
+    assertThat(status.metrics().errorRate()).isEqualTo(0.1);
+  }
+
+  @Test
+  void semMetricasContinuaUp() {
+    // O servidor de teste não tem /actuator/prometheus: 404.
+    ComponentStatus status = new ServiceCheck("pedidos-service", adminUrl(), TIMEOUT).check();
+    assertThat(status.status()).isEqualTo(HealthState.UP);
+    assertThat(status.metrics()).isNull();
+  }
+
+  @Test
+  void servicoForaDoArNaoBuscaMetricas() {
+    codigo.set(503);
+    assertThat(new ServiceCheck("p", adminUrl(), TIMEOUT).check().metrics()).isNull();
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void falhaAoLerMetricasViraNulo() throws Exception {
+    HttpClient http = mock(HttpClient.class);
+    when(http.send(any(), any(HttpResponse.BodyHandler.class)))
+        .thenThrow(new IOException("reset"))
+        .thenThrow(new InterruptedException());
+    var check = new ServiceCheck("p", adminUrl(), TIMEOUT, http);
+    try {
+      assertThat(check.metrics()).isNull();
+      assertThat(check.metrics()).isNull();
+      assertThat(Thread.currentThread().isInterrupted()).isTrue();
+    } finally {
+      Thread.interrupted();
+    }
   }
 }

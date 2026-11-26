@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: plataforma
+    folder: Plataforma
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards

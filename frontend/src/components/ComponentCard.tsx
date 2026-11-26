@@ -1,5 +1,6 @@
 import type { StatusComponent } from '../api/status';
 import { COMPONENT_STATUS_LABEL, formatLatency } from '../utils/format';
+import { MetricasServico } from './MetricasServico';
 
 export function ComponentCard({ component }: { component: StatusComponent }) {
   const statusClass = component.status === 'UP' ? 'up' : 'down';
@@ -23,6 +24,9 @@ export function ComponentCard({ component }: { component: StatusComponent }) {
         </div>
       </dl>
       {component.details ? <p className="component__details">{component.details}</p> : null}
+      {component.metrics ? (
+        <MetricasServico nome={component.name} metrics={component.metrics} />
+      ) : null}
     </li>
   );
 }

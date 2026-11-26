@@ -41,11 +41,18 @@ public record StatusProperties(
    *
    * @param healthPath caminho que responde 200 quando o serviço está pronto (padrão: a readiness do
    *     Actuator; o Keycloak usa {@code health/ready})
+   * @param metricsPath métricas no formato do Prometheus (padrão: {@code actuator/prometheus}); com
+   *     {@code none}, o serviço não tem métricas na página de saúde (o Keycloak)
    */
-  public record ServiceTarget(@NotBlank String name, @NotNull URI url, String healthPath) {
+  public record ServiceTarget(
+      @NotBlank String name, @NotNull URI url, String healthPath, String metricsPath) {
     public ServiceTarget {
       healthPath =
           healthPath == null || healthPath.isBlank() ? ServiceCheck.HEALTH_PATH : healthPath;
+      metricsPath =
+          metricsPath == null || metricsPath.isBlank()
+              ? ServiceCheck.METRICS_PATH
+              : "none".equals(metricsPath) ? null : metricsPath;
     }
   }
 }

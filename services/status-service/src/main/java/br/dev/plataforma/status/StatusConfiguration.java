@@ -27,7 +27,10 @@ public class StatusConfiguration {
     props
         .services()
         .forEach(
-            s -> checks.add(new ServiceCheck(s.name(), s.url(), s.healthPath(), props.timeout())));
+            s ->
+                checks.add(
+                    new ServiceCheck(
+                        s.name(), s.url(), s.healthPath(), s.metricsPath(), props.timeout())));
     return List.copyOf(checks);
   }
 
