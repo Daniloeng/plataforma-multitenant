@@ -19,15 +19,26 @@ public class Outbox {
   private final MongoOperations mongo;
   private final EventCatalog catalog;
   private final String service;
+  private final CurrentTrace currentTrace;
 
   /**
    * @param service contexto deste serviço ({@code x-produtor}, ex.: tenants); se informado, só
    *     eventos que ele produz podem entrar no outbox (só o dono publica, ADR-0003)
    */
   public Outbox(MongoOperations mongo, EventCatalog catalog, String service) {
+    this(mongo, catalog, service, CurrentTrace.NONE);
+  }
+
+  /**
+   * @param currentTrace {@code traceparent} (W3C) do span atual, ou null; vai na mensagem quando o
+   *     evento não traz o seu, e o consumidor continua o mesmo trace (ADR-0015)
+   */
+  public Outbox(
+      MongoOperations mongo, EventCatalog catalog, String service, CurrentTrace currentTrace) {
     this.mongo = mongo;
     this.catalog = catalog;
     this.service = service;
+    this.currentTrace = currentTrace;
   }
 
   /**
@@ -56,6 +67,14 @@ public class Outbox {
     String eventId = field(event, "eventId").toString();
     String tenantId = field(event, "tenantId").toString();
     Object traceparent = field(event, "traceparent");
+    if (traceparent == null) {
+      traceparent = currentTrace.traceparent();
+      if (traceparent != null) {
+        // Payload e propriedade da mensagem levam o mesmo trace (ADR-0003, ADR-0015): quem lê o
+        // evento depois (dead letter, reprocessamento) não o perde.
+        event.put(event.getSchema().getField("traceparent").pos(), traceparent);
+      }
+    }
     Instant occurredAt = (Instant) field(event, "occurredAt");
     OutboxMessage message =
         new OutboxMessage(

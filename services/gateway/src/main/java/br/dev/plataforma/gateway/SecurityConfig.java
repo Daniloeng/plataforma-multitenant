@@ -6,6 +6,7 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -26,6 +27,7 @@ import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtAuthenticationConverterAdapter;
 import org.springframework.security.web.server.SecurityWebFilterChain;
+import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.reactive.CorsConfigurationSource;
 import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
@@ -59,7 +61,39 @@ public class SecurityConfig {
     return source;
   }
 
+  /**
+   * Porta interna do actuator (8001, ADR-0015): só ela serve as métricas, sem token, para o
+   * Prometheus. A 8000, pública, continua negando {@code /actuator/prometheus}.
+   */
   @Bean
+  @Order(0)
+  SecurityWebFilterChain management(
+      ServerHttpSecurity http, @Value("${management.server.port:-1}") int managementPort) {
+    return http.securityMatcher(managementPort(managementPort))
+        .csrf(ServerHttpSecurity.CsrfSpec::disable)
+        .httpBasic(ServerHttpSecurity.HttpBasicSpec::disable)
+        .formLogin(ServerHttpSecurity.FormLoginSpec::disable)
+        .logout(ServerHttpSecurity.LogoutSpec::disable)
+        .authorizeExchange(
+            auth ->
+                auth.pathMatchers("/actuator/health/**", "/actuator/info", "/actuator/prometheus")
+                    .permitAll()
+                    .anyExchange()
+                    .denyAll())
+        .build();
+  }
+
+  static ServerWebExchangeMatcher managementPort(int port) {
+    return exchange -> {
+      var local = exchange.getRequest().getLocalAddress();
+      return port > 0 && local != null && local.getPort() == port
+          ? ServerWebExchangeMatcher.MatchResult.match()
+          : ServerWebExchangeMatcher.MatchResult.notMatch();
+    };
+  }
+
+  @Bean
+  @Order(1)
   SecurityWebFilterChain security(ServerHttpSecurity http, ObjectMapper json) {
     return http.csrf(ServerHttpSecurity.CsrfSpec::disable)
         // CORS na cadeia de segurança: vale também para 401/403/429 e para /api/v1/me, que não

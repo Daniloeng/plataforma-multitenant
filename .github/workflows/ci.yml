@@ -84,8 +84,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Subir MongoDB x4, Pulsar, Keycloak, gateway, tenant, catálogo, pedidos, pagamentos e status
-        run: docker compose -f infra/docker-compose.yml up -d --build --wait --wait-timeout 420
+      - name: Subir MongoDB x4, Pulsar, Keycloak, gateway, serviços, status e observabilidade
+        run: TRACING_EXPORT=true docker compose -f infra/docker-compose.yml --profile observabilidade up -d --build --wait --wait-timeout 420
       - name: Conferir /api/status pelo gateway
         run: |
           curl -fsS http://localhost:8000/api/status | tee status.json
@@ -360,8 +360,68 @@ jobs:
             sleep 1
           done
           python3 -c 'import json; m=json.load(open("me.json")); assert {t["id"]: t["nivelIsolamento"] for t in m["tenants"]}["globex"] == "BRIDGE", m'
+      - name: Observabilidade (alertas testados, métricas, Prometheus, Grafana e trace entre serviços)
+        run: |
+          # Regras de alerta: sintaxe e testes unitários (promtool).
+          docker run --rm -v "$PWD/infra/observabilidade/prometheus:/p" -w /p --entrypoint promtool \
+            prom/prometheus:v3.4.2 check config prometheus.yml
+          docker run --rm -v "$PWD/infra/observabilidade/prometheus:/p" -w /p --entrypoint promtool \
+            prom/prometheus:v3.4.2 test rules alertas.test.yml
+          # A página de saúde traz as métricas de cada serviço (o pedidos-service já atendeu e consumiu).
+          curl -fsS -o /dev/null http://localhost:8000/api/status # conta como requisição do gateway
+          curl -fsS http://localhost:8000/api/status > status-metricas.json
+          python3 - <<'PY'
+          import json
+          s = {c["name"]: c for c in json.load(open("status-metricas.json"))["components"]}
+          m = s["pedidos-service"]["metrics"]
+          assert m and m["requests"] > 0 and m["p99Ms"] is not None, m
+          assert m["outboxPending"] is not None and m["eventsConsumed"] > 0, m
+          assert s["gateway"]["metrics"]["requests"] > 0, s["gateway"]
+          assert s["keycloak"].get("metrics") is None, s["keycloak"]
+          print("Métricas do pedidos-service:", m)
+          PY
+          # As métricas do gateway não saem pela porta pública.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/actuator/prometheus)" -ge 400
+          # Prometheus raspa os 5 serviços e cada serviço com outbox tem exatamente um líder do relay.
+          q() { curl -fsS --get http://localhost:9090/api/v1/query --data-urlencode "query=$1"; }
+          for i in $(seq 1 30); do
+            q 'sum(up)' | python3 -c 'import json,sys; exit(0 if float(json.load(sys.stdin)["data"]["result"][0]["value"][1]) == 5 else 1)' && break
+            sleep 2
+          done
+          q 'sum(up)' | python3 -c 'import json,sys; v=json.load(sys.stdin)["data"]["result"][0]["value"][1]; assert float(v) == 5, v'
+          q 'sum by (job) (plataforma_outbox_relay_lider)' | python3 -c '
+          import json, sys
+          r = {x["metric"]["job"]: float(x["value"][1]) for x in json.load(sys.stdin)["data"]["result"]}
+          assert set(r) == {"tenant-service", "catalogo-service", "pedidos-service", "pagamentos-service"}, r
+          assert all(v == 1 for v in r.values()), r
+          print("Líder do relay por serviço:", r)'
+          q 'count(http_server_requests_seconds_count{tenant="acme"})' | python3 -c 'import json,sys; assert json.load(sys.stdin)["data"]["result"], "sem tag de tenant"'
+          curl -fsS http://localhost:9090/api/v1/rules | python3 -c 'import json,sys; n=sum(len(g["rules"]) for g in json.load(sys.stdin)["data"]["groups"]); assert n == 10, n'
+          # Grafana com o Prometheus e o painel provisionados.
+          curl -fsS http://localhost:3000/api/health
+          curl -fsS http://localhost:3000/api/dashboards/uid/plataforma | python3 -c 'import json,sys; d=json.load(sys.stdin)["dashboard"]; assert len(d["panels"]) >= 10; print("\nPainel:", d["title"])'
+          # Um trace que atravessa o Pulsar: o consumo de pedido.criado no pagamentos-service tem
+          # como pai o span do pedidos-service (traceparent gravado no outbox).
+          for i in $(seq 1 30); do
+            curl -fsS --get http://localhost:3200/api/search --data-urlencode 'q={ resource.service.name = "pagamentos-service" && name = "consumir pedido.criado" }' > traces.json || true
+            python3 -c 'import json; exit(0 if json.load(open("traces.json")).get("traces") else 1)' && break
+            sleep 2
+          done
+          TRACE=$(python3 -c 'import json; print(json.load(open("traces.json"))["traces"][0]["traceID"])')
+          curl -fsS "http://localhost:3200/api/traces/$TRACE" > trace.json
+          python3 - <<'PY'
+          import json
+          t = json.load(open("trace.json"))
+          servicos = set()
+          for b in t.get("batches", t.get("resourceSpans", [])):
+              for a in b["resource"]["attributes"]:
+                  if a["key"] == "service.name":
+                      servicos.add(a["value"]["stringValue"])
+          assert {"pedidos-service", "pagamentos-service"} <= servicos, servicos
+          print("Trace", "atravessa", sorted(servicos))
+          PY
       - name: Logs em caso de falha
         if: failure()
         run: docker compose -f infra/docker-compose.yml logs --tail 200
       - if: always()
-        run: docker compose -f infra/docker-compose.yml down -v
+        run: docker compose -f infra/docker-compose.yml --profile observabilidade down -v

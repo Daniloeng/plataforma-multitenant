@@ -1,5 +1,6 @@
-import { fetchStatus } from '../api/status';
-import { DEMO_VERSION, buildDemoStatus } from './handlers';
+import { fetchStatus, type ServiceMetrics } from '../api/status';
+import { avaliarAlertas } from '../utils/metricas';
+import { DEMO_VERSION, buildDemoMetrics, buildDemoStatus } from './handlers';
 
 describe('buildDemoStatus', () => {
   it('monta Mongo, Pulsar, tenant-service, catalogo-service, pedidos-service, pagamentos-service, gateway e keycloak no ar com latência base quando random = 0', () => {
@@ -70,6 +71,69 @@ describe('buildDemoStatus', () => {
       expect(c.latencyMs).toBeGreaterThanOrEqual(2);
       expect(c.latencyMs).toBeLessThanOrEqual(22);
     }
+  });
+});
+
+describe('buildDemoMetrics', () => {
+  it('dá métricas aos serviços e não ao Mongo, Pulsar e Keycloak', () => {
+    const status = buildDemoStatus(() => 0);
+    const comMetricas = status.components.filter((c) => c.metrics).map((c) => c.name);
+    expect(comMetricas).toEqual([
+      'tenant-service',
+      'catalogo-service',
+      'pedidos-service',
+      'pagamentos-service',
+      'gateway',
+    ]);
+    for (const c of status.components.filter((c) => !c.metrics)) {
+      expect(c.metrics).toBeUndefined();
+    }
+  });
+
+  it('o gateway não tem outbox nem consome; o tenant-service tem outbox e não consome', () => {
+    const m = buildDemoMetrics(() => 0);
+    expect(m.gateway).toEqual({
+      requests: 5820,
+      errorRate: 0.003,
+      p99Ms: 320,
+      outboxPending: null,
+      outboxLagSeconds: null,
+      eventsConsumed: null,
+      eventsFailed: null,
+    });
+    expect(m['tenant-service']).toMatchObject({
+      outboxPending: 0,
+      outboxLagSeconds: 0,
+      eventsConsumed: null,
+      eventsFailed: null,
+    });
+    for (const nome of ['catalogo-service', 'pedidos-service', 'pagamentos-service']) {
+      const s = m[nome] as ServiceMetrics;
+      expect(s.outboxPending).not.toBeNull();
+      expect(s.outboxLagSeconds).not.toBeNull();
+      expect(s.eventsConsumed).toBeGreaterThan(0);
+      expect(s.eventsFailed).not.toBeNull();
+    }
+  });
+
+  it('varia requisições e p99 com o random, mantendo p99 abaixo da meta', () => {
+    const m = buildDemoMetrics(() => 1);
+    expect(m['pedidos-service']).toMatchObject({ requests: 2015, p99Ms: 320 });
+    for (const s of Object.values(m)) {
+      expect(s.p99Ms).toBeLessThan(3000);
+    }
+  });
+
+  it('deixa o pagamentos-service em alerta para a demo mostrar o destaque', () => {
+    const pagamentos = buildDemoMetrics()['pagamentos-service'] as ServiceMetrics;
+    expect(pagamentos.eventsFailed).toBeGreaterThan(0);
+    expect(avaliarAlertas(buildDemoStatus().components)).toEqual([
+      {
+        componente: 'pagamentos-service',
+        regra: 'ERROS',
+        mensagem: '1,4% de erros 5xx, acima de 1%',
+      },
+    ]);
   });
 });
 

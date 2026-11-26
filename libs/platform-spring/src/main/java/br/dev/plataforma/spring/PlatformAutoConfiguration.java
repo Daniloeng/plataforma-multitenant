@@ -6,19 +6,23 @@ import br.dev.plataforma.spring.events.EventSubscriber;
 import br.dev.plataforma.spring.events.WriterSchemaResolver;
 import br.dev.plataforma.spring.idempotency.IdempotencyIndexes;
 import br.dev.plataforma.spring.idempotency.IdempotentConsumer;
+import br.dev.plataforma.spring.outbox.CurrentTrace;
 import br.dev.plataforma.spring.outbox.EventPublisher;
 import br.dev.plataforma.spring.outbox.Outbox;
 import br.dev.plataforma.spring.outbox.OutboxRelay;
 import br.dev.plataforma.spring.outbox.PulsarEventPublisher;
+import br.dev.plataforma.spring.outbox.RelayLease;
 import br.dev.plataforma.spring.tenancy.TenantContextFilter;
 import br.dev.plataforma.spring.tenancy.TenantGuard;
 import br.dev.plataforma.spring.web.Caller;
 import br.dev.plataforma.spring.web.CallerArgumentResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.observation.ObservationRegistry;
 import java.time.Clock;
 import java.util.List;
 import org.apache.pulsar.client.admin.PulsarAdmin;
 import org.apache.pulsar.client.api.PulsarClient;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -131,8 +135,13 @@ public class PlatformAutoConfiguration {
     }
 
     @Bean
-    Outbox outbox(MongoOperations mongo, EventCatalog catalog, PlatformProperties props) {
-      return new Outbox(mongo, catalog, props.service());
+    Outbox outbox(
+        MongoOperations mongo,
+        EventCatalog catalog,
+        PlatformProperties props,
+        ObjectProvider<CurrentTrace> currentTrace) {
+      return new Outbox(
+          mongo, catalog, props.service(), currentTrace.getIfAvailable(() -> CurrentTrace.NONE));
     }
 
     @Bean
@@ -163,15 +172,20 @@ public class PlatformAutoConfiguration {
         EventDecoder decoder,
         IdempotentConsumer idempotent,
         PlatformTransactionManager transactions,
-        PlatformProperties props) {
-      return new EventSubscriber(
-          client,
-          catalog,
-          decoder,
-          idempotent,
-          new TransactionTemplate(transactions),
-          props.service(),
-          props.events().maxRedeliveries());
+        PlatformProperties props,
+        ObjectProvider<ObservationRegistry> observations) {
+      EventSubscriber subscriber =
+          new EventSubscriber(
+              client,
+              catalog,
+              decoder,
+              idempotent,
+              new TransactionTemplate(transactions),
+              props.service(),
+              props.events().maxRedeliveries());
+      subscriber.setObservationRegistry(
+          observations.getIfAvailable(() -> ObservationRegistry.NOOP));
+      return subscriber;
     }
   }
 
@@ -192,10 +206,13 @@ public class PlatformAutoConfiguration {
       return new PulsarEventPublisher(client, catalog, props.outbox().sendTimeout());
     }
 
-    @Bean
+    @Bean(destroyMethod = "close")
     OutboxRelay outboxRelay(
         MongoOperations mongo, EventPublisher publisher, Clock clock, PlatformProperties props) {
-      return new OutboxRelay(mongo, publisher, clock, props.outbox().batchSize());
+      // O lease fica na database padrão, como o outbox (sem tenant no contexto do relay).
+      RelayLease lease =
+          new RelayLease(mongo.getCollection(RelayLease.COLLECTION), clock, props.outbox().lease());
+      return new OutboxRelay(mongo, publisher, clock, props.outbox().batchSize(), lease);
     }
 
     /** Um scheduler próprio, de uma thread, para o relay nunca rodar em paralelo consigo mesmo. */
@@ -204,6 +221,8 @@ public class PlatformAutoConfiguration {
       SimpleAsyncTaskScheduler scheduler = new SimpleAsyncTaskScheduler();
       scheduler.setThreadNamePrefix("outbox-relay-");
       scheduler.setVirtualThreads(true);
+      // O desligamento espera o ciclo em andamento antes de o relay soltar o lease.
+      scheduler.setTaskTerminationTimeout(10_000);
       ((TaskScheduler) scheduler)
           .scheduleWithFixedDelay(relay::runCycle, props.outbox().interval());
       return scheduler;

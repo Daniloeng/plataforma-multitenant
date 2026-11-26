@@ -293,6 +293,80 @@ a:focus-visible {
   font-size: 0.9rem;
 }
 
+/* ---- Métricas por serviço e alertas (Dia 10) ---- */
+
+.metricas {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.metricas__lista {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  gap: 6px 12px;
+  margin: 0;
+}
+
+.metrica dt {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.metrica dd {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.metrica--alerta dt,
+.metrica--alerta dd {
+  color: var(--down);
+  font-weight: 600;
+}
+
+.metrica--atencao dt,
+.metrica--atencao dd {
+  color: var(--degraded);
+  font-weight: 600;
+}
+
+.metricas__nota {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.alertas {
+  margin-bottom: 12px;
+}
+
+.alertas h3 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+}
+
+.alertas--ativos {
+  border-color: var(--down);
+}
+
+.alertas__lista {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--down);
+}
+
+.alertas__vazio {
+  margin: 0;
+  color: var(--up);
+  font-weight: 600;
+}
+
+.alertas__nota {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
 .service__day {
   margin: 6px 0 0;
   font-size: 0.85rem;

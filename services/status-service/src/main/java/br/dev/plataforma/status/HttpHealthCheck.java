@@ -53,6 +53,14 @@ abstract class HttpHealthCheck implements ComponentCheck, AutoCloseable {
     return healthUri;
   }
 
+  HttpClient http() {
+    return http;
+  }
+
+  Duration timeout() {
+    return timeout;
+  }
+
   @Override
   public ComponentStatus check() {
     long start = System.nanoTime();

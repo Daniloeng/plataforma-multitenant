@@ -54,8 +54,8 @@ Há duas formas comuns:
   regra do ADR-0005: a coleção é de infraestrutura e o relay lê todos os tenants juntos.
 - O relay lê só a database padrão do serviço. Tenants Bridge (database própria, Dia 9) precisarão
   de um relay por database ou de um outbox central.
-- Lease do relay antes de rodar mais de uma réplica (Dia 10). Até lá, o relay fica ligado por
-  padrão e o deploy mantém uma réplica por serviço.
+- ~~Lease do relay antes de rodar mais de uma réplica (Dia 10).~~ Feito no Dia 10 (ADR-0015):
+  lease no MongoDB (`outbox_relay_lease`), métrica `plataforma_outbox_relay_lider` e alertas.
 
 ## Alternativas consideradas
 

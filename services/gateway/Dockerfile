@@ -16,5 +16,5 @@ EXPOSE 8000
 # Heap limitado: a estimativa de memória do plano pede JVMs enxutas.
 ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=60 -XX:+UseSerialGC"
 HEALTHCHECK --interval=10s --timeout=3s --retries=12 \
-  CMD ["bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8000 && printf 'GET /actuator/health/readiness HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+  CMD ["bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8001 && printf 'GET /actuator/health/readiness HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]

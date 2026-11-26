@@ -17,19 +17,20 @@ multi-tenant de pedidos B2B + pagamentos em microsserviços. O plano de 22 dias 
 ```
 libs/platform-core/       tipos compartilhados (TenantId, IsolationLevel), sem Spring
 libs/contracts/           contratos: eventos Avro (gera classes Java) e OpenAPI; EventCatalog
-libs/platform-spring/     autoconfiguração comum: TenantContext/filtro X-Tenant-Id, TenantGuard, Outbox + relay, IdempotentConsumer, EventDecoder, EventSubscriber, Caller, database por tenant (isolation)
+libs/platform-spring/     autoconfiguração comum: TenantContext/filtro X-Tenant-Id, TenantGuard, Outbox + relay, IdempotentConsumer, EventDecoder, EventSubscriber, Caller, database por tenant (isolation), métricas e tracing (observability)
 services/gateway/         Spring Cloud Gateway (porta 8000): JWT do Keycloak, tenant do token, rate limit por plano, /api/v1/me
 services/tenant-service/  cadastro de tenants, /api/v1/tenants (porta 8081, só plataforma-admin); publica tenant.* pelo outbox; promoção de nível e namespace Pulsar plataforma/t-<id>
 services/catalogo-service/ produtos por tenant, /api/v1/produtos (porta 8082); publica produto.alterado e preco.alterado; consome tenant.*
 services/pedidos-service/ pedidos, /api/v1/pedidos (porta 8083); preço da cópia local do catálogo, Idempotency-Key; publica pedido.criado, pedido.confirmado e pedido.cancelado; consome pagamento.*; expira PENDENTE após 15 min; histórico e linha do tempo ao vivo (SSE, change stream); Bridge/Silo em pedidos_t_<tenant>
 services/pagamentos-service/ cobrança simulada, estorno e ledger, /api/v1/pagamentos e /api/v1/ledger (porta 8084, só gestor/admin); consome pedido.*; publica pagamento.*
-services/status-service/  saúde de MongoDB x4, Pulsar e serviços em GET /api/status (porta 8090)
+services/status-service/  saúde de MongoDB x4, Pulsar e serviços em GET /api/status (porta 8090), com métricas lidas do /actuator/prometheus de cada serviço
 frontend/                 React + Vite + TS; modo demo com MSW (GitHub Pages)
-infra/                    Docker Compose (MongoDB por serviço, Pulsar, Keycloak), keycloak/realm-plataforma.json, seed.sh
+infra/                    Docker Compose (MongoDB por serviço, Pulsar, Keycloak), keycloak/realm-plataforma.json, seed.sh; observabilidade/ (Prometheus + alertas testados, Grafana, Tempo; perfil observabilidade)
+docs/runbooks/            um runbook por alerta (skill runbook)
 docs/dias/NN.md           diário detalhado de cada dia
 docs/adr/                 decisões de arquitetura (ADRs)
 docs/arquitetura/         event storming e diagramas (Mermaid)
-.claude/                  hooks (format, run-tests), subagentes (arquiteto, testador) e skills (adr)
+.claude/                  hooks (format, run-tests), subagentes (arquiteto, testador) e skills (adr, runbook)
 ```
 Novos microsserviços entram em `services/<nome>-service` (o `services/gateway` é a exceção: é
 infraestrutura de borda, não um serviço de negócio), como módulo do `pom.xml` raiz, dependem de
@@ -46,6 +47,8 @@ no host no Compose e entra no `status-service`.
 | Formatar Java | `mvn spotless:apply` |
 | Frontend | `cd frontend && npm ci && npm run test:coverage && npm run typecheck && npm run format:check` |
 | Ambiente local | `docker compose -f infra/docker-compose.yml up -d --build --wait` |
+| Com Prometheus, Grafana e Tempo | `TRACING_EXPORT=true docker compose -f infra/docker-compose.yml --profile observabilidade up -d --build --wait` |
+| Testar os alertas | `docker run --rm -v "$PWD/infra/observabilidade/prometheus:/p" -w /p --entrypoint promtool prom/prometheus:v3.4.2 test rules alertas.test.yml` |
 | Frontend com API real | `cd frontend && npm run dev` (proxy `/api` → gateway em `localhost:8000`; login no Keycloak em `localhost:8180`) |
 | Tenants de demonstração | `infra/seed.sh` (Compose de pé) |
 | Token para curl | `curl -s localhost:8180/realms/plataforma/protocol/openid-connect/token -d grant_type=password -d client_id=plataforma-cli -d username=ana -d password=senha123` |
@@ -91,6 +94,13 @@ no host no Compose e entra no `status-service`.
   (`PlatformDatabase`). Job ou leitura sem tenant no contexto enxerga só a database padrão: percorra
   também `TenantPlacements.dedicated()`. Durante a migração, as APIs do tenant dão 503
   `tenant-em-migracao`.
+- **Observabilidade** (ADR-0015): todo serviço novo declara `micrometer-registry-prometheus`,
+  `micrometer-tracing-bridge-otel` e `opentelemetry-exporter-otlp`, expõe `health,info,prometheus`
+  e entra no `prometheus.yml`. Métrica da plataforma tem prefixo `plataforma_` e nome em português;
+  alerta novo entra em `alertas.yml` com `runbook_url`, runbook em `docs/runbooks/` e teste em
+  `alertas.test.yml`. Nunca use dado de corpo ou id de pedido como tag (cardinalidade); a tag
+  `tenant` já vem do filtro. O relay do outbox tem lease (`outbox_relay_lease`): várias réplicas
+  podem subir.
 - **APIs**: contract-first em `libs/contracts/src/main/resources/openapi/`; rotas `/api/v1/`;
   `X-Tenant-Id` obrigatório nas APIs de negócio; erros em Problem Details (RFC 9457).
 - **Decisões**: decisão de arquitetura vira ADR (skill `adr`); peça revisão ao subagente `arquiteto`

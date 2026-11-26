@@ -19,6 +19,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicLong;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.slf4j.Logger;
@@ -60,6 +61,7 @@ public class TenantMigrator implements AutoCloseable {
   private final Duration grace;
   private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
   private final Map<String, Boolean> running = new ConcurrentHashMap<>();
+  private final AtomicLong failures = new AtomicLong();
   private volatile boolean closed;
 
   /**
@@ -89,6 +91,7 @@ public class TenantMigrator implements AutoCloseable {
                 LOG.info("Migração do tenant {} interrompida pelo desligamento", tenant);
                 return;
               }
+              failures.incrementAndGet();
               int attempts = placements.of(tenant).attempts() + 1;
               LOG.error(
                   "Migração do tenant {} falhou (tentativa {}); outra tentativa na próxima rodada",
@@ -101,6 +104,11 @@ public class TenantMigrator implements AutoCloseable {
             }
           });
     }
+  }
+
+  /** Migrações que falharam nesta réplica desde a subida (métrica). */
+  public long failureCount() {
+    return failures.get();
   }
 
   /** Se esta réplica está migrando o tenant agora. */

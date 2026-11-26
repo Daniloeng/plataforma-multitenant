@@ -26,7 +26,25 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
+  # Observabilidade (ADR-0015): /actuator/prometheus, histograma de latência para o p99 e traces
+  # OTLP (ligados com TRACING_EXPORT=true, como no perfil observabilidade do Compose).
+  metrics:
+    distribution:
+      # Baldes fixos em vez do histograma padrão (~70 baldes): o limite da meta (3 s) é exato e as
+      # séries cabem com a tag tenant (conta no ADR-0015).
+      slo:
+        http.server.requests: 50ms,100ms,250ms,500ms,1s,3s,5s,10s
+    tags:
+      application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING:1.0}
+  otlp:
+    tracing:
+      endpoint: ${OTLP_TRACING_ENDPOINT:http://localhost:4318/v1/traces}
+      export:
+        enabled: ${TRACING_EXPORT:false}
   endpoint:
     health:
       probes:

@@ -5,6 +5,11 @@
 #   docker compose -f infra/docker-compose.yml up -d --wait        # tudo
 #   docker compose -f infra/docker-compose.yml up -d --wait pulsar # só o necessário
 #
+# Observabilidade (ADR-0015): Prometheus (localhost:9090), Grafana (localhost:3000) e Tempo, com
+# os traces ligados nos serviços:
+#
+#   TRACING_EXPORT=true docker compose -f infra/docker-compose.yml --profile observabilidade up -d --wait
+#
 # Cada MongoDB roda como replica set de um nó (necessário para transações,
 # usadas pelo outbox a partir do Dia 3) e com cache do WiredTiger limitado a 256 MB.
 name: plataforma
@@ -102,7 +107,7 @@ services:
       CATALOGO_SERVICE_URL: http://catalogo-service:8082
       PEDIDOS_SERVICE_URL: http://pedidos-service:8083
       PAGAMENTOS_SERVICE_URL: http://pagamentos-service:8084
-      GATEWAY_URL: http://gateway:8000
+      GATEWAY_URL: http://gateway:8001
       KEYCLOAK_MANAGEMENT_URL: http://keycloak:9000
     depends_on:
       mongo-tenants: { condition: service_healthy }
@@ -124,6 +129,9 @@ services:
     environment:
       MONGO_URI: mongodb://mongo-tenants:27017/tenants?replicaSet=rs-tenants
       PULSAR_URL: pulsar://pulsar:6650
+      # Traces para o Tempo do perfil observabilidade (TRACING_EXPORT=true para ligar).
+      OTLP_TRACING_ENDPOINT: http://tempo:4318/v1/traces
+      TRACING_EXPORT: ${TRACING_EXPORT:-false}
       PULSAR_ADMIN_URL: http://pulsar:8080
     depends_on:
       mongo-tenants: { condition: service_healthy }
@@ -143,6 +151,9 @@ services:
     environment:
       MONGO_URI: mongodb://mongo-catalogo:27017/catalogo?replicaSet=rs-catalogo
       PULSAR_URL: pulsar://pulsar:6650
+      # Traces para o Tempo do perfil observabilidade (TRACING_EXPORT=true para ligar).
+      OTLP_TRACING_ENDPOINT: http://tempo:4318/v1/traces
+      TRACING_EXPORT: ${TRACING_EXPORT:-false}
       PULSAR_ADMIN_URL: http://pulsar:8080
     depends_on:
       mongo-catalogo: { condition: service_healthy }
@@ -162,6 +173,9 @@ services:
     environment:
       MONGO_URI: mongodb://mongo-pedidos:27017/pedidos?replicaSet=rs-pedidos
       PULSAR_URL: pulsar://pulsar:6650
+      # Traces para o Tempo do perfil observabilidade (TRACING_EXPORT=true para ligar).
+      OTLP_TRACING_ENDPOINT: http://tempo:4318/v1/traces
+      TRACING_EXPORT: ${TRACING_EXPORT:-false}
       PULSAR_ADMIN_URL: http://pulsar:8080
     depends_on:
       mongo-pedidos: { condition: service_healthy }
@@ -181,6 +195,9 @@ services:
     environment:
       MONGO_URI: mongodb://mongo-pagamentos:27017/pagamentos?replicaSet=rs-pagamentos
       PULSAR_URL: pulsar://pulsar:6650
+      # Traces para o Tempo do perfil observabilidade (TRACING_EXPORT=true para ligar).
+      OTLP_TRACING_ENDPOINT: http://tempo:4318/v1/traces
+      TRACING_EXPORT: ${TRACING_EXPORT:-false}
       PULSAR_ADMIN_URL: http://pulsar:8080
     depends_on:
       mongo-pagamentos: { condition: service_healthy }
@@ -239,6 +256,9 @@ services:
       PEDIDOS_SERVICE_URL: http://pedidos-service:8083
       PAGAMENTOS_SERVICE_URL: http://pagamentos-service:8084
       PULSAR_URL: pulsar://pulsar:6650
+      # Traces para o Tempo do perfil observabilidade (TRACING_EXPORT=true para ligar).
+      OTLP_TRACING_ENDPOINT: http://tempo:4318/v1/traces
+      TRACING_EXPORT: ${TRACING_EXPORT:-false}
       PULSAR_ADMIN_URL: http://pulsar:8080
     depends_on:
       keycloak: { condition: service_healthy }
@@ -249,6 +269,66 @@ services:
       resources:
         limits:
           memory: 384m
+
+  # Perfil "observabilidade" (ADR-0015): só sobe com --profile observabilidade. As portas ficam só
+  # em 127.0.0.1: as métricas têm nomes de tenants.
+  prometheus:
+    image: prom/prometheus:v3.4.2
+    profiles: [observabilidade]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=2d
+      - --web.enable-lifecycle
+    volumes:
+      - ./observabilidade/prometheus:/etc/prometheus:ro
+    ports: ["127.0.0.1:9090:9090"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+  tempo:
+    image: grafana/tempo:2.8.1
+    profiles: [observabilidade]
+    command: ["-config.file=/etc/tempo.yaml"]
+    user: "0"
+    volumes:
+      - ./observabilidade/tempo/tempo.yaml:/etc/tempo.yaml:ro
+    ports: ["127.0.0.1:3200:3200"]
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+  grafana:
+    image: grafana/grafana:12.0.2
+    profiles: [observabilidade]
+    environment:
+      # Só para estudo local: entra direto como admin, sem login.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/plataforma.json
+    volumes:
+      - ./observabilidade/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observabilidade/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on:
+      prometheus: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    deploy:
+      resources:
+        limits:
+          memory: 256m
 
 volumes:
   mongo-tenants:

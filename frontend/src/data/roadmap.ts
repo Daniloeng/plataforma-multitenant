@@ -71,10 +71,17 @@ export const ROADMAP: readonly RoadmapService[] = [
     day: 10,
     responsibility:
       'Mede cada serviço com OpenTelemetry, Prometheus e Grafana e mostra a saúde por serviço com traces de ponta a ponta.',
+    situation: 'Ativo',
+  },
+  {
+    name: 'Kubernetes e MVP1',
+    day: 11,
+    responsibility:
+      'Empacota os serviços com Helm, sobe tudo num cluster kind com escala por KEDA e entrega contínua pelo Argo CD, fechando o MVP1.',
     situation: 'Planejado',
   },
 ];
 
-export const CURRENT_DAY = 9;
+export const CURRENT_DAY = 10;
 export const TOTAL_DAYS = 22;
 export const REPOSITORY_URL = 'https://github.com/Daniloeng/plataforma-multitenant';

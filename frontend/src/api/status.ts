@@ -8,12 +8,37 @@ export { ApiError };
 export type PlatformStatus = 'UP' | 'DEGRADED' | 'DOWN';
 export type ComponentStatus = 'UP' | 'DOWN';
 
+/**
+ * Métricas de um serviço desde a subida (Dia 10). Ausentes (ou null) para MongoDB, Pulsar e
+ * Keycloak, ou quando o serviço não respondeu as métricas. Campos null não se aplicam ao serviço.
+ */
+export interface ServiceMetrics {
+  /** Requisições HTTP atendidas desde a subida (sem /actuator). */
+  requests: number;
+  /** Fração de respostas 5xx, de 0 a 1. */
+  errorRate: number;
+  /** p99 de latência em ms; null se ainda não houve requisição. */
+  p99Ms: number | null;
+  /** Eventos esperando publicação no outbox; null se o serviço não tem outbox. */
+  outboxPending?: number | null;
+  /** Idade do evento pendente mais antigo, em segundos; null se o serviço não tem outbox. */
+  outboxLagSeconds?: number | null;
+  /** Eventos consumidos com sucesso; null se o serviço não consome eventos. */
+  eventsConsumed?: number | null;
+  /** Tentativas de consumo que falharam; null se o serviço não consome eventos. */
+  eventsFailed?: number | null;
+  /** O serviço tem outbox, mas não conseguiu contá-lo (MongoDB lento ou fora). */
+  outboxUnreadable?: boolean;
+}
+
 export interface StatusComponent {
   name: string;
   type: string;
   status: ComponentStatus;
   latencyMs: number | null;
   details: string | null;
+  /** Opcional desde o Dia 10: respostas anteriores não trazem o campo. */
+  metrics?: ServiceMetrics | null;
 }
 
 export interface StatusResponse {
@@ -31,6 +56,25 @@ export function statusUrl(
   origin: string = window.location.origin,
 ): string {
   return apiUrl('api/status', baseUrl, origin);
+}
+
+function isOptionalNumber(value: unknown): boolean {
+  return value === null || value === undefined || typeof value === 'number';
+}
+
+function isServiceMetrics(value: unknown): value is ServiceMetrics {
+  if (typeof value !== 'object' || value === null) return false;
+  const m = value as Record<string, unknown>;
+  return (
+    typeof m.requests === 'number' &&
+    typeof m.errorRate === 'number' &&
+    isOptionalNumber(m.p99Ms) &&
+    isOptionalNumber(m.outboxPending) &&
+    isOptionalNumber(m.outboxLagSeconds) &&
+    isOptionalNumber(m.eventsConsumed) &&
+    isOptionalNumber(m.eventsFailed) &&
+    (m.outboxUnreadable === undefined || typeof m.outboxUnreadable === 'boolean')
+  );
 }
 
 function isStatusComponent(value: unknown): value is StatusComponent {
@@ -77,7 +121,16 @@ export async function fetchStatus(signal?: AbortSignal): Promise<StatusResponse>
   if (!isStatusResponse(body)) {
     throw new ApiError('A resposta da API está fora do contrato esperado.', response.status);
   }
-  return body;
+  // Métrica malformada (ex.: NaN de um serviço com o MongoDB lento) some só daquele card: a saúde
+  // dos outros componentes continua visível.
+  return {
+    ...body,
+    components: body.components.map((c) =>
+      c.metrics === null || c.metrics === undefined || isServiceMetrics(c.metrics)
+        ? c
+        : { ...c, metrics: null },
+    ),
+  };
 }
 
 /** Converte qualquer falha em uma mensagem legível em pt-BR. */

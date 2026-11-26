@@ -27,7 +27,7 @@ public record PlatformProperties(
   public PlatformProperties {
     events = events == null ? new Events(0) : events;
     tenancy = tenancy == null ? new Tenancy(null, null) : tenancy;
-    outbox = outbox == null ? new OutboxProps(null, null, null, 0) : outbox;
+    outbox = outbox == null ? new OutboxProps(null, null, null, 0, null) : outbox;
     idempotency = idempotency == null ? new Idempotency(null) : idempotency;
     isolation = isolation == null ? new Isolation(false, null, null, null, null, null) : isolation;
   }
@@ -81,15 +81,32 @@ public record PlatformProperties(
   /**
    * @param enabled liga o relay que publica o outbox (padrão: true)
    * @param interval intervalo entre ciclos do relay (padrão: 200 ms)
-   * @param sendTimeout tempo máximo de uma publicação (padrão: 5 s)
+   * @param sendTimeout tempo máximo de uma publicação (padrão: 4 s, ou um terço de um lease curto;
+   *     menor que metade do lease)
    * @param batchSize mensagens por ciclo (padrão: 100)
+   * @param lease validade do lease do relay entre réplicas (padrão: 10 s; ADR-0015)
    */
   public record OutboxProps(
-      Boolean enabled, Duration interval, Duration sendTimeout, int batchSize) {
+      Boolean enabled, Duration interval, Duration sendTimeout, int batchSize, Duration lease) {
     public OutboxProps {
+      lease = lease == null ? Duration.ofSeconds(10) : lease;
+      if (sendTimeout == null) {
+        // Padrão de 4 s, mas sempre dentro da regra abaixo quando só o lease foi encurtado.
+        Duration standard = Duration.ofSeconds(4);
+        sendTimeout = standard.compareTo(lease.dividedBy(2)) < 0 ? standard : lease.dividedBy(3);
+      }
+      if (sendTimeout.compareTo(lease.dividedBy(2)) >= 0) {
+        // Na primeira metade do prazo a dona publica sem consultar o lease: uma publicação
+        // precisa caber nela, senão outra réplica assume no meio (ADR-0015).
+        throw new IllegalArgumentException(
+            "plataforma.outbox.send-timeout ("
+                + sendTimeout
+                + ") precisa ser menor que metade do plataforma.outbox.lease ("
+                + lease
+                + ")");
+      }
       enabled = enabled == null ? Boolean.TRUE : enabled;
       interval = interval == null ? Duration.ofMillis(200) : interval;
-      sendTimeout = sendTimeout == null ? Duration.ofSeconds(5) : sendTimeout;
       batchSize = batchSize <= 0 ? 100 : batchSize;
     }
   }
