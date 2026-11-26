@@ -38,7 +38,7 @@ Novos microsserviços entram em `services/<nome>-service`, como módulo do `pom.
 | Formatar Java | `mvn spotless:apply` |
 | Frontend | `cd frontend && npm ci && npm run test:coverage && npm run typecheck && npm run format:check` |
 | Ambiente local | `docker compose -f infra/docker-compose.yml up -d --build --wait` |
-| Frontend com API real | `cd frontend && npm run dev` (proxy `/api` → `localhost:8090`) |
+| Frontend com API real | `cd frontend && npm run dev` (proxy `/api/v1/tenants` → `localhost:8081`, resto de `/api` → `localhost:8090`) |
 | Frontend em modo demo | `cd frontend && VITE_DEMO=true npm run dev` |
 | Só testes rápidos (sem `*IT`) | `mvn -B -q test -pl <módulo> -am -Dtest='!*IT' -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true` |
 

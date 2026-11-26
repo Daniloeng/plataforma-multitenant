@@ -4,6 +4,7 @@ import br.dev.plataforma.contracts.EventCatalog;
 import br.dev.plataforma.contracts.EventContract;
 import java.time.Instant;
 import org.apache.avro.specific.SpecificRecord;
+import org.bson.types.ObjectId;
 import org.springframework.data.mongodb.core.MongoOperations;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -66,6 +67,7 @@ public class Outbox {
             event.getSchema().toString(),
             traceparent == null ? null : traceparent.toString(),
             occurredAt,
+            new ObjectId().toHexString(),
             null,
             0,
             null);

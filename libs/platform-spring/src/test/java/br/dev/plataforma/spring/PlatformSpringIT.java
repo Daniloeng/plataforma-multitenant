@@ -8,6 +8,7 @@ import br.dev.plataforma.contracts.tenants.NivelIsolamento;
 import br.dev.plataforma.contracts.tenants.Plano;
 import br.dev.plataforma.contracts.tenants.TenantCriado;
 import br.dev.plataforma.core.TenantId;
+import br.dev.plataforma.spring.idempotency.IdempotencyIndexes;
 import br.dev.plataforma.spring.idempotency.IdempotentConsumer;
 import br.dev.plataforma.spring.idempotency.ProcessedEvent;
 import br.dev.plataforma.spring.outbox.AvroCodec;
@@ -57,6 +58,8 @@ import org.testcontainers.utility.DockerImageName;
     webEnvironment = SpringBootTest.WebEnvironment.NONE,
     properties = "plataforma.outbox.interval=1h") // o teste dispara o relay à mão
 class PlatformSpringIT {
+
+  static final TenantId ACME = new TenantId("acme");
 
   @Container static final MongoDBContainer MONGO = new MongoDBContainer("mongo:8.0");
 
@@ -214,10 +217,10 @@ class PlatformSpringIT {
     List<String> efeitos = new ArrayList<>();
     Runnable efeito = () -> efeitos.add("x");
 
-    Boolean primeira = tx.execute(s -> idempotent.processOnce("acme", "catalogo", "e1", efeito));
-    Boolean repetida = tx.execute(s -> idempotent.processOnce("acme", "catalogo", "e1", efeito));
+    Boolean primeira = tx.execute(s -> idempotent.processOnce(ACME, "catalogo", "e1", efeito));
+    Boolean repetida = tx.execute(s -> idempotent.processOnce(ACME, "catalogo", "e1", efeito));
     Boolean outroConsumidor =
-        tx.execute(s -> idempotent.processOnce("acme", "pedidos", "e1", efeito));
+        tx.execute(s -> idempotent.processOnce(ACME, "pedidos", "e1", efeito));
 
     assertThat(primeira).isTrue();
     assertThat(repetida).isFalse();
@@ -232,7 +235,7 @@ class PlatformSpringIT {
                 tx.executeWithoutResult(
                     s ->
                         idempotent.processOnce(
-                            "acme",
+                            ACME,
                             "catalogo",
                             "e2",
                             () -> {
@@ -240,13 +243,13 @@ class PlatformSpringIT {
                             })))
         .hasMessage("efeito falhou");
 
-    Boolean reentrega = tx.execute(s -> idempotent.processOnce("acme", "catalogo", "e2", () -> {}));
+    Boolean reentrega = tx.execute(s -> idempotent.processOnce(ACME, "catalogo", "e2", () -> {}));
     assertThat(reentrega).isTrue();
   }
 
   @Test
   void consumidorIdempotenteExigeTransacao() {
-    assertThatThrownBy(() -> idempotent.processOnce("acme", "c", "e", () -> {}))
+    assertThatThrownBy(() -> idempotent.processOnce(ACME, "c", "e", () -> {}))
         .isInstanceOf(IllegalStateException.class);
   }
 
@@ -285,6 +288,17 @@ class PlatformSpringIT {
         .anySatisfy(i -> assertThat(i.getName()).isEqualTo("uk_tenant_consumer_event"))
         .anySatisfy(i -> assertThat(i.getName()).isEqualTo("ttl_processed"));
     assertThat(mongo.indexOps(OutboxMessage.class).getIndexInfo())
-        .anySatisfy(i -> assertThat(i.getName()).isEqualTo("ix_pending"));
+        .anySatisfy(i -> assertThat(i.getName()).isEqualTo("ix_pending_seq"));
+  }
+
+  @Test
+  void mudarARetencaoRecriaOIndiceTtlEmVezDeImpedirASubida() {
+    IdempotencyIndexes.ensure(mongo, java.time.Duration.ofDays(3));
+
+    assertThat(mongo.indexOps(OutboxMessage.class).getIndexInfo())
+        .filteredOn(i -> i.getName().equals("ttl_published"))
+        .singleElement()
+        .satisfies(i -> assertThat(i.getExpireAfter()).hasValue(java.time.Duration.ofDays(3)));
+    IdempotencyIndexes.ensure(mongo, java.time.Duration.ofDays(7));
   }
 }

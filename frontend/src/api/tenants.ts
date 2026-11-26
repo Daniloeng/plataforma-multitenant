@@ -182,7 +182,7 @@ export async function createTenant(novo: NovoTenant): Promise<Tenant> {
   return readJson(response, isTenant);
 }
 
-/** PATCH /api/v1/tenants/{id} — altera nome, plano, nível ou situação (200). */
+/** PATCH /api/v1/tenants/{id} — altera nome, plano ou situação (200); o nível não muda (409). */
 export async function updateTenant(id: string, alteracao: AlteracaoTenant): Promise<Tenant> {
   const response = await fetch(tenantsUrl(id), {
     method: 'PATCH',

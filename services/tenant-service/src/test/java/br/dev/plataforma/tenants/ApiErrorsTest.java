@@ -1,11 +1,10 @@
 package br.dev.plataforma.tenants;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.mongodb.MongoException;
 import org.junit.jupiter.api.Test;
-import org.springframework.dao.TransientDataAccessResourceException;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.mongodb.UncategorizedMongoDbException;
 import org.springframework.http.ProblemDetail;
 
@@ -27,19 +26,21 @@ class ApiErrorsTest {
   }
 
   @Test
-  void codigo112SemRotuloEExcecaoTransitoriaDoSpringTambem() {
+  void codigo112SemRotuloTambemEConflito() {
     assertThat(
-            ApiErrors.isTransientTransactionError(
+            ApiErrors.isWriteConflict(
                 new UncategorizedMongoDbException("x", new MongoException(112, "WriteConflict"))))
         .isTrue();
-    assertThat(errors.transientConflict(new TransientDataAccessResourceException("x")).getStatus())
-        .isEqualTo(409);
   }
 
+  /** Timeout ou banco fora do ar não é edição concorrente: 503, em Problem Details. */
   @Test
-  void outroErroDoMongoNaoViraConflito() {
+  void outrasFalhasDoBancoViram503() {
+    assertThat(errors.transientConflict(new QueryTimeoutException("x")).getStatus()).isEqualTo(503);
     var outro = new UncategorizedMongoDbException("x", new MongoException(13, "Unauthorized"));
-    assertThat(ApiErrors.isTransientTransactionError(outro)).isFalse();
-    assertThatThrownBy(() -> errors.transientConflict(outro)).isSameAs(outro);
+    assertThat(ApiErrors.isWriteConflict(outro)).isFalse();
+    ProblemDetail p = errors.transientConflict(outro);
+    assertThat(p.getStatus()).isEqualTo(503);
+    assertThat(p.getType()).hasToString("https://plataforma.dev.br/problemas/indisponivel");
   }
 }

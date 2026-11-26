@@ -68,8 +68,14 @@ public class ApiErrors extends ResponseEntityExceptionHandler {
    */
   @ExceptionHandler({TransientDataAccessException.class, UncategorizedMongoDbException.class})
   ProblemDetail transientConflict(DataAccessException e) {
-    if (!isTransientTransactionError(e)) {
-      throw e;
+    if (!isWriteConflict(e)) {
+      // Timeout ou banco indisponível não é edição concorrente: 503, para o cliente tentar depois.
+      logger.warn("Falha de acesso ao MongoDB", e);
+      return problem(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "indisponivel",
+          "Serviço indisponível",
+          "O banco de dados não respondeu; tente de novo em instantes.");
     }
     return problem(
         HttpStatus.CONFLICT,
@@ -78,7 +84,7 @@ public class ApiErrors extends ResponseEntityExceptionHandler {
         "Outra requisição alterou o mesmo tenant ao mesmo tempo; repita a operação.");
   }
 
-  static boolean isTransientTransactionError(Throwable e) {
+  static boolean isWriteConflict(Throwable e) {
     for (Throwable t = e; t != null; t = t.getCause()) {
       if (t instanceof MongoException m
           && (m.hasErrorLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL)
@@ -86,7 +92,7 @@ public class ApiErrors extends ResponseEntityExceptionHandler {
         return true;
       }
     }
-    return e instanceof TransientDataAccessException;
+    return false;
   }
 
   @ExceptionHandler(TenantExceptions.InvalidRequest.class)

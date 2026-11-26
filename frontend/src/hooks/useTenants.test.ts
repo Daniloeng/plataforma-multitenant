@@ -38,4 +38,35 @@ describe('useTenants', () => {
     expect(result.current.items).toHaveLength(5);
     expect(result.current.loadingMore).toBe(false);
   });
+
+  it.each([
+    ['sucesso', false],
+    ['erro', true],
+  ])('descarta a página de loadMore que volta depois de um reload (%s)', async (_, falha) => {
+    let releasePagina2: () => void = () => {};
+    server.use(
+      http.get('*/api/v1/tenants', async ({ request }) => {
+        const cursor = new URL(request.url).searchParams.get('cursor');
+        if (!cursor) return HttpResponse.json({ itens: makeTenants(2), proximoCursor: 'c1' });
+        await new Promise<void>((r) => (releasePagina2 = r));
+        if (falha) return HttpResponse.error();
+        return HttpResponse.json({
+          itens: [{ ...makeTenants(1)[0]!, id: 'antigo' }],
+          proximoCursor: 'c2',
+        });
+      }),
+    );
+    const { result } = renderHook(() => useTenants());
+    await waitFor(() => expect(result.current.nextCursor).toBe('c1'));
+
+    act(() => void result.current.loadMore());
+    await waitFor(() => expect(result.current.loadingMore).toBe(true));
+    await act(() => result.current.reload());
+    await act(async () => releasePagina2());
+
+    await waitFor(() => expect(result.current.loadingMore).toBe(false));
+    expect(result.current.items.map((t) => t.id)).not.toContain('antigo');
+    expect(result.current.nextCursor).toBe('c1');
+    expect(result.current.actionError).toBeNull();
+  });
 });

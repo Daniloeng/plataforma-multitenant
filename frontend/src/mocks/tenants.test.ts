@@ -157,21 +157,30 @@ describe('GET e PATCH /api/v1/tenants/{id}', () => {
     expect(missing.body).toMatchObject({ instance: '/api/v1/tenants/nao-existe' });
   });
 
-  it('altera nome, plano, nível e situação', async () => {
+  it('altera nome, plano e situação (nível igual ao atual é aceito)', async () => {
     const { status, body } = await call('PATCH', '/ceramica-paraiba', {
       nome: 'Cerâmica Paraíba S.A.',
       plano: 'PROFISSIONAL',
-      nivelIsolamento: 'BRIDGE',
+      nivelIsolamento: 'POOL',
       ativo: true,
     });
     expect(status).toBe(200);
     expect(body).toMatchObject({
       nome: 'Cerâmica Paraíba S.A.',
       plano: 'PROFISSIONAL',
-      nivelIsolamento: 'BRIDGE',
+      nivelIsolamento: 'POOL',
       ativo: true,
     });
     expect(tenantStoreSnapshot().find((t) => t.id === 'ceramica-paraiba')?.ativo).toBe(true);
+  });
+
+  it('responde 409 ao trocar o nível de isolamento, como o tenant-service', async () => {
+    const { status, body } = await call('PATCH', '/ceramica-paraiba', { nivelIsolamento: 'SILO' });
+    expect(status).toBe(409);
+    expect(body).toMatchObject({ title: 'Mudança de nível não suportada', status: 409 });
+    expect(tenantStoreSnapshot().find((t) => t.id === 'ceramica-paraiba')?.nivelIsolamento).toBe(
+      'POOL',
+    );
   });
 
   it.each([

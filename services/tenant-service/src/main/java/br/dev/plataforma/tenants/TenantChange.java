@@ -15,9 +15,4 @@ public record TenantChange(
   boolean isEmpty() {
     return nome == null && plano == null && nivelIsolamento == null && ativo == null;
   }
-
-  /** Nome em branco não é "sem mudança": é inválido. */
-  boolean hasBlankName() {
-    return nome != null && nome.isBlank();
-  }
 }

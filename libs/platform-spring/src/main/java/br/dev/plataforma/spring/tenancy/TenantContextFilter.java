@@ -15,6 +15,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.util.AntPathMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.util.UrlPathHelper;
 
 /**
  * Lê {@code X-Tenant-Id} (obrigatório nos caminhos configurados) e {@code X-Cliente-Id} (opcional),
@@ -38,9 +39,13 @@ public class TenantContextFilter extends OncePerRequestFilter {
     this.json = json;
   }
 
+  private static final UrlPathHelper PATHS = new UrlPathHelper();
+
   @Override
   protected boolean shouldNotFilter(HttpServletRequest request) {
-    String path = request.getRequestURI().substring(request.getContextPath().length());
+    // Caminho decodificado e normalizado, o mesmo que o Spring MVC usa para rotear: com o URI cru,
+    // /api/v%31/pedidos escaparia de /api/v1/** e chegaria ao controller sem tenant.
+    String path = PATHS.getPathWithinApplication(request);
     return requiredPaths.stream().noneMatch(p -> matcher.match(p, path))
         || excludedPaths.stream().anyMatch(p -> matcher.match(p, path));
   }

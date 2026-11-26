@@ -81,8 +81,9 @@ const PROBLEM_TYPES: Record<400 | 404 | 409, [string, string]> = {
   409: ['conflito', 'Tenant já existe'],
 };
 
-function problem(status: 400 | 404 | 409, detail: string, instance?: string) {
-  const [type, title] = PROBLEM_TYPES[status];
+function problem(status: 400 | 404 | 409, detail: string, instance?: string, customTitle?: string) {
+  const [type, defaultTitle] = PROBLEM_TYPES[status];
+  const title = customTitle ?? defaultTitle;
   const body: Problema = {
     type: `https://plataforma.dev.br/problemas/${type}`,
     title,
@@ -198,9 +199,20 @@ export const tenantHandlers = [
     if ('ativo' in body && typeof body.ativo !== 'boolean') {
       return problem(400, 'ativo deve ser true ou false.');
     }
+    if (
+      isNivelIsolamento(body.nivelIsolamento) &&
+      body.nivelIsolamento !== tenant.nivelIsolamento
+    ) {
+      // Como no tenant-service: trocar de nível é uma migração (Dia 9), não um PATCH.
+      return problem(
+        409,
+        `O nível de isolamento de '${id}' não muda por PATCH: a migração entre níveis chega no Dia 9.`,
+        `/api/v1/tenants/${id}`,
+        'Mudança de nível não suportada',
+      );
+    }
     if (typeof body.nome === 'string') tenant.nome = body.nome.trim();
     if (isPlano(body.plano)) tenant.plano = body.plano;
-    if (isNivelIsolamento(body.nivelIsolamento)) tenant.nivelIsolamento = body.nivelIsolamento;
     if (typeof body.ativo === 'boolean') tenant.ativo = body.ativo;
     return HttpResponse.json({ ...tenant });
   }),

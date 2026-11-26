@@ -243,6 +243,16 @@ class TenantServiceIT {
         .isEqualTo("https://plataforma.dev.br/problemas/requisicao-invalida");
     assertThat(chamar("PATCH", "/api/v1/tenants/delta", "{\"nome\":\"   \"}").status())
         .isEqualTo(400);
+    assertThat(chamar("PATCH", "/api/v1/tenants/delta", "{\"nome\":\"  x \"}").status())
+        .as("nome com 1 caractere depois de tirar os espaços")
+        .isEqualTo(400);
+    assertThat(
+            chamar(
+                    "POST",
+                    "/api/v1/tenants",
+                    "{\"id\":\"curto\",\"nome\":\" a \",\"plano\":\"GRATUITO\"}")
+                .status())
+        .isEqualTo(400);
     assertThat(chamar("GET", "/api/v1/tenants?limite=0", null).status()).isEqualTo(400);
     assertThat(chamar("GET", "/api/v1/tenants?cursor=%25%25", null).status()).isEqualTo(400);
     assertThat(chamar("GET", "/api/v1/tenants/X", null).status()).isEqualTo(400);

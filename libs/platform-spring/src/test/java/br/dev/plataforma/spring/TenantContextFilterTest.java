@@ -68,6 +68,12 @@ class TenantContextFilterTest {
   }
 
   @Test
+  void caminhoCodificadoNaoEscapaDaRegra() throws Exception {
+    // %31 é "1": o Spring MVC roteia para /api/v1/eco, então o filtro também precisa exigir tenant.
+    mvc.perform(get(java.net.URI.create("/api/v%31/eco"))).andExpect(status().isBadRequest());
+  }
+
+  @Test
   void tenantInvalidoResponde400ComMotivo() throws Exception {
     mvc.perform(get("/api/v1/eco").header("X-Tenant-Id", "ACME!"))
         .andExpect(status().isBadRequest())

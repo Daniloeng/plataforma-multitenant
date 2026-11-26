@@ -72,8 +72,15 @@ export function useTenants(): UseTenants {
     const cursor = state.nextCursor;
     if (!cursor || state.loadingMore) return;
     setState((prev) => ({ ...prev, loadingMore: true, actionError: null }));
+    // Um reload no meio do caminho troca o controller: a página antiga é descartada.
+    const generation = controllerRef.current;
+    const stale = () => controllerRef.current !== generation;
     try {
       const page = await listTenants({ cursor });
+      if (stale()) {
+        setState((prev) => ({ ...prev, loadingMore: false }));
+        return;
+      }
       setState((prev) => ({
         ...prev,
         items: merge(prev.items, page.itens),
@@ -81,6 +88,10 @@ export function useTenants(): UseTenants {
         loadingMore: false,
       }));
     } catch (err) {
+      if (stale()) {
+        setState((prev) => ({ ...prev, loadingMore: false }));
+        return;
+      }
       setState((prev) => ({
         ...prev,
         loadingMore: false,

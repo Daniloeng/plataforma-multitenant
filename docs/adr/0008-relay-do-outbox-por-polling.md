@@ -18,7 +18,8 @@ Há duas formas comuns:
 ## Decisão
 
 - **Polling a cada 200 ms** (`plataforma.outbox.interval`), lotes de até 100 itens
-  (`plataforma.outbox.batch-size`), pelo índice `ix_pending` (`publishedAt`, `occurredAt`). O relay está na biblioteca comum `libs/platform-spring` e todo serviço o
+  (`plataforma.outbox.batch-size`), pelo índice `ix_pending_seq` (`publishedAt`, `occurredAt`, `sequence`). O `sequence` é um
+  ObjectId gerado no `append`: desempata eventos do mesmo milissegundo na ordem em que foram gravados. O relay está na biblioteca comum `libs/platform-spring` e todo serviço o
   ganha por autoconfiguração.
 - **Ordem de publicação:** o lote é publicado em sequência e **para na primeira falha**, que
   incrementa `attempts` e guarda `lastError`. O item que falhou volta no ciclo seguinte antes dos
@@ -49,7 +50,7 @@ Há duas formas comuns:
 
 ## Exceções e dívidas registradas
 
-- Os índices do outbox (`ix_pending`, `ttl_published`) não começam por `tenantId`, ao contrário da
+- Os índices do outbox (`ix_pending_seq`, `ttl_published`) não começam por `tenantId`, ao contrário da
   regra do ADR-0005: a coleção é de infraestrutura e o relay lê todos os tenants juntos.
 - O relay lê só a database padrão do serviço. Tenants Bridge (database própria, Dia 9) precisarão
   de um relay por database ou de um outbox central.

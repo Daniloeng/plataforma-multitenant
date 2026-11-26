@@ -22,7 +22,7 @@ ferramentas gratuitas.
 | Pagamentos | Dia 7 |
 | Gateway + Keycloak | Dia 4 |
 | Contratos | 10 eventos Avro, 4 APIs OpenAPI, 8 ADRs ([arquitetura](docs/arquitetura/event-storming.md)) |
-| Cobertura (linhas) | `platform-core` 100% · `contracts` 100% · `platform-spring` 91,1% · `tenant-service` 97,3% · `status-service` 98,6% · frontend 99,9% (mínimo exigido: 80%) |
+| Cobertura (linhas) | `platform-core` 100% · `contracts` 100% · `platform-spring` 91,0% · `tenant-service` 97,3% · `status-service` 98,6% · frontend 99,9% (mínimo exigido: 80%) |
 
 ## Arquitetura (visão alvo)
 
@@ -112,7 +112,7 @@ com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
   nenhuma mudança fica sem evento, mesmo com o Pulsar fora do ar.
 - **Como testar:** suba o Compose, crie um tenant com `curl` (acima) ou pela aba Tenants e confira
   `tenant.criado` em `localhost:8080/admin/v2/persistent/plataforma/tenants/tenant.criado.v1/stats`.
-- **Cobertura:** `platform-spring` 91,1%, `tenant-service` 97,3%, frontend 99,9% de linhas.
+- **Cobertura:** `platform-spring` 91,0%, `tenant-service` 97,3%, frontend 99,9% de linhas.
 - **Claude Code:** subagente `testador`, hook `Stop` que roda os testes rápidos antes de o Claude
   encerrar, e o frontend feito por um subagente em background a partir do contrato.
 

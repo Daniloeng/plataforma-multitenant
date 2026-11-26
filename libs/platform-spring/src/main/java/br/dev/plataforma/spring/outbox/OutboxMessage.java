@@ -19,6 +19,8 @@ import org.springframework.data.mongodb.core.mapping.Document;
  *     a versão errada
  * @param traceparent contexto de trace, se houver
  * @param occurredAt instante do fato
+ * @param sequence desempate monotônico ({@link org.bson.types.ObjectId} gerado no append): dois
+ *     eventos do mesmo milissegundo saem na ordem em que foram gravados
  * @param publishedAt instante da publicação; nulo enquanto pendente
  * @param attempts tentativas de publicação que falharam
  * @param lastError última falha, para diagnóstico
@@ -34,6 +36,7 @@ public record OutboxMessage(
     String schema,
     String traceparent,
     Instant occurredAt,
+    String sequence,
     Instant publishedAt,
     int attempts,
     String lastError) {}

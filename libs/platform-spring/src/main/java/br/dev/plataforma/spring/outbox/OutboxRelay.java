@@ -50,7 +50,7 @@ public class OutboxRelay {
   public int publishPending() {
     Query pending =
         Query.query(Criteria.where("publishedAt").isNull())
-            .with(Sort.by("occurredAt", "_id"))
+            .with(Sort.by("occurredAt", "sequence"))
             .limit(batchSize);
     List<OutboxMessage> batch = mongo.find(pending, OutboxMessage.class);
     int published = 0;

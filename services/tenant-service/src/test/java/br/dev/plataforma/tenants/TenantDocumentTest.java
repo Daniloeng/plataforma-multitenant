@@ -66,11 +66,9 @@ class TenantDocumentTest {
   }
 
   @Test
-  void alteracaoVaziaENomeEmBranco() {
+  void alteracaoVazia() {
     assertThat(new TenantChange(null, null, null, null).isEmpty()).isTrue();
     assertThat(new TenantChange(null, null, null, false).isEmpty()).isFalse();
-    assertThat(new TenantChange(" ", null, null, null).hasBlankName()).isTrue();
-    assertThat(new TenantChange(null, null, null, null).hasBlankName()).isFalse();
   }
 
   @Test

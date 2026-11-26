@@ -41,6 +41,7 @@ public class TenantService {
   @Transactional
   public TenantView create(NewTenant request) {
     String id = parseId(request.id());
+    String nome = validName(request.nome());
     // Consulta antes de inserir: chave duplicada dentro da transação do MongoDB aborta a transação.
     // A corrida entre dois POSTs iguais ainda cai na chave única do _id (ver ApiErrors).
     if (mongo.exists(byId(id), TenantDocument.class)) {
@@ -50,9 +51,7 @@ public class TenantService {
     NivelIsolamento nivel =
         request.nivelIsolamento() == null ? NivelIsolamento.POOL : request.nivelIsolamento();
     TenantDocument saved =
-        mongo.insert(
-            new TenantDocument(
-                id, request.nome().strip(), request.plano(), nivel, true, now, now, null));
+        mongo.insert(new TenantDocument(id, nome, request.plano(), nivel, true, now, now, null));
     outbox.append(
         TenantCriado.newBuilder()
             .setEventId(UUID.randomUUID())
@@ -72,9 +71,6 @@ public class TenantService {
     if (change.isEmpty()) {
       throw new TenantExceptions.InvalidRequest("Informe ao menos um campo para alterar.");
     }
-    if (change.hasBlankName()) {
-      throw new TenantExceptions.InvalidRequest("O nome não pode ficar em branco.");
-    }
     String id = parseId(rawId);
     TenantDocument current = find(id);
     // Mudar de nível move os dados do tenant (outra database ou cluster): é um job de migração
@@ -85,7 +81,7 @@ public class TenantService {
     Instant now = now();
     TenantChange normalized =
         new TenantChange(
-            change.nome() == null ? null : change.nome().strip(),
+            change.nome() == null ? null : validName(change.nome()),
             change.plano(),
             change.nivelIsolamento(),
             change.ativo());
@@ -147,6 +143,16 @@ public class TenantService {
   /** Milissegundos bastam: é a precisão do MongoDB e do timestamp-millis do Avro. */
   private Instant now() {
     return clock.instant().truncatedTo(ChronoUnit.MILLIS);
+  }
+
+  /** O contrato pede de 2 a 120 caracteres sem contar os espaços das pontas, que são removidos. */
+  private static String validName(String raw) {
+    String nome = raw.strip();
+    if (nome.length() < 2) {
+      throw new TenantExceptions.InvalidRequest(
+          "O nome precisa de ao menos 2 caracteres além de espaços.");
+    }
+    return nome;
   }
 
   private static Query byId(String id) {
