@@ -41,8 +41,9 @@ export const ROADMAP: readonly RoadmapService[] = [
   {
     name: 'Pedidos',
     day: 6,
-    responsibility: 'Recebe pedidos B2B e publica eventos do ciclo de vida no Pulsar.',
-    situation: 'Planejado',
+    responsibility:
+      'Recebe pedidos B2B com Idempotency-Key, calcula o total com os preços do catálogo e publica pedido.criado e pedido.cancelado pelo outbox.',
+    situation: 'Ativo',
   },
   {
     name: 'Pagamentos',
@@ -52,6 +53,6 @@ export const ROADMAP: readonly RoadmapService[] = [
   },
 ];
 
-export const CURRENT_DAY = 5;
+export const CURRENT_DAY = 6;
 export const TOTAL_DAYS = 22;
 export const REPOSITORY_URL = 'https://github.com/Daniloeng/plataforma-multitenant';

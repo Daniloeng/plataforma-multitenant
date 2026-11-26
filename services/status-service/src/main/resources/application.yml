@@ -48,3 +48,5 @@ plataforma:
         url: ${TENANT_SERVICE_URL:http://localhost:8081}
       - name: catalogo-service
         url: ${CATALOGO_SERVICE_URL:http://localhost:8082}
+      - name: pedidos-service
+        url: ${PEDIDOS_SERVICE_URL:http://localhost:8083}

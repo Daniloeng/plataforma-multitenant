@@ -1,6 +1,6 @@
 # ADR-0006: Saga coreografada com outbox transacional
 
-- **Status:** Aceito
+- **Status:** Aceito; escopo da Idempotency-Key alterado pelo ADR-0011
 - **Data:** 2026-11-26
 
 ## Contexto

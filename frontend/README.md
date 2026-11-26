@@ -1,6 +1,6 @@
-# Frontend — Status, Tenants, Produtos, Arquitetura e Minha conta
+# Frontend — Status, Tenants, Produtos, Pedidos, Arquitetura e Minha conta
 
-Frontend da plataforma multi-tenant (pedidos B2B + pagamentos), com cinco páginas em abas e, no
+Frontend da plataforma multi-tenant (pedidos B2B + pagamentos), com seis páginas em abas e, no
 cabeçalho, login (Keycloak) e troca de tenant:
 
 - **Status** (`#/`): status do `status-service` (`GET /api/status`, atualizado a cada 10 s), o
@@ -8,14 +8,16 @@ cabeçalho, login (Keycloak) e troca de tenant:
 - **Tenants** (`#/tenants`): administração do catálogo de tenants — cria, lista, suspende e
   reativa tenants pelo Tenant Service (`/api/v1/tenants`). Só para o papel `plataforma-admin`.
 - **Produtos** (`#/produtos`): catálogo do tenant escolhido no cabeçalho (`/api/v1/produtos`).
-  Gestores cadastram, mudam preço, renomeiam e ativam/desativam; compradores só consultam.
+  Gestores cadastram, mudam preço, renomeiam e ativam/desativam; compradores montam o carrinho.
+- **Pedidos** (`#/pedidos` e `#/pedidos/<id>`): pedidos do tenant (`/api/v1/pedidos`) — o comprador
+  vê os do próprio cliente, o gestor vê os de todos; detalhe e cancelamento.
 - **Arquitetura** (`#/arquitetura`): diagramas do event storming, catálogo de eventos, matriz
   produtor × consumidor e lista de ADRs — tudo lido **em build time** do próprio repositório.
 
 - **Minha conta** (`#/conta`): o que o gateway sabe do usuário (`GET /api/v1/me`) — papéis,
   tenants, plano e limite de cada um — e o botão "Testar limite".
 
-O roteamento é por hash (`#/`, `#/tenants`, `#/produtos`, `#/arquitetura` e `#/conta`), sem biblioteca de rotas,
+O roteamento é por hash (`#/`, `#/tenants`, `#/produtos`, `#/pedidos`, `#/arquitetura` e `#/conta`), sem biblioteca de rotas,
 para funcionar no GitHub Pages (que não reescreve rotas para o `index.html`).
 
 Stack: React 19 + Vite 7 + TypeScript, testes com Vitest + Testing Library + MSW. Requer Node 22+.
@@ -80,16 +82,20 @@ simulados. A página exibe o selo "Modo demo (API simulada)".
   (`tenant-suspenso`) para tenant suspenso; rate limit por tenant em `/api/v1/me` (token bucket em
   memória, conforme o plano) com 429 + `Retry-After`.
 - `/api/status` (`src/mocks/handlers.ts`), público: MongoDB x4, Pulsar, `tenant-service`,
-  `catalogo-service`, `gateway` e `keycloak` (type `SERVICE`) no ar, latências variando.
+  `catalogo-service`, `pedidos-service`, `gateway` e `keycloak` (type `SERVICE`) no ar, latências
+  variando.
 - `/api/v1/produtos` (`src/mocks/catalogo.ts`): catálogo em memória por tenant, atrás do gateway
   simulado (token e `X-Tenant-Id` obrigatórios; 403 para comprador escrevendo). Veja
   [Página Produtos](#página-produtos).
+- `/api/v1/pedidos` (`src/mocks/pedidos.ts`): pedidos em memória por tenant, atrás do gateway
+  simulado; o `X-Cliente-Id` vem do usuário do token (`clienteIdOf` em `src/mocks/gateway.ts`). Veja
+  [Carrinho e página Pedidos](#carrinho-e-página-pedidos).
 - `/api/v1/tenants` e `/api/v1/tenants/:id` (`src/mocks/tenants.ts`): store em memória
   pré-populado com 5 tenants fictícios (Pool, Bridge e Silo), com as mesmas regras do contrato —
   400 em Problem Details (`application/problem+json`) para dados inválidos, 409 para id repetido,
   404 para tenant inexistente e paginação por cursor real (ordem: mais recentes primeiro; cursor =
   id do último item da página). O store vive só na aba do navegador: recarregar a página volta ao
-  estado inicial. Nos testes, `resetTenantStore()`, `resetRateLimits()` e a limpeza do
+  estado inicial. Nos testes, `resetTenantStore()`, `resetCatalogoStore()`, `resetPedidosStore()`, `resetRateLimits()` e a limpeza do
   `sessionStorage` rodam depois de cada teste (`src/test/setup.ts`).
 
 ```bash
@@ -148,6 +154,43 @@ recarrega a lista.
   Empresarial 10.000, lido do plano atual do tenant), 409 para SKU repetido no tenant e no limite.
   A `ceramica-paraiba` (Gratuito, suspensa) tem 19 produtos: reative-a como admin, entre de novo e
   cadastre dois produtos para ver o `limite-do-plano`.
+
+## Carrinho e página Pedidos
+
+Consome `libs/contracts/src/main/resources/openapi/pedidos.yaml` (cliente e tipos em
+`src/api/pedidos.ts`).
+
+| Ação     | Chamada                                                            | Quem                                |
+| -------- | ------------------------------------------------------------------ | ----------------------------------- |
+| Criar    | `POST api/v1/pedidos` com `Idempotency-Key` → 201 (ou 200 repete)  | comprador                           |
+| Listar   | `GET api/v1/pedidos?limite=20&cursor=…&status=…`                   | comprador (os seus), gestor (todos) |
+| Detalhe  | `GET api/v1/pedidos/{id}`                                          | comprador (os seus), gestor         |
+| Cancelar | `POST api/v1/pedidos/{id}/cancelamento` → 200; 409 se já cancelado | comprador (os seus), gestor         |
+
+- **Carrinho** (só para `comprador`, na aba Produtos): cada produto ativo tem quantidade e
+  "Adicionar ao carrinho". O resumo mostra os itens com quantidade editável (1 a 10.000), subtotal,
+  remover, esvaziar e o **total estimado** com o preço do catálogo — o preço final é o do servidor,
+  porque o corpo do pedido só leva `produtoId` e `quantidade`. Até 200 produtos. O carrinho fica no
+  `sessionStorage` por usuário e tenant (`plataforma.carrinho.<usuario>.<tenant>`, `src/hooks/useCarrinho.ts`);
+  sem storage, vale até recarregar a página. Gestores não veem o carrinho.
+- **Fazer pedido** (`src/hooks/useEnviarPedido.ts`): cada pedido ganha uma `Idempotency-Key`
+  (`crypto.randomUUID`). Se a tentativa falha e o usuário repete com o mesmo carrinho, a mesma chave
+  vai de novo: se a primeira chegou ao servidor e só a resposta se perdeu, ele devolve o mesmo
+  pedido (200, `Idempotent-Replayed: true`) em vez de criar outro. Carrinho diferente = chave nova
+  (evita `chave-reutilizada`). Ao criar, o carrinho esvazia e a página abre `#/pedidos/<id>`.
+- **Erros** mostram o `detail` do Problem Details; `produto-indisponivel` (409) destaca o item citado
+  no carrinho.
+- **Lista**: data, cliente (só gestor), resumo dos itens, total em R$, selo de status (Pendente,
+  Confirmado, Cancelado), filtro de status e "Carregar mais" pelo `proximoCursor`, do mais recente
+  para o mais antigo. **Detalhe**: itens com SKU, nome e preço unitário gravados no pedido,
+  subtotal, total e o motivo do cancelamento. **Cancelar** pede confirmação na própria linha (sem
+  `window.confirm`).
+- **Modo demo**: pedidos de exemplo no tenant de `bruno` (dele e de outros três clientes, visíveis
+  para a `admin`) e nos tenants da `ana`. Preço, SKU e nome vêm do catálogo simulado; produto
+  inativo ou de outro tenant responde 409 `produto-indisponivel`. Idempotência por (tenant, cliente,
+  chave) com hash do corpo. No Dia 6 todo pedido novo fica `PENDENTE` (o pagamento chega no Dia 7);
+  o cancelamento usa o motivo `SOLICITADO_PELO_CLIENTE`. Comprador lendo ou cancelando pedido de
+  outro cliente recebe 404.
 
 ## Página Arquitetura
 

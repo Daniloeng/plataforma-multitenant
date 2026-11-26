@@ -84,7 +84,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Subir MongoDB x4, Pulsar, Keycloak, gateway, tenant, catálogo e status
+      - name: Subir MongoDB x4, Pulsar, Keycloak, gateway, tenant, catálogo, pedidos e status
         run: docker compose -f infra/docker-compose.yml up -d --build --wait --wait-timeout 420
       - name: Conferir /api/status pelo gateway
         run: |
@@ -93,7 +93,7 @@ jobs:
           import json
           s = json.load(open("status.json"))
           assert s["status"] == "UP", s
-          assert len(s["components"]) == 9, s
+          assert len(s["components"]) == 10, s
           print("\nPlataforma UP com", len(s["components"]), "componentes")
           PY
       - name: Conferir namespaces Pulsar
@@ -105,7 +105,7 @@ jobs:
           done
       - name: Serviços não ficam expostos fora do gateway
         run: |
-          for url in http://localhost:8081/api/v1/tenants http://localhost:8082/api/v1/produtos http://localhost:8090/api/status; do
+          for url in http://localhost:8081/api/v1/tenants http://localhost:8082/api/v1/produtos http://localhost:8083/api/v1/pedidos http://localhost:8090/api/status; do
             if curl -fsS -m 3 "$url"; then echo "$url respondeu fora do gateway" && exit 1; fi
           done
       - name: Sem token, a API responde 401
@@ -183,6 +183,58 @@ jobs:
             sleep 1
           done
           echo "preco.alterado não chegou ao Pulsar" && exit 1
+      - name: Pedidos pelo gateway (preço do catálogo, idempotência e papéis)
+        run: |
+          token() {
+            curl -fsS http://localhost:8180/realms/plataforma/protocol/openid-connect/token \
+              -d grant_type=password -d client_id=plataforma-cli -d "username=$1" -d password=senha123 |
+              python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])'
+          }
+          ANA=$(token ana); BRUNO=$(token bruno)
+          api() { curl -sS -o resp.json -w '%{http_code}' "$@"; }
+          # Produto do seed em acme; o pedidos-service aprende nome e preço pelos eventos do catálogo.
+          test "$(api 'http://localhost:8000/api/v1/produtos?busca=FITA-ISO' -H "Authorization: Bearer $BRUNO" -H 'X-Tenant-Id: acme')" = 200
+          produto=$(python3 -c 'import json; print(json.load(open("resp.json"))["itens"][0]["id"])')
+          corpo="{\"itens\":[{\"produtoId\":\"$produto\",\"quantidade\":3,\"precoUnitario\":{\"centavos\":1}}]}"
+          chave=$(python3 -c 'import uuid; print(uuid.uuid4())')
+          pedir() { api -X POST http://localhost:8000/api/v1/pedidos -H "Authorization: Bearer $1" -H 'X-Tenant-Id: acme' -H "Idempotency-Key: $2" -H 'Content-Type: application/json' -d "$3"; }
+          # Consistência eventual: espera a cópia local do produto chegar (até 30 s).
+          for i in $(seq 1 30); do
+            code=$(pedir "$BRUNO" "$chave" "$corpo")
+            [ "$code" = 201 ] && break
+            # Só o produto ainda não copiado justifica esperar; qualquer outro erro falha já.
+            [ "$code" = 409 ] && grep -q 'produto-indisponivel' resp.json || { cat resp.json; exit 1; }
+            sleep 1
+          done
+          cat resp.json
+          python3 - <<'PY'
+          import json
+          p = json.load(open("resp.json"))
+          # O preço enviado pelo cliente é ignorado: vale o do catálogo (790 centavos).
+          assert p["status"] == "PENDENTE" and p["total"]["centavos"] == 3 * 790, p
+          assert p["clienteId"] == "cli-bruno", p
+          PY
+          id=$(python3 -c 'import json; print(json.load(open("resp.json"))["id"])')
+          # Repetir com a mesma chave devolve o mesmo pedido; outro corpo com a mesma chave é 409.
+          test "$(pedir "$BRUNO" "$chave" "$corpo")" = 200
+          python3 -c "import json; assert json.load(open('resp.json'))['id'] == '$id'"
+          test "$(pedir "$BRUNO" "$chave" "{\"itens\":[{\"produtoId\":\"$produto\",\"quantidade\":1}]}")" = 409
+          # Gestora não compra, mas vê e cancela os pedidos do tenant.
+          test "$(pedir "$ANA" "$(python3 -c 'import uuid; print(uuid.uuid4())')" "$corpo")" = 403
+          test "$(api http://localhost:8000/api/v1/pedidos -H "Authorization: Bearer $ANA" -H 'X-Tenant-Id: acme')" = 200
+          python3 -c "import json; assert '$id' in [p['id'] for p in json.load(open('resp.json'))['itens']]"
+          test "$(api -X POST http://localhost:8000/api/v1/pedidos/$id/cancelamento -H "Authorization: Bearer $ANA" -H 'X-Tenant-Id: acme')" = 200
+          test "$(api -X POST http://localhost:8000/api/v1/pedidos/$id/cancelamento -H "Authorization: Bearer $BRUNO" -H 'X-Tenant-Id: acme')" = 409
+          for evento in pedido.criado pedido.cancelado; do
+            topico=http://localhost:8080/admin/v2/persistent/plataforma/pedidos/$evento.v1
+            ok=0
+            for i in $(seq 1 30); do
+              n=$(curl -fsS "$topico/stats" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("msgInCounter", 0))' || echo 0)
+              [ "$n" -ge 1 ] && echo "$evento publicado ($n mensagens)" && ok=1 && break
+              sleep 1
+            done
+            [ "$ok" = 1 ] || { echo "$evento não chegou ao Pulsar"; exit 1; }
+          done
       - name: Logs em caso de falha
         if: failure()
         run: docker compose -f infra/docker-compose.yml logs --tail 200

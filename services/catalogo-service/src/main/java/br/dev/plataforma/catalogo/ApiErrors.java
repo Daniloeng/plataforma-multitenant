@@ -5,6 +5,7 @@ import com.mongodb.MongoException;
 import java.net.URI;
 import java.util.stream.Collectors;
 import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.TransientDataAccessException;
@@ -81,7 +82,13 @@ public class ApiErrors extends ResponseEntityExceptionHandler {
    * WriteConflict (rótulo TransientTransactionError), que o Spring não traduz para
    * DuplicateKeyException nem OptimisticLockingFailureException. Para o cliente é o mesmo 409.
    */
-  @ExceptionHandler({TransientDataAccessException.class, UncategorizedMongoDbException.class})
+  // O WriteConflict (código 112) chega como DataIntegrityViolationException em gravações dentro de
+  // transação; a DuplicateKeyException, subclasse dela, tem handler próprio e mais específico.
+  @ExceptionHandler({
+    TransientDataAccessException.class,
+    UncategorizedMongoDbException.class,
+    DataIntegrityViolationException.class
+  })
   ProblemDetail transientConflict(DataAccessException e) {
     if (!isWriteConflict(e)) {
       // Timeout ou banco indisponível não é edição concorrente: 503, para o cliente tentar depois.

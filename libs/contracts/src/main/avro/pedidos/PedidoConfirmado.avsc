@@ -45,6 +45,12 @@
     {
       "name": "pagamentoId",
       "type": "string"
+    },
+    {
+      "name": "versao",
+      "type": "long",
+      "default": 0,
+      "doc": "Versão do pedido (@Version do documento). Consumidores ignoram versão menor ou igual à última recebida neste tópico para o pedido."
     }
   ]
 }

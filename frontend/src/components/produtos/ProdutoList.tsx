@@ -10,6 +10,7 @@ import {
   validateNomeProduto,
   type Produto,
 } from '../../api/catalogo';
+import { ITENS_MAX, QUANTIDADE_MAX, QUANTIDADE_MIN, quantidadeValida } from '../../api/pedidos';
 import type { UseProdutos } from '../../hooks/useProdutos';
 
 const COMPOSE_COMMAND = 'docker compose -f infra/docker-compose.yml up -d --build --wait';
@@ -33,6 +34,8 @@ type Props = Pick<
   gestor: boolean;
   /** Há busca ou filtro ativo (muda a mensagem de lista vazia). */
   filtrado: boolean;
+  /** Compradores: "Adicionar ao carrinho" em cada produto ativo. */
+  onAdicionar?: (produto: Produto, quantidade: number) => boolean;
 };
 
 /** Lista do catálogo: tabela no desktop, cartões no celular, com paginação por cursor. */
@@ -51,6 +54,7 @@ export function ProdutoList({
   setActive,
   gestor,
   filtrado,
+  onAdicionar,
 }: Props) {
   return (
     <section className="section" aria-labelledby="produtos-title">
@@ -113,6 +117,7 @@ export function ProdutoList({
                 <th scope="col">Nome</th>
                 <th scope="col">Preço</th>
                 <th scope="col">Situação</th>
+                {onAdicionar ? <th scope="col">Carrinho</th> : null}
                 {gestor ? (
                   <th scope="col">
                     <span className="sr-only">Ações</span>
@@ -129,6 +134,7 @@ export function ProdutoList({
                   pending={pendingIds.has(p.id)}
                   onReplace={replace}
                   onSetActive={setActive}
+                  onAdicionar={onAdicionar}
                 />
               ))}
             </tbody>
@@ -160,9 +166,17 @@ interface RowProps {
   pending: boolean;
   onReplace: (produto: Produto) => void;
   onSetActive: (id: string, ativo: boolean) => Promise<void>;
+  onAdicionar?: (produto: Produto, quantidade: number) => boolean;
 }
 
-function ProdutoRow({ produto: p, gestor, pending, onReplace, onSetActive }: RowProps) {
+function ProdutoRow({
+  produto: p,
+  gestor,
+  pending,
+  onReplace,
+  onSetActive,
+  onAdicionar,
+}: RowProps) {
   const [editing, setEditing] = useState<Editing>(null);
   return (
     <tr aria-label={p.sku} className={p.ativo ? undefined : 'produtos__inativo'}>
@@ -203,6 +217,11 @@ function ProdutoRow({ produto: p, gestor, pending, onReplace, onSetActive }: Row
           {p.ativo ? 'Ativo' : 'Inativo'}
         </span>
       </td>
+      {onAdicionar ? (
+        <td data-label="Carrinho" className="produtos__carrinho">
+          {p.ativo ? <AdicionarAoCarrinho produto={p} onAdicionar={onAdicionar} /> : null}
+        </td>
+      ) : null}
       {gestor ? (
         <td className="tenants__acoes produtos__acoes">
           <button
@@ -235,6 +254,69 @@ function ProdutoRow({ produto: p, gestor, pending, onReplace, onSetActive }: Row
         </td>
       ) : null}
     </tr>
+  );
+}
+
+/** Quantidade + "Adicionar ao carrinho"; confirma com "Adicionado" por alguns segundos. */
+function AdicionarAoCarrinho({
+  produto,
+  onAdicionar,
+}: {
+  produto: Produto;
+  onAdicionar: (produto: Produto, quantidade: number) => boolean;
+}) {
+  const uid = useId();
+  const [texto, setTexto] = useState('1');
+  const [mensagem, setMensagem] = useState<{ ok: boolean; texto: string } | null>(null);
+  const quantidade = Number(texto);
+  const valida = quantidadeValida(quantidade);
+
+  function adicionar(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!valida) return;
+    const ok = onAdicionar(produto, quantidade);
+    setMensagem(
+      ok
+        ? { ok, texto: `${quantidade.toLocaleString('pt-BR')} no carrinho` }
+        : { ok, texto: `O carrinho aceita até ${ITENS_MAX} produtos.` },
+    );
+    setTexto('1');
+  }
+
+  return (
+    <form className="adicionar" onSubmit={adicionar} noValidate>
+      <label htmlFor={`${uid}-qtd`} className="sr-only">
+        Quantidade de {produto.sku} para adicionar
+      </label>
+      <input
+        id={`${uid}-qtd`}
+        className="input num adicionar__qtd"
+        type="number"
+        inputMode="numeric"
+        min={QUANTIDADE_MIN}
+        max={QUANTIDADE_MAX}
+        step={1}
+        value={texto}
+        onChange={(e) => {
+          setTexto(e.target.value);
+          setMensagem(null);
+        }}
+        aria-invalid={valida ? undefined : true}
+      />
+      <button
+        type="submit"
+        className="button button--small"
+        disabled={!valida}
+        aria-label={`Adicionar ${produto.sku} ao carrinho`}
+      >
+        Adicionar ao carrinho
+      </button>
+      {mensagem ? (
+        <span className={mensagem.ok ? 'adicionar__ok' : 'field-error'} role="status">
+          {mensagem.texto}
+        </span>
+      ) : null}
+    </form>
   );
 }
 

@@ -1,6 +1,6 @@
 # ADR-0010: Consumidor padrão de eventos e cópias locais de dados de outro serviço
 
-- **Status:** Aceito
+- **Status:** Aceito; retenção do catálogo alterada pelo ADR-0011
 - **Data:** 2026-11-26
 
 ## Contexto

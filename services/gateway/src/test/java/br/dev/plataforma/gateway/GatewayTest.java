@@ -44,6 +44,7 @@ class GatewayTest {
     registry.add("plataforma.gateway.services.tenants", BACKEND::url);
     registry.add("plataforma.gateway.services.status", BACKEND::url);
     registry.add("plataforma.gateway.services.catalogo", BACKEND::url);
+    registry.add("plataforma.gateway.services.pedidos", BACKEND::url);
   }
 
   @AfterAll
@@ -382,5 +383,25 @@ class GatewayTest {
         .containsEntry("X-Tenant-Id", "acme")
         .containsEntry("X-Papeis", "gestor-tenant")
         .containsEntry("X-Usuario", "ana");
+  }
+
+  @Test
+  void pedidosVaoParaOPedidosServiceComOClienteDoToken() {
+    web.mutateWith(BRUNO)
+        .post()
+        .uri("/api/v1/pedidos")
+        .header("X-Tenant-Id", "acme")
+        .header("Idempotency-Key", "chave-de-teste-1")
+        // Cliente forjado pelo navegador é descartado: vale o do token.
+        .header("X-Cliente-Id", "cli-outro")
+        .exchange()
+        .expectStatus()
+        .isOk();
+    assertThat(BACKEND.lastHeaders)
+        .containsEntry("path", "/api/v1/pedidos")
+        .containsEntry("X-Tenant-Id", "acme")
+        .containsEntry("X-Cliente-Id", "cli-bruno")
+        .containsEntry("Idempotency-Key", "chave-de-teste-1")
+        .containsEntry("X-Papeis", "comprador");
   }
 }

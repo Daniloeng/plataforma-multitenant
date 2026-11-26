@@ -88,6 +88,12 @@
       "type": "string",
       "default": "BRL",
       "doc": "Código ISO 4217."
+    },
+    {
+      "name": "versao",
+      "type": "long",
+      "default": 0,
+      "doc": "Versão do pedido (@Version do documento). Consumidores ignoram versão menor ou igual à última recebida neste tópico para o pedido."
     }
   ]
 }

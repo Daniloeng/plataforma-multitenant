@@ -3,7 +3,7 @@ import { ROADMAP } from '../data/roadmap';
 import { RoadmapSection } from './RoadmapSection';
 
 describe('RoadmapSection', () => {
-  it('lista status-service, Tenants, Gateway e Catálogo ativos e os dois serviços planejados', () => {
+  it('lista status-service, Tenants, Gateway, Catálogo e Pedidos ativos e Pagamentos planejado', () => {
     render(<RoadmapSection />);
     const items = screen.getAllByRole('listitem');
     expect(items).toHaveLength(6);
@@ -30,14 +30,15 @@ describe('RoadmapSection', () => {
     expect(within(catalogo).getByText('Ativo')).toHaveClass('pill--up');
     expect(catalogo).toHaveTextContent('produto.alterado e preco.alterado');
 
-    for (const [name, day] of [
-      ['Pedidos', 6],
-      ['Pagamentos', 7],
-    ] as const) {
-      const item = screen.getByRole('listitem', { name });
-      expect(item).toHaveTextContent(`Dia ${day}`);
-      expect(within(item).getByText('Planejado')).toHaveClass('pill--planned');
-    }
+    const pedidos = screen.getByRole('listitem', { name: 'Pedidos' });
+    expect(pedidos).toHaveTextContent('Dia 6');
+    expect(within(pedidos).getByText('Ativo')).toHaveClass('pill--up');
+    expect(pedidos).toHaveTextContent('Idempotency-Key');
+    expect(pedidos).toHaveTextContent('pedido.criado e pedido.cancelado');
+
+    const pagamentos = screen.getByRole('listitem', { name: 'Pagamentos' });
+    expect(pagamentos).toHaveTextContent('Dia 7');
+    expect(within(pagamentos).getByText('Planejado')).toHaveClass('pill--planned');
   });
 
   it('cada serviço tem responsabilidade em uma frase', () => {

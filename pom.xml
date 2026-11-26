@@ -25,6 +25,7 @@
     <module>services/status-service</module>
     <module>services/tenant-service</module>
     <module>services/catalogo-service</module>
+    <module>services/pedidos-service</module>
     <module>services/gateway</module>
   </modules>
 

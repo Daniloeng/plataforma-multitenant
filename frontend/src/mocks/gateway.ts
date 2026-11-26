@@ -43,6 +43,14 @@ export function tenantsOf(user: DemoUser): Tenant[] {
   return all.filter((t) => ids.includes(t.id));
 }
 
+/**
+ * O X-Cliente-Id que o gateway escreve para os serviços: vem só da claim cliente_id do token
+ * (aqui, do usuário de demo). Um X-Cliente-Id enviado pelo navegador é descartado (ADR-0007).
+ */
+export function clienteIdOf(user: DemoUser): string | null {
+  return user.clienteId;
+}
+
 export function meOf(user: DemoUser): Me {
   return {
     usuario: user.usuario,
