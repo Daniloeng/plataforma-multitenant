@@ -100,6 +100,7 @@ services:
       PULSAR_ADMIN_URL: http://pulsar:8080
       TENANT_SERVICE_URL: http://tenant-service:8081
       CATALOGO_SERVICE_URL: http://catalogo-service:8082
+      PEDIDOS_SERVICE_URL: http://pedidos-service:8083
       GATEWAY_URL: http://gateway:8000
       KEYCLOAK_MANAGEMENT_URL: http://keycloak:9000
     depends_on:
@@ -143,6 +144,25 @@ services:
       PULSAR_ADMIN_URL: http://pulsar:8080
     depends_on:
       mongo-catalogo: { condition: service_healthy }
+      pulsar: { condition: service_healthy }
+      pulsar-init: { condition: service_completed_successfully }
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  pedidos-service:
+    build:
+      context: ..
+      dockerfile: services/pedidos-service/Dockerfile
+    image: plataforma/pedidos-service:dev
+    environment:
+      MONGO_URI: mongodb://mongo-pedidos:27017/pedidos?replicaSet=rs-pedidos
+      PULSAR_URL: pulsar://pulsar:6650
+      PULSAR_ADMIN_URL: http://pulsar:8080
+    depends_on:
+      mongo-pedidos: { condition: service_healthy }
       pulsar: { condition: service_healthy }
       pulsar-init: { condition: service_completed_successfully }
     restart: unless-stopped
@@ -195,6 +215,7 @@ services:
       TENANT_SERVICE_URL: http://tenant-service:8081
       STATUS_SERVICE_URL: http://status-service:8090
       CATALOGO_SERVICE_URL: http://catalogo-service:8082
+      PEDIDOS_SERVICE_URL: http://pedidos-service:8083
       PULSAR_URL: pulsar://pulsar:6650
       PULSAR_ADMIN_URL: http://pulsar:8080
     depends_on:

@@ -7,6 +7,7 @@ import { SessionBar } from './components/auth/SessionBar';
 import { ROUTE_HASH, useHashRoute, type Route } from './hooks/useHashRoute';
 import { AccountPage } from './pages/AccountPage';
 import { ArchitecturePage } from './pages/ArchitecturePage';
+import { PedidosPage } from './pages/PedidosPage';
 import { ProdutosPage } from './pages/ProdutosPage';
 import { StatusPage } from './pages/StatusPage';
 import { TenantsPage } from './pages/TenantsPage';
@@ -31,6 +32,12 @@ const PAGES: Record<Route, { tab: string; title: string; footer: string }> = {
     footer:
       'Dados do catalogo-service pelo gateway (/api/v1/produtos com X-Tenant-Id; escrita para gestor-tenant e plataforma-admin).',
   },
+  pedidos: {
+    tab: 'Pedidos',
+    title: 'Pedidos',
+    footer:
+      'Dados do pedidos-service pelo gateway (/api/v1/pedidos com X-Tenant-Id; o gateway põe o X-Cliente-Id do token; criação com Idempotency-Key).',
+  },
   arquitetura: {
     tab: 'Arquitetura',
     title: 'Arquitetura',
@@ -47,6 +54,7 @@ function CurrentPage({ route }: { route: Route }) {
   if (route === 'arquitetura') return <ArchitecturePage />;
   if (route === 'conta') return <AccountPage />;
   if (route === 'produtos') return <ProdutosPage />;
+  if (route === 'pedidos') return <PedidosPage />;
   if (route === 'tenants') {
     return (
       <RequireAdmin>

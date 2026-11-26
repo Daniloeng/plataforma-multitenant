@@ -68,7 +68,8 @@ Os eventos em ordem, com o comando que os causa e a política que reage a eles.
 | 1b | Política: "tenant criado ou alterado → atualizar cache" | Atualizar catálogo de tenants | Gateway e todos os serviços | (interno) |
 | 2 | Política: "tenant criado ou alterado → copiar plano e situação" (ADR-0010) | Atualizar cópia local do tenant | Catálogo | (interno) |
 | 3 | Gestor do tenant; política "limite do plano" e "tenant suspenso não escreve" | Cadastrar produto / alterar preço | Catálogo | `produto.alterado`, `preco.alterado` |
-| 4 | Comprador (cliente B2B) | Fazer pedido | Pedidos | `pedido.criado` |
+| 3b | Política: "produto ou preço alterado → copiar" (ADR-0011) | Atualizar cópia local do produto | Pedidos | (interno) |
+| 4 | Comprador (cliente B2B); políticas "preço da cópia local" e "mesma Idempotency-Key, mesmo pedido" (ADR-0011) | Fazer pedido | Pedidos | `pedido.criado` |
 | 5 | Política: "pedido criado → cobrar" | Autorizar e capturar | Pagamentos | `pagamento.aprovado` ou `pagamento.recusado` |
 | 6a | Política: "pagamento aprovado → confirmar" | Confirmar pedido | Pedidos | `pedido.confirmado` |
 | 6b | Política: "pagamento recusado → cancelar" | Cancelar pedido | Pedidos | `pedido.cancelado` |

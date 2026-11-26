@@ -21,6 +21,7 @@ libs/platform-spring/     autoconfiguração comum: TenantContext/filtro X-Tenan
 services/gateway/         Spring Cloud Gateway (porta 8000): JWT do Keycloak, tenant do token, rate limit por plano, /api/v1/me
 services/tenant-service/  cadastro de tenants, /api/v1/tenants (porta 8081, só plataforma-admin); publica tenant.* pelo outbox
 services/catalogo-service/ produtos por tenant, /api/v1/produtos (porta 8082); publica produto.alterado e preco.alterado; consome tenant.*
+services/pedidos-service/ pedidos, /api/v1/pedidos (porta 8083); preço da cópia local do catálogo, Idempotency-Key; publica pedido.criado e pedido.cancelado
 services/status-service/  saúde de MongoDB x4, Pulsar e serviços em GET /api/status (porta 8090)
 frontend/                 React + Vite + TS; modo demo com MSW (GitHub Pages)
 infra/                    Docker Compose (MongoDB por serviço, Pulsar, Keycloak), keycloak/realm-plataforma.json, seed.sh
@@ -67,13 +68,16 @@ no host no Compose e entra no `status-service`.
   `EventSubscriber.on(Evento.class, "nome", efeito)` (ADR-0010), que já faz assinatura durável
   Key_Shared, schema do escritor, transação, `IdempotentConsumer` e dead letter. Dado de outro
   serviço vira cópia local mínima com `versao` (ignore versão menor ou igual). Dentro de transação MongoDB, consulte
-  antes de inserir: chave duplicada aborta a transação inteira.
+  antes de inserir: chave duplicada aborta a transação inteira. Coleção que um consumidor grava
+  nasce na subida do serviço (junto dos índices), nunca dentro da transação do primeiro evento.
 - **Documento de negócio implementa `TenantOwned`** e consultas usam `TenantQueries.scoped(...)`.
 - **Eventos**: um `.avsc` por evento em `libs/contracts/src/main/avro/<contexto>/`, com
   `eventId`, `tenantId`, `occurredAt`, `traceparent` e as propriedades `x-evento`, `x-topico`,
   `x-produtor`, `x-consumidores`. Tópico `persistent://plataforma/<produtor>/<entidade>.<evento>.v<n>`,
   resolvido pelo `EventCatalog`, nunca por texto solto. Evolução BACKWARD: campo novo precisa de
   default; enum com símbolo default; compatibilidade FULL; mudança incompatível vira tópico `.v2`. Dinheiro em centavos (`long`).
+- **Pedidos** (ADR-0011): o preço vem da cópia local do catálogo, nunca do corpo; POST exige
+  `Idempotency-Key` (mesma chave e corpo devolvem o pedido com `Idempotent-Replayed: true`).
 - **APIs**: contract-first em `libs/contracts/src/main/resources/openapi/`; rotas `/api/v1/`;
   `X-Tenant-Id` obrigatório nas APIs de negócio; erros em Problem Details (RFC 9457).
 - **Decisões**: decisão de arquitetura vira ADR (skill `adr`); peça revisão ao subagente `arquiteto`

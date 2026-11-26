@@ -18,8 +18,10 @@ export function problemResponse(
   title: string,
   detail: string,
   headers: Record<string, string> = {},
+  extensions: Record<string, unknown> = {},
 ): HttpResponse<Problema> {
-  const body: Problema = { type: `${PROBLEM_BASE}${type}`, title, status, detail };
+  // Propriedades de extensão (RFC 9457 §3.2) primeiro: não sobrescrevem os campos padrão.
+  const body: Problema = { ...extensions, type: `${PROBLEM_BASE}${type}`, title, status, detail };
   return HttpResponse.json(body, {
     status,
     headers: { 'Content-Type': 'application/problem+json', ...headers },
@@ -41,6 +43,14 @@ export function tenantsOf(user: DemoUser): Tenant[] {
   if (user.tenants === 'todos') return all;
   const ids = user.tenants;
   return all.filter((t) => ids.includes(t.id));
+}
+
+/**
+ * O X-Cliente-Id que o gateway escreve para os serviços: vem só da claim cliente_id do token
+ * (aqui, do usuário de demo). Um X-Cliente-Id enviado pelo navegador é descartado (ADR-0007).
+ */
+export function clienteIdOf(user: DemoUser): string | null {
+  return user.clienteId;
 }
 
 export function meOf(user: DemoUser): Me {

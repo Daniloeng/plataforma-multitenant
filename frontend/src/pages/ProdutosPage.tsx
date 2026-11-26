@@ -1,11 +1,14 @@
 import { useId, useState } from 'react';
 import { BUSCA_MAX, podeGerirCatalogo, type FiltroProdutos } from '../api/catalogo';
 import type { TenantDoUsuario } from '../api/me';
+import { podeComprar } from '../api/pedidos';
 import { useAuth } from '../auth/context';
 import { LoginPrompt } from '../components/auth/LoginPrompt';
+import { Carrinho } from '../components/pedidos/Carrinho';
 import { NovoProdutoForm } from '../components/produtos/NovoProdutoForm';
 import { ProdutoList } from '../components/produtos/ProdutoList';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import { carrinhoKey, useCarrinho } from '../hooks/useCarrinho';
 import { useProdutos } from '../hooks/useProdutos';
 import { PLANO_LABEL } from '../utils/format';
 
@@ -65,11 +68,23 @@ export function ProdutosPage() {
       key={auth.selectedTenant.id}
       tenant={auth.selectedTenant}
       gestor={podeGerirCatalogo(auth.me.papeis)}
+      usuario={auth.me.usuario}
+      comprador={podeComprar(auth.me.papeis, auth.me.clienteId)}
     />
   );
 }
 
-function Catalogo({ tenant, gestor }: { tenant: TenantDoUsuario; gestor: boolean }) {
+function Catalogo({
+  tenant,
+  gestor,
+  usuario,
+  comprador,
+}: {
+  tenant: TenantDoUsuario;
+  gestor: boolean;
+  usuario: string;
+  comprador: boolean;
+}) {
   const uid = useId();
   const [buscaTexto, setBuscaTexto] = useState('');
   const [situacao, setSituacao] = useState<Situacao>('todos');
@@ -79,6 +94,8 @@ function Catalogo({ tenant, gestor }: { tenant: TenantDoUsuario; gestor: boolean
     ativo: gestor ? ATIVO_POR_SITUACAO[situacao] : undefined,
   };
   const produtos = useProdutos(tenant.id, filtro);
+  // Um carrinho por tenant (e por usuário), no sessionStorage. Só compradores compram.
+  const carrinho = useCarrinho(carrinhoKey(usuario, tenant.id));
   const planoCheio =
     produtos.usados !== null &&
     produtos.limitePlano !== null &&
@@ -95,7 +112,9 @@ function Catalogo({ tenant, gestor }: { tenant: TenantDoUsuario; gestor: boolean
           <p className="muted catalogo-tenant__papel">
             {gestor
               ? 'Você pode cadastrar produtos, mudar preços, renomear e ativar ou desativar.'
-              : 'Somente leitura: compradores veem só os produtos ativos.'}
+              : comprador
+                ? 'Compradores veem só os produtos ativos e montam o pedido no carrinho.'
+                : 'Somente leitura: você vê só os produtos ativos.'}
           </p>
         </div>
         <PlanoUso
@@ -106,6 +125,8 @@ function Catalogo({ tenant, gestor }: { tenant: TenantDoUsuario; gestor: boolean
       </section>
 
       {gestor ? <NovoProdutoForm onCreated={produtos.added} planoCheio={planoCheio} /> : null}
+
+      {comprador ? <Carrinho carrinho={carrinho} /> : null}
 
       <div className="filters produtos__filtros" role="search" aria-label="Filtrar produtos">
         <div className="field-group produtos__busca">
@@ -141,6 +162,7 @@ function Catalogo({ tenant, gestor }: { tenant: TenantDoUsuario; gestor: boolean
         {...produtos}
         gestor={gestor}
         filtrado={Boolean(filtro.busca) || filtro.ativo !== undefined}
+        onAdicionar={comprador ? carrinho.adicionar : undefined}
       />
     </>
   );

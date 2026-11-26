@@ -4,7 +4,9 @@ info:
   version: 1.0.0
   description: >-
     Ciclo de vida do pedido. Um pedido nasce PENDENTE e muda de estado pelos eventos
-    de pagamento (saga coreografada).
+    de pagamento (saga coreografada). O preço de cada item vem da cópia local do catálogo
+    (eventos produto.alterado e preco.alterado), nunca do cliente: o corpo só traz produto e
+    quantidade.
 servers:
   - url: http://localhost:8083
 security:
@@ -28,15 +30,35 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/NovoPedido' }
+      description: >-
+        Só compradores (com cliente no token); tenant suspenso responde 403 `tenant-suspenso`. Repetir com a mesma Idempotency-Key e o mesmo corpo
+        devolve o pedido já criado (200, cabeçalho Idempotent-Replayed: true); a mesma chave com
+        outro corpo responde 409 `chave-reutilizada`. Produto inexistente, inativo ou ainda sem preço na cópia
+        local do catálogo responde 409 `produto-indisponivel`, com os ids na propriedade `produtos`.
       responses:
+        '200':
+          description: Repetição de uma criação já feita com a mesma chave.
+          headers:
+            Idempotent-Replayed:
+              description: Sempre "true" na repetição.
+              schema: { type: string, enum: ['true'] }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Pedido' }
         '201':
           description: Pedido criado.
+          headers:
+            Location:
+              description: Caminho do pedido criado (/api/v1/pedidos/{id}).
+              schema: { type: string }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Pedido' }
         '400': { $ref: '_comum.yaml#/components/responses/RequisicaoInvalida' }
+        '403': { $ref: '#/components/responses/SemPermissao' }
         '409': { $ref: '_comum.yaml#/components/responses/Conflito' }
         '429': { $ref: '_comum.yaml#/components/responses/LimiteExcedido' }
+        '503': { $ref: '#/components/responses/Indisponivel' }
     get:
       tags: [pedidos]
       operationId: listarPedidos
@@ -61,6 +83,8 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/Pedido' }
                   proximoCursor: { type: [string, 'null'] }
+        '400': { $ref: '_comum.yaml#/components/responses/RequisicaoInvalida' }
+        '403': { $ref: '#/components/responses/SemPermissao' }
   /api/v1/pedidos/{pedidoId}:
     parameters:
       - $ref: '_comum.yaml#/components/parameters/TenantId'
@@ -80,6 +104,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Pedido' }
+        '403': { $ref: '#/components/responses/SemPermissao' }
         '404': { $ref: '_comum.yaml#/components/responses/NaoEncontrado' }
   /api/v1/pedidos/{pedidoId}/cancelamento:
     parameters:
@@ -92,7 +117,11 @@ paths:
       tags: [pedidos]
       operationId: cancelarPedido
       summary: Cancela o pedido e publica pedido.cancelado (gera estorno se já capturado)
-      description: Comprador só cancela pedido do próprio cliente; o de outro cliente responde 404.
+      description: >-
+        Comprador cancela pedido do próprio cliente (o de outro cliente responde 404); gestor-tenant
+        cancela qualquer pedido do tenant (plataforma-admin também). O motivo registra quem cancelou:
+        SOLICITADO_PELO_CLIENTE ou CANCELADO_PELO_TENANT. Pedido já cancelado responde 409
+        `pedido-ja-cancelado`; quem repete um cancelamento pode tratar esse 409 como sucesso.
       parameters:
         - $ref: '_comum.yaml#/components/parameters/ClienteIdOpcional'
       responses:
@@ -101,13 +130,28 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Pedido' }
+        '403': { $ref: '#/components/responses/SemPermissao' }
         '404': { $ref: '_comum.yaml#/components/responses/NaoEncontrado' }
         '409': { $ref: '_comum.yaml#/components/responses/Conflito' }
 components:
   securitySchemes:
     jwt:
       $ref: '_comum.yaml#/components/securitySchemes/jwt'
+  responses:
+    Indisponivel:
+      description: O banco de dados não respondeu; tente de novo em instantes (`indisponivel`).
+      content:
+        application/problem+json:
+          schema: { $ref: '_comum.yaml#/components/schemas/Problema' }
+    SemPermissao:
+      description: O papel do usuário não permite a operação.
+      content:
+        application/problem+json:
+          schema: { $ref: '_comum.yaml#/components/schemas/Problema' }
   schemas:
+    MotivoCancelamento:
+      type: string
+      enum: [PAGAMENTO_RECUSADO, SOLICITADO_PELO_CLIENTE, EXPIRADO, OUTRO, CANCELADO_PELO_TENANT]
     StatusPedido:
       type: string
       enum: [PENDENTE, CONFIRMADO, CANCELADO]
@@ -117,6 +161,7 @@ components:
       properties:
         produtoId: { type: string }
         sku: { type: string, readOnly: true }
+        nome: { type: string, readOnly: true, description: Nome do produto no momento do pedido. }
         quantidade: { type: integer, minimum: 1, maximum: 10000 }
         precoUnitario:
           $ref: '_comum.yaml#/components/schemas/Dinheiro'
@@ -141,5 +186,9 @@ components:
           type: array
           items: { $ref: '#/components/schemas/ItemPedido' }
         total: { $ref: '_comum.yaml#/components/schemas/Dinheiro' }
+        motivoCancelamento:
+          oneOf:
+            - $ref: '#/components/schemas/MotivoCancelamento'
+            - type: 'null'
         criadoEm: { type: string, format: date-time }
         atualizadoEm: { type: string, format: date-time }

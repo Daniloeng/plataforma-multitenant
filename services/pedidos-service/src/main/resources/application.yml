@@ -1,0 +1,40 @@
+server:
+  port: 8083
+  shutdown: graceful
+
+spring:
+  application:
+    name: pedidos-service
+  threads:
+    virtual:
+      enabled: true
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+  data:
+    mongodb:
+      # Replica set de um nó: transações (pedido + outbox, efeito + deduplicação).
+      uri: ${MONGO_URI:mongodb://localhost:27019/pedidos?directConnection=true}
+  pulsar:
+    client:
+      service-url: ${PULSAR_URL:pulsar://localhost:6650}
+    admin:
+      # O consumidor busca o schema do escritor de cada evento pelo admin (EventDecoder).
+      service-url: ${PULSAR_ADMIN_URL:http://localhost:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,mongo
+
+plataforma:
+  # Contexto produtor (x-produtor) e prefixo das assinaturas: pedidos-produto-alterado, ...
+  service: pedidos

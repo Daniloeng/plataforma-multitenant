@@ -20,6 +20,9 @@ public class Routes {
         .route(
             "catalogo",
             r -> r.path("/api/v1/produtos", "/api/v1/produtos/**").uri(props.services().catalogo()))
+        .route(
+            "pedidos",
+            r -> r.path("/api/v1/pedidos", "/api/v1/pedidos/**").uri(props.services().pedidos()))
         .build();
   }
 }

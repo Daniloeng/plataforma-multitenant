@@ -10,7 +10,7 @@ ferramentas gratuitas.
 
 **Demo:** <https://daniloeng.github.io/plataforma-multitenant/> (frontend em modo demo, API simulada)
 
-## Estado atual: Dia 5 de 22
+## Estado atual: Dia 6 de 22
 
 | Componente | Situação |
 |---|---|
@@ -19,10 +19,10 @@ ferramentas gratuitas.
 | Tenants | ✅ Ativo: cadastro em `/api/v1/tenants` (só `plataforma-admin`), publica `tenant.criado` e `tenant.alterado` |
 | Biblioteca comum | ✅ `platform-spring`: contexto de tenant, outbox transacional, consumidor padrão de eventos (`EventSubscriber`), identidade do gateway (`Caller`) |
 | Catálogo | ✅ Ativo: produtos e preços por tenant em `/api/v1/produtos`, limite de produtos por plano, publica `produto.alterado` e `preco.alterado` |
-| Pedidos | Dia 6 |
+| Pedidos | ✅ Ativo: `/api/v1/pedidos` com preço da cópia local do catálogo, `Idempotency-Key`, cancelamento; publica `pedido.criado` e `pedido.cancelado` |
 | Pagamentos | Dia 7 |
-| Contratos | 10 eventos Avro, 5 APIs OpenAPI, 10 ADRs ([arquitetura](docs/arquitetura/event-storming.md)) |
-| Cobertura (linhas) | `platform-core` 100% · `contracts` 100% · `platform-spring` 91,1% · `gateway` 91,2% · `catalogo-service` 94,2% · `tenant-service` 97,4% · `status-service` 98,7% · frontend 99,9% (mínimo exigido: 80%) |
+| Contratos | 10 eventos Avro, 5 APIs OpenAPI, 11 ADRs ([arquitetura](docs/arquitetura/event-storming.md)) |
+| Cobertura (linhas) | `platform-core` 100% · `contracts` 100% · `platform-spring` 91,1% · `gateway` 91,2% · `catalogo-service` 94,2% · `pedidos-service` 94,1% · `tenant-service` 97,4% · `status-service` 98,7% · frontend 99,9% (mínimo exigido: 80%) |
 
 ## Arquitetura (visão alvo)
 
@@ -46,7 +46,7 @@ ferramentas gratuitas.
 Pré-requisitos: Java 21, Maven 3.9, Node 22, Docker.
 
 ```bash
-# Infraestrutura + serviços (4 MongoDB, Pulsar, Keycloak, gateway, tenant-service, status-service)
+# Infraestrutura + serviços (4 MongoDB, Pulsar, Keycloak, gateway, tenants, catálogo, pedidos, status)
 docker compose -f infra/docker-compose.yml up -d --build --wait
 infra/seed.sh                      # cria os tenants acme, globex e initech e produtos de exemplo
 curl -s localhost:8000/api/status  # público
@@ -82,7 +82,8 @@ cd frontend && npm run test:coverage   # Vitest, falha abaixo de 80%
 
 O CI (GitHub Actions) roda backend, frontend e um teste do **Compose inteiro**: sobe todos os
 containers, exige `UP` em `/api/status` pelo gateway, cria tenants com token do Keycloak, confere
-o `tenant.criado` no Pulsar, o `/api/v1/me`, os 403 de papel e de tenant e o limite do plano. Nada entra na `main` com CI vermelho.
+o `tenant.criado` no Pulsar, o `/api/v1/me`, os 403 de papel e de tenant, o limite do plano e
+uma compra com repetição pela mesma `Idempotency-Key`. Nada entra na `main` com CI vermelho.
 
 ## Estrutura
 
@@ -93,6 +94,7 @@ libs/platform-spring/     base Spring comum: tenant por requisição, outbox, id
 services/gateway/         porta de entrada: JWT, tenant, rate limit e rotas (porta 8000)
 services/tenant-service/  cadastro de tenants (porta 8081, só na rede interna)
 services/catalogo-service/ produtos e preços por tenant (porta 8082, só na rede interna)
+services/pedidos-service/ pedidos B2B com idempotência (porta 8083, só na rede interna)
 services/status-service/  saúde da plataforma (porta 8090)
 frontend/                 React + Vite + TypeScript, publicado no GitHub Pages
 infra/                    Docker Compose, realm do Keycloak, scripts do Pulsar e seed
@@ -107,6 +109,22 @@ CLAUDE.md                 regras e comandos para o Claude Code
 
 Cada dia equivale a ~10 h de trabalho executado pelo Claude Code e revisado pelo Danilo, e termina
 com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
+
+### Dia 6: pedidos com outbox e idempotência · [detalhes](docs/dias/06.md)
+
+- **Feito:** `pedidos-service` com `/api/v1/pedidos` (criar, listar, detalhar, cancelar); preço
+  e nome vindos da cópia local do catálogo, montada pelos eventos `produto.alterado` e
+  `preco.alterado`; `Idempotency-Key` obrigatória com hash do corpo; comprador vê só os pedidos do
+  próprio cliente; `pedido.criado` e `pedido.cancelado` pelo outbox; ADR-0011. No frontend, o
+  **carrinho** na aba Produtos e a aba **Pedidos**.
+- **Por quê:** o pedido é o começo da saga com dinheiro. Repetir um POST não pode gerar dois
+  pedidos (nem duas cobranças no Dia 7), e o preço não pode vir do navegador.
+- **Como testar:** entre como `bruno`, monte o carrinho em acme e faça o pedido; entre como `ana`
+  e veja os pedidos de todos os clientes. Os comandos com `curl` estão no diário.
+- **Cobertura:** `pedidos-service` 94%, frontend 99,9% de linhas.
+- **Claude Code:** a assinatura de eventos do PR do Dia 5 trouxe a falha do CI de volta à sessão,
+  que corrigiu um conflito de transação real antes do merge; frontend feito por subagente em
+  background; revisão do `arquiteto`.
 
 ### Dia 5: catálogo de produtos por tenant · [detalhes](docs/dias/05.md)
 
@@ -190,7 +208,7 @@ com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
 | 3 ✅ | Biblioteca comum (tenant context, outbox, idempotência) e Tenant Service | Criar e listar tenants |
 | 4 ✅ | Keycloak, Spring Cloud Gateway, rate limit por tenant | Login e troca de tenant |
 | 5 ✅ | Catálogo | Produtos por tenant |
-| 6 | Pedidos com outbox | Carrinho e pedido |
+| 6 ✅ | Pedidos com outbox | Carrinho e pedido |
 | 7 | Pagamentos: autorização, captura, ledger | Pagamento e extrato |
 | 8 | Saga completa | Linha do tempo do pedido (SSE) |
 | 9 | Níveis Pool, Bridge e Silo | Selo e promoção de nível |

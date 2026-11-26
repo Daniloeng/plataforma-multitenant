@@ -30,7 +30,7 @@ class TenantCatalogLoaderTest {
             null,
             null,
             null,
-            new GatewayProperties.Services(tenants, null, null),
+            new GatewayProperties.Services(tenants, null, null, null),
             null,
             null,
             null);

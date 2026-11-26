@@ -125,14 +125,14 @@ describe('ProdutosPage — acesso', () => {
 });
 
 describe('ProdutosPage — comprador', () => {
-  it('bruno vê só os ativos, sem formulário, sem filtro de situação e sem ações', async () => {
+  it('bruno vê só os ativos, sem formulário, sem filtro de situação e sem ações de gestor', async () => {
     await abrir('Bruno Lima');
     await tabela();
     expect(linhas()).toHaveLength(9);
     for (const row of linhas()) expect(within(row).getByText('Ativo')).toBeVisible();
     expect(screen.queryByRole('row', { name: 'ESP-ALG-500' })).not.toBeInTheDocument();
     expect(
-      screen.getByText(/Somente leitura: compradores veem só os produtos ativos/),
+      screen.getByText(/Compradores veem só os produtos ativos e montam o pedido no carrinho/),
     ).toBeVisible();
     expect(screen.queryByRole('form', { name: 'Novo produto' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Situação')).not.toBeInTheDocument();

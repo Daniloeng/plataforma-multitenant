@@ -5,6 +5,7 @@ import com.mongodb.MongoException;
 import java.net.URI;
 import java.util.stream.Collectors;
 import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.TransientDataAccessException;
@@ -81,8 +82,18 @@ public class ApiErrors extends ResponseEntityExceptionHandler {
    * WriteConflict (rótulo TransientTransactionError), que o Spring não traduz para
    * DuplicateKeyException nem OptimisticLockingFailureException. Para o cliente é o mesmo 409.
    */
-  @ExceptionHandler({TransientDataAccessException.class, UncategorizedMongoDbException.class})
+  // O WriteConflict (código 112) chega como DataIntegrityViolationException em gravações dentro de
+  // transação; a DuplicateKeyException, subclasse dela, tem handler próprio e mais específico.
+  @ExceptionHandler({
+    TransientDataAccessException.class,
+    UncategorizedMongoDbException.class,
+    DataIntegrityViolationException.class
+  })
   ProblemDetail transientConflict(DataAccessException e) {
+    if (e instanceof DataIntegrityViolationException && !isWriteConflict(e)) {
+      // Violação de dado (ex.: validação do documento) não é indisponibilidade: segue como 500.
+      throw e;
+    }
     if (!isWriteConflict(e)) {
       // Timeout ou banco indisponível não é edição concorrente: 503, para o cliente tentar depois.
       logger.warn("Falha de acesso ao MongoDB", e);
@@ -99,11 +110,13 @@ public class ApiErrors extends ResponseEntityExceptionHandler {
         "Outra requisição alterou o mesmo produto ao mesmo tempo; repita a operação.");
   }
 
+  static final int WRITE_CONFLICT = 112;
+
   static boolean isWriteConflict(Throwable e) {
     for (Throwable t = e; t != null; t = t.getCause()) {
-      if (t instanceof MongoException m
-          && (m.hasErrorLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL)
-              || m.getCode() == 112)) {
+      // Só o WriteConflict (112): o rótulo TransientTransactionError também marca queda de rede e
+      // troca de primário, que são indisponibilidade (503), não edição concorrente.
+      if (t instanceof MongoException m && m.getCode() == WRITE_CONFLICT) {
         return true;
       }
     }

@@ -53,11 +53,18 @@
           "PAGAMENTO_RECUSADO",
           "SOLICITADO_PELO_CLIENTE",
           "EXPIRADO",
-          "OUTRO"
+          "OUTRO",
+          "CANCELADO_PELO_TENANT"
         ],
         "default": "OUTRO"
       },
       "doc": "Por que o pedido foi cancelado. Símbolo desconhecido para um consumidor antigo vira OUTRO."
+    },
+    {
+      "name": "versao",
+      "type": "long",
+      "default": 0,
+      "doc": "Versão do pedido (@Version do documento). Consumidores ignoram versão menor ou igual à última recebida neste tópico para o pedido."
     }
   ]
 }

@@ -33,6 +33,8 @@ final class BackendStub implements AutoCloseable {
             lastHeaders.put(h, v == null ? "<ausente>" : v);
           }
           lastHeaders.put("path", exchange.getRequestURI().toString());
+          String chave = exchange.getRequestHeaders().getFirst("Idempotency-Key");
+          lastHeaders.put("Idempotency-Key", chave == null ? "<ausente>" : chave);
           String body =
               exchange.getRequestURI().getPath().equals("/api/v1/tenants")
                   ? tenantsPage

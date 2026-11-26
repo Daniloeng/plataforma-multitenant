@@ -6,6 +6,7 @@ import { server } from '../mocks/server';
 import { resetRateLimits } from '../mocks/gateway';
 import { resetTenantStore } from '../mocks/tenants';
 import { resetCatalogoStore } from '../mocks/catalogo';
+import { resetPedidosStore } from '../mocks/pedidos';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => {
@@ -15,6 +16,8 @@ afterEach(() => {
   resetTenantStore();
   // ... e o catálogo de produtos de cada tenant.
   resetCatalogoStore();
+  // ... e os pedidos (com as chaves de idempotência).
+  resetPedidosStore();
   // Sessão (token de demo, tenant escolhido) e baldes do rate limit também recomeçam.
   resetRateLimits();
   window.sessionStorage.clear();
