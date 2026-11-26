@@ -141,7 +141,7 @@ describe('App', () => {
     await screen.findByTestId('overall-status');
     expect(screen.getByRole('heading', { name: 'Microsserviços' })).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Progresso' })).toBeVisible();
-    expect(screen.getByText('Dia 4 de 22')).toBeVisible();
+    expect(screen.getByText('Dia 5 de 22')).toBeVisible();
   });
 
   it('mostra o selo de demo apenas no modo demo', async () => {
@@ -230,7 +230,7 @@ describe('App', () => {
       within(nav)
         .getAllByRole('link')
         .map((a) => a.textContent),
-    ).toEqual(['Status', 'Tenants', 'Arquitetura', 'Minha conta']);
+    ).toEqual(['Status', 'Tenants', 'Produtos', 'Arquitetura', 'Minha conta']);
     const tenants = within(nav).getByRole('link', { name: 'Tenants' });
     expect(tenants).toHaveAttribute('href', '#/tenants');
 

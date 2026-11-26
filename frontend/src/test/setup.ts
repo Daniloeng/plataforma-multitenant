@@ -5,6 +5,7 @@ import { setSessionProvider } from '../api/http';
 import { server } from '../mocks/server';
 import { resetRateLimits } from '../mocks/gateway';
 import { resetTenantStore } from '../mocks/tenants';
+import { resetCatalogoStore } from '../mocks/catalogo';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => {
@@ -12,6 +13,8 @@ afterEach(() => {
   server.resetHandlers();
   // Cada teste começa com os tenants iniciais do modo demo.
   resetTenantStore();
+  // ... e o catálogo de produtos de cada tenant.
+  resetCatalogoStore();
   // Sessão (token de demo, tenant escolhido) e baldes do rate limit também recomeçam.
   resetRateLimits();
   window.sessionStorage.clear();

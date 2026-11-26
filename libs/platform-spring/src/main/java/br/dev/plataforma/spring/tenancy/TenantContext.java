@@ -53,6 +53,17 @@ public final class TenantContext {
     }
   }
 
+  /** Versão sem exceção checada de {@link #callAs}, sem cliente (ex.: processar um evento). */
+  public static <T> T callAsUnchecked(TenantId tenantId, java.util.function.Supplier<T> action) {
+    try {
+      return callAs(tenantId, null, action::get);
+    } catch (RuntimeException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new IllegalStateException(e);
+    }
+  }
+
   /** Versão sem retorno e sem exceção checada de {@link #callAs}. */
   public static void runAs(TenantId tenantId, Runnable action) {
     try {

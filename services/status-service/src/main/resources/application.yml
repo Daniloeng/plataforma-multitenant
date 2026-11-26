@@ -46,3 +46,5 @@ plataforma:
         health-path: health/ready
       - name: tenant-service
         url: ${TENANT_SERVICE_URL:http://localhost:8081}
+      - name: catalogo-service
+        url: ${CATALOGO_SERVICE_URL:http://localhost:8082}

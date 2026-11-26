@@ -58,6 +58,12 @@
       "type": "string",
       "default": "BRL",
       "doc": "Código ISO 4217."
+    },
+    {
+      "name": "versao",
+      "type": "long",
+      "default": 0,
+      "doc": "Versão do produto (@Version do documento). Consumidores ignoram versão menor ou igual à que já têm: reentregas e tópicos diferentes podem chegar fora de ordem."
     }
   ]
 }

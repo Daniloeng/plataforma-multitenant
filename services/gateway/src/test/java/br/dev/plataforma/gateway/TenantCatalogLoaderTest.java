@@ -27,7 +27,13 @@ class TenantCatalogLoaderTest {
   private TenantCatalogLoader loader(TenantDirectory directory, EventDecoder decoder, URI tenants) {
     var props =
         new GatewayProperties(
-            null, null, null, new GatewayProperties.Services(tenants, null), null, null, null);
+            null,
+            null,
+            null,
+            new GatewayProperties.Services(tenants, null, null),
+            null,
+            null,
+            null);
     return new TenantCatalogLoader(
         directory,
         mock(PulsarClient.class),

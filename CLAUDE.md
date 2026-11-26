@@ -17,9 +17,10 @@ multi-tenant de pedidos B2B + pagamentos em microsserviços. O plano de 22 dias 
 ```
 libs/platform-core/       tipos compartilhados (TenantId, IsolationLevel), sem Spring
 libs/contracts/           contratos: eventos Avro (gera classes Java) e OpenAPI; EventCatalog
-libs/platform-spring/     autoconfiguração comum: TenantContext/filtro X-Tenant-Id, TenantGuard, Outbox + relay, IdempotentConsumer, EventDecoder
+libs/platform-spring/     autoconfiguração comum: TenantContext/filtro X-Tenant-Id, TenantGuard, Outbox + relay, IdempotentConsumer, EventDecoder, EventSubscriber, Caller
 services/gateway/         Spring Cloud Gateway (porta 8000): JWT do Keycloak, tenant do token, rate limit por plano, /api/v1/me
 services/tenant-service/  cadastro de tenants, /api/v1/tenants (porta 8081, só plataforma-admin); publica tenant.* pelo outbox
+services/catalogo-service/ produtos por tenant, /api/v1/produtos (porta 8082); publica produto.alterado e preco.alterado; consome tenant.*
 services/status-service/  saúde de MongoDB x4, Pulsar e serviços em GET /api/status (porta 8090)
 frontend/                 React + Vite + TS; modo demo com MSW (GitHub Pages)
 infra/                    Docker Compose (MongoDB por serviço, Pulsar, Keycloak), keycloak/realm-plataforma.json, seed.sh
@@ -56,12 +57,16 @@ no host no Compose e entra no `status-service`.
 - **Multi-tenant**: o tenant vem só do cabeçalho `X-Tenant-Id` verificado pelo gateway contra a
   claim `tenants` do token (ADR-0009), nunca do corpo da requisição. O cliente B2B vem de
   `X-Cliente-Id`, o usuário de `X-Usuario` e os papéis de `X-Papeis`, todos escritos pelo gateway.
-  Use `TenantId` (valida o formato) em vez de `String`.
+  Use `TenantId` (valida o formato) em vez de `String`. Nos controllers, receba um `Caller`
+  (usuário e papéis) e chame `caller.requireAnyRole(...)` antes de escrever; `ForbiddenException`
+  vira 403 `acesso-negado` no `ApiErrors` do serviço.
 - **Banco por serviço**: um serviço nunca lê o MongoDB de outro; integração só por eventos Pulsar
   ou API.
 - **Publicar evento só pelo outbox**: `Outbox.append(evento, aggregateId)` dentro do mesmo
-  `@Transactional` da mudança de estado; nunca chamar o Pulsar direto. Consumidor usa
-  `IdempotentConsumer.processOnce` na transação do efeito. Dentro de transação MongoDB, consulte
+  `@Transactional` da mudança de estado; nunca chamar o Pulsar direto. Consumidor se registra no
+  `EventSubscriber.on(Evento.class, "nome", efeito)` (ADR-0010), que já faz assinatura durável
+  Key_Shared, schema do escritor, transação, `IdempotentConsumer` e dead letter. Dado de outro
+  serviço vira cópia local mínima com `versao` (ignore versão menor ou igual). Dentro de transação MongoDB, consulte
   antes de inserir: chave duplicada aborta a transação inteira.
 - **Documento de negócio implementa `TenantOwned`** e consultas usam `TenantQueries.scoped(...)`.
 - **Eventos**: um `.avsc` por evento em `libs/contracts/src/main/avro/<contexto>/`, com

@@ -14,6 +14,7 @@ describe('useHashRoute', () => {
     ['#/ARQUITETURA', 'arquitetura'],
     ['#/tenants', 'tenants'],
     ['#/Tenants/', 'tenants'],
+    ['#/produtos', 'produtos'],
     ['#/outra', 'status'],
   ])('%s → %s', (hash, route) => {
     expect(parseHash(hash)).toBe(route);

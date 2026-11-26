@@ -10,19 +10,19 @@ ferramentas gratuitas.
 
 **Demo:** <https://daniloeng.github.io/plataforma-multitenant/> (frontend em modo demo, API simulada)
 
-## Estado atual: Dia 4 de 22
+## Estado atual: Dia 5 de 22
 
 | Componente | Situação |
 |---|---|
 | `status-service` | ✅ Ativo: saúde de MongoDB x4, Pulsar e serviços em `GET /api/status` |
 | Gateway + Keycloak | ✅ Ativo: única entrada (porta 8000), login OIDC, troca de tenant, rate limit por plano |
 | Tenants | ✅ Ativo: cadastro em `/api/v1/tenants` (só `plataforma-admin`), publica `tenant.criado` e `tenant.alterado` |
-| Biblioteca comum | ✅ `platform-spring`: contexto de tenant, outbox transacional, consumo idempotente |
-| Catálogo | Dia 5 |
+| Biblioteca comum | ✅ `platform-spring`: contexto de tenant, outbox transacional, consumidor padrão de eventos (`EventSubscriber`), identidade do gateway (`Caller`) |
+| Catálogo | ✅ Ativo: produtos e preços por tenant em `/api/v1/produtos`, limite de produtos por plano, publica `produto.alterado` e `preco.alterado` |
 | Pedidos | Dia 6 |
 | Pagamentos | Dia 7 |
-| Contratos | 10 eventos Avro, 5 APIs OpenAPI, 9 ADRs ([arquitetura](docs/arquitetura/event-storming.md)) |
-| Cobertura (linhas) | `platform-core` 100% · `contracts` 100% · `platform-spring` 91,8% · `gateway` 91,1% · `tenant-service` 97,4% · `status-service` 98,7% · frontend 99,9% (mínimo exigido: 80%) |
+| Contratos | 10 eventos Avro, 5 APIs OpenAPI, 10 ADRs ([arquitetura](docs/arquitetura/event-storming.md)) |
+| Cobertura (linhas) | `platform-core` 100% · `contracts` 100% · `platform-spring` 91,1% · `gateway` 91,2% · `catalogo-service` 94,2% · `tenant-service` 97,4% · `status-service` 98,7% · frontend 99,9% (mínimo exigido: 80%) |
 
 ## Arquitetura (visão alvo)
 
@@ -48,7 +48,7 @@ Pré-requisitos: Java 21, Maven 3.9, Node 22, Docker.
 ```bash
 # Infraestrutura + serviços (4 MongoDB, Pulsar, Keycloak, gateway, tenant-service, status-service)
 docker compose -f infra/docker-compose.yml up -d --build --wait
-infra/seed.sh                      # cria os tenants acme, globex e initech pelo gateway
+infra/seed.sh                      # cria os tenants acme, globex e initech e produtos de exemplo
 curl -s localhost:8000/api/status  # público
 
 # Token de um usuário de demonstração (senha123: admin, ana, bruno) e chamada pelo gateway
@@ -92,6 +92,7 @@ libs/contracts/           eventos Avro, APIs OpenAPI e catálogo de eventos
 libs/platform-spring/     base Spring comum: tenant por requisição, outbox, idempotência
 services/gateway/         porta de entrada: JWT, tenant, rate limit e rotas (porta 8000)
 services/tenant-service/  cadastro de tenants (porta 8081, só na rede interna)
+services/catalogo-service/ produtos e preços por tenant (porta 8082, só na rede interna)
 services/status-service/  saúde da plataforma (porta 8090)
 frontend/                 React + Vite + TypeScript, publicado no GitHub Pages
 infra/                    Docker Compose, realm do Keycloak, scripts do Pulsar e seed
@@ -106,6 +107,20 @@ CLAUDE.md                 regras e comandos para o Claude Code
 
 Cada dia equivale a ~10 h de trabalho executado pelo Claude Code e revisado pelo Danilo, e termina
 com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
+
+### Dia 5: catálogo de produtos por tenant · [detalhes](docs/dias/05.md)
+
+- **Feito:** `catalogo-service` com `/api/v1/produtos` (cadastro, busca, paginação, preço, ativar
+  e desativar), SKU único por tenant, comprador vê só produtos ativos e só gestor altera; limite
+  de produtos por plano aprendido pelos eventos de tenant; `EventSubscriber` e `Caller` na
+  biblioteca comum; rota no gateway; ADR-0010. No frontend, a aba **Produtos**.
+- **Por quê:** é o primeiro serviço que consome eventos de outro, e o padrão de consumo (schema
+  do escritor, idempotência, dead letter) serve aos Pedidos e Pagamentos.
+- **Como testar:** `infra/seed.sh` cria produtos em acme e globex; entre como `ana` e veja a aba
+  Produtos trocando de tenant, ou como `bruno` para ver o catálogo só de leitura.
+- **Claude Code:** frontend em subagente de background a partir do contrato, revisão do
+  `arquiteto`, `/code-review` e a skill `adr`.
+- **Cobertura:** `catalogo-service` 94,2%, `platform-spring` 91,1%, frontend 99,97% de linhas.
 
 ### Dia 4: gateway, Keycloak e rate limit por tenant · [detalhes](docs/dias/04.md)
 
@@ -174,7 +189,7 @@ com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
 | 2 ✅ | Event storming, contratos Avro e OpenAPI, ADRs | Arquitetura e catálogo de eventos |
 | 3 ✅ | Biblioteca comum (tenant context, outbox, idempotência) e Tenant Service | Criar e listar tenants |
 | 4 ✅ | Keycloak, Spring Cloud Gateway, rate limit por tenant | Login e troca de tenant |
-| 5 | Catálogo | Produtos por tenant |
+| 5 ✅ | Catálogo | Produtos por tenant |
 | 6 | Pedidos com outbox | Carrinho e pedido |
 | 7 | Pagamentos: autorização, captura, ledger | Pagamento e extrato |
 | 8 | Saga completa | Linha do tempo do pedido (SSE) |

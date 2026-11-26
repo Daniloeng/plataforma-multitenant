@@ -1,19 +1,21 @@
-# Frontend — Status, Tenants, Arquitetura e Minha conta
+# Frontend — Status, Tenants, Produtos, Arquitetura e Minha conta
 
-Frontend da plataforma multi-tenant (pedidos B2B + pagamentos), com quatro páginas em abas e, no
+Frontend da plataforma multi-tenant (pedidos B2B + pagamentos), com cinco páginas em abas e, no
 cabeçalho, login (Keycloak) e troca de tenant:
 
 - **Status** (`#/`): status do `status-service` (`GET /api/status`, atualizado a cada 10 s), o
   roadmap dos microsserviços e o progresso do estudo.
 - **Tenants** (`#/tenants`): administração do catálogo de tenants — cria, lista, suspende e
   reativa tenants pelo Tenant Service (`/api/v1/tenants`). Só para o papel `plataforma-admin`.
+- **Produtos** (`#/produtos`): catálogo do tenant escolhido no cabeçalho (`/api/v1/produtos`).
+  Gestores cadastram, mudam preço, renomeiam e ativam/desativam; compradores só consultam.
 - **Arquitetura** (`#/arquitetura`): diagramas do event storming, catálogo de eventos, matriz
   produtor × consumidor e lista de ADRs — tudo lido **em build time** do próprio repositório.
 
 - **Minha conta** (`#/conta`): o que o gateway sabe do usuário (`GET /api/v1/me`) — papéis,
   tenants, plano e limite de cada um — e o botão "Testar limite".
 
-O roteamento é por hash (`#/`, `#/tenants`, `#/arquitetura` e `#/conta`), sem biblioteca de rotas,
+O roteamento é por hash (`#/`, `#/tenants`, `#/produtos`, `#/arquitetura` e `#/conta`), sem biblioteca de rotas,
 para funcionar no GitHub Pages (que não reescreve rotas para o `index.html`).
 
 Stack: React 19 + Vite 7 + TypeScript, testes com Vitest + Testing Library + MSW. Requer Node 22+.
@@ -77,8 +79,11 @@ simulados. A página exibe o selo "Modo demo (API simulada)".
   `/api/v1/tenants` para quem não é `plataforma-admin` e para `X-Tenant-Id` de outro tenant; 403
   (`tenant-suspenso`) para tenant suspenso; rate limit por tenant em `/api/v1/me` (token bucket em
   memória, conforme o plano) com 429 + `Retry-After`.
-- `/api/status` (`src/mocks/handlers.ts`), público: MongoDB x4, Pulsar, `tenant-service`, `gateway`
-  e `keycloak` (type `SERVICE`) no ar, latências variando.
+- `/api/status` (`src/mocks/handlers.ts`), público: MongoDB x4, Pulsar, `tenant-service`,
+  `catalogo-service`, `gateway` e `keycloak` (type `SERVICE`) no ar, latências variando.
+- `/api/v1/produtos` (`src/mocks/catalogo.ts`): catálogo em memória por tenant, atrás do gateway
+  simulado (token e `X-Tenant-Id` obrigatórios; 403 para comprador escrevendo). Veja
+  [Página Produtos](#página-produtos).
 - `/api/v1/tenants` e `/api/v1/tenants/:id` (`src/mocks/tenants.ts`): store em memória
   pré-populado com 5 tenants fictícios (Pool, Bridge e Silo), com as mesmas regras do contrato —
   400 em Problem Details (`application/problem+json`) para dados inválidos, 409 para id repetido,
@@ -114,6 +119,35 @@ Consome o contrato `libs/contracts/src/main/resources/openapi/tenants.yaml` (cli
   sem corpo, o código HTTP.
 - Datas em pt-BR no fuso `America/Sao_Paulo`, como na página Status.
 - Se a API estiver inacessível, a página explica como subir o tenant-service ou usar o modo demo.
+
+## Página Produtos
+
+Consome `libs/contracts/src/main/resources/openapi/catalogo.yaml` (cliente, tipos e validação em
+`src/api/catalogo.ts`). Exige login e um tenant selecionado; trocar de tenant remonta a página e
+recarrega a lista.
+
+| Ação               | Chamada                                                        | Quem           |
+| ------------------ | -------------------------------------------------------------- | -------------- |
+| Listar             | `GET api/v1/produtos?limite=20&cursor=…&busca=…&ativo=…`       | todos          |
+| Criar              | `POST api/v1/produtos` → 201                                   | gestor / admin |
+| Renomear, situação | `PATCH api/v1/produtos/{id}` com `{ "nome" }` ou `{ "ativo" }` | gestor / admin |
+| Preço              | `PUT api/v1/produtos/{id}/preco` com `{ "centavos", "moeda" }` | gestor / admin |
+
+- **Lista**: "Carregar mais" pelo `proximoCursor`, busca por nome ou SKU com debounce de 300 ms,
+  filtro de situação (Todos/Ativos/Inativos) só para gestores, preço em R$ com
+  `Intl.NumberFormat('pt-BR')` a partir dos centavos e a barra "usados de limitePlano produtos do
+  plano" (vermelha no limite).
+- **Preço digitado em reais** (`reaisParaCentavos`): "12,90", "R$ 1.234,5", "12.9" e "1.234"
+  (milhar) viram centavos só com inteiros, sem ponto flutuante; mais de duas casas, negativo ou
+  texto inválido mostram erro no campo.
+- **Erros** em Problem Details mostram o `detail`. `sku-duplicado` (409) marca o campo SKU;
+  `limite-do-plano` (409) explica que o limite conta ativos e inativos.
+- **Comprador** (`bruno`): só leitura, sem formulário, filtro ou ações; vê só os ativos.
+- **Modo demo**: 8 a 12 produtos B2B por tenant (alimentos, limpeza, farmácia, metalurgia),
+  ordenados por SKU (cursor = id do último item), limite por plano (Gratuito 20, Profissional 500,
+  Empresarial 10.000, lido do plano atual do tenant), 409 para SKU repetido no tenant e no limite.
+  A `ceramica-paraiba` (Gratuito, suspensa) tem 19 produtos: reative-a como admin, entre de novo e
+  cadastre dois produtos para ver o `limite-do-plano`.
 
 ## Página Arquitetura
 

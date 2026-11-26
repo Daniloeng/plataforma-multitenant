@@ -1105,7 +1105,7 @@ summary:focus-visible {
     right: auto;
   }
 
-  /* Quatro abas numa linha em 375 px; se não couber, a faixa rola (a página não). */
+  /* Abas numa linha em 375 px; com cinco, a faixa rola na horizontal (a página não). */
   .tabs {
     gap: 0;
     overflow-x: auto;
@@ -1115,5 +1115,123 @@ summary:focus-visible {
     padding: 8px 7px;
     font-size: 0.95rem;
     white-space: nowrap;
+  }
+}
+
+/* ---- Produtos: catálogo do tenant (Dia 5) ---- */
+
+.catalogo-tenant {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 12px 24px;
+  align-items: center;
+}
+
+.catalogo-tenant p {
+  margin: 0;
+}
+
+.catalogo-tenant__nome {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.catalogo-tenant__papel {
+  font-size: 0.88rem;
+}
+
+.plano-uso .progress__label {
+  gap: 12px;
+  font-size: 0.9rem;
+}
+
+.progress__bar--cheio {
+  background: var(--down);
+}
+
+.alert--warn {
+  border-color: var(--degraded);
+  background: var(--degraded-bg);
+  margin: 0 0 12px;
+}
+
+.produtos__filtros {
+  align-items: flex-end;
+  gap: 12px 16px;
+  margin-top: 20px;
+}
+
+.produtos__filtros .field-group {
+  flex: 0 1 180px;
+}
+
+.produtos__filtros .produtos__busca {
+  flex: 1 1 260px;
+}
+
+.produtos__total {
+  margin: -4px 0 8px;
+  font-size: 0.88rem;
+}
+
+.produtos__preco {
+  white-space: nowrap;
+}
+
+.produtos__inativo .tenants__nome,
+.produtos__inativo .produtos__preco {
+  color: var(--muted);
+}
+
+.produtos__acoes {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+@media (min-width: 721px) {
+  .produtos__acoes {
+    display: table-cell;
+  }
+
+  .produtos__acoes .button + .button {
+    margin-left: 6px;
+  }
+}
+
+.inline-edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: normal;
+}
+
+.inline-edit .input {
+  min-height: 34px;
+  padding: 4px 8px;
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.inline-edit .inline-edit__preco {
+  flex: 0 1 110px;
+}
+
+.inline-edit__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.inline-edit .field-error {
+  flex-basis: 100%;
+}
+
+@media (max-width: 720px) {
+  .tenants td .inline-edit {
+    justify-content: flex-end;
+    flex: 1 1 auto;
   }
 }

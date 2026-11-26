@@ -12,12 +12,14 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param tenancy regras do cabeçalho de tenant
  * @param outbox publicação de eventos
  * @param idempotency retenção dos registros de deduplicação e do outbox publicado
+ * @param events consumo de eventos ({@code EventSubscriber})
  */
 @ConfigurationProperties("plataforma")
 public record PlatformProperties(
-    String service, Tenancy tenancy, OutboxProps outbox, Idempotency idempotency) {
+    String service, Tenancy tenancy, OutboxProps outbox, Idempotency idempotency, Events events) {
 
   public PlatformProperties {
+    events = events == null ? new Events(0) : events;
     tenancy = tenancy == null ? new Tenancy(null, null) : tenancy;
     outbox = outbox == null ? new OutboxProps(null, null, null, 0) : outbox;
     idempotency = idempotency == null ? new Idempotency(null) : idempotency;
@@ -47,6 +49,15 @@ public record PlatformProperties(
       interval = interval == null ? Duration.ofMillis(200) : interval;
       sendTimeout = sendTimeout == null ? Duration.ofSeconds(5) : sendTimeout;
       batchSize = batchSize <= 0 ? 100 : batchSize;
+    }
+  }
+
+  /**
+   * @param maxRedeliveries tentativas antes de mandar a mensagem para o dead letter (padrão: 10)
+   */
+  public record Events(int maxRedeliveries) {
+    public Events {
+      maxRedeliveries = maxRedeliveries <= 0 ? 10 : maxRedeliveries;
     }
   }
 
