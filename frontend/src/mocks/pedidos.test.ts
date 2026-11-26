@@ -3,10 +3,19 @@ import { apiUrl } from '../api/http';
 import { resetCatalogoStore, catalogoSnapshot } from './catalogo';
 import { clienteIdOf } from './gateway';
 import { findDemoUser } from '../auth/demoUsers';
+import { SseParser, type MensagemSse } from '../api/sse';
+import { COBRANCA_ATRASO_MS } from './pagamentos';
 import {
+  LINHA_DO_TEMPO_PING_MS,
+  LINHA_DO_TEMPO_TIMEOUT_MS,
+  LINHA_DO_TEMPO_VERIFICACAO_MS,
+  MOTIVO_RECUSA_LIMITE,
+  aplicarEstorno,
   aplicarPagamento,
   assinarPedidos,
   hashCorpo,
+  linhasDoTempoAbertas,
+  mensagemPedido,
   pedidosSnapshot,
   resetPedidosStore,
 } from './pedidos';
@@ -477,5 +486,303 @@ describe('integração com o pagamentos-service simulado', () => {
       motivoCancelamento: 'PAGAMENTO_RECUSADO',
       atualizadoEm: quando,
     });
+  });
+});
+
+describe('histórico (marcos da saga)', () => {
+  const tipos = (p: Pedido) => (p.historico ?? []).map((m) => [m.tipo, m.detalhe ?? null]);
+
+  it('os exemplos têm histórico coerente com a situação, do mais antigo ao mais recente', () => {
+    const porId = new Map(pedidosSnapshot(FARMA).map((p) => [p.id, p]));
+    const pendente = porId.get('ped-farmaceutica-0008')!;
+    expect(pendente.historico).toEqual([{ tipo: 'CRIADO', em: pendente.criadoEm, detalhe: null }]);
+    expect(tipos(porId.get('ped-farmaceutica-0007')!)).toEqual([
+      ['CRIADO', null],
+      ['PAGO', 'pag-farmaceutica-0007'],
+    ]);
+    expect(tipos(porId.get('ped-farmaceutica-0005')!)).toEqual([
+      ['CRIADO', null],
+      ['PAGO', 'pag-farmaceutica-0005'],
+      ['CANCELADO', 'SOLICITADO_PELO_CLIENTE'],
+      ['ESTORNADO', 'pag-farmaceutica-0005'],
+    ]);
+    expect(tipos(porId.get('ped-farmaceutica-0004')!)).toEqual([
+      ['CRIADO', null],
+      ['RECUSADO', MOTIVO_RECUSA_LIMITE],
+      ['CANCELADO', 'PAGAMENTO_RECUSADO'],
+    ]);
+    expect(tipos(porId.get('ped-farmaceutica-0002')!)).toEqual([
+      ['CRIADO', null],
+      ['CANCELADO', 'SOLICITADO_PELO_CLIENTE'],
+    ]);
+    for (const p of porId.values()) {
+      const datas = p.historico!.map((m) => Date.parse(m.em));
+      expect([...datas].sort((a, b) => a - b)).toEqual(datas);
+      expect(p.historico!.at(-1)!.em).toBe(p.atualizadoEm);
+    }
+  });
+
+  it('criação, aprovação, cancelamento e estorno anotam cada marco (o pagamentos simulado avisa o estorno)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const { json } = await criar(
+        { itens: [{ produtoId: DIP, quantidade: 1 }] },
+        'chave-historico',
+      );
+      const novo = json as unknown as Pedido;
+      expect(tipos(novo)).toEqual([['CRIADO', null]]);
+      vi.advanceTimersByTime(COBRANCA_ATRASO_MS);
+      const pago = (await call(`api/v1/pedidos/${novo.id}`)).json as unknown as Pedido;
+      expect(tipos(pago)).toEqual([
+        ['CRIADO', null],
+        ['PAGO', 'pag-n00001'],
+      ]);
+      vi.advanceTimersByTime(60_000);
+      const cancelado = (await call(`api/v1/pedidos/${novo.id}/cancelamento`, { method: 'POST' }))
+        .json as unknown as Pedido;
+      expect(tipos(cancelado)).toEqual([
+        ['CRIADO', null],
+        ['PAGO', 'pag-n00001'],
+        ['CANCELADO', 'SOLICITADO_PELO_CLIENTE'],
+        ['ESTORNADO', 'pag-n00001'],
+      ]);
+      expect(cancelado.historico![3]!.em).toBe(cancelado.atualizadoEm);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('recusa anota RECUSADO com o motivo e CANCELADO; o gestor cancela como tenant', async () => {
+    const quando = '2026-11-26T12:00:00.000Z';
+    aplicarPagamento(
+      FARMA,
+      'ped-farmaceutica-0008',
+      { aprovado: false, motivo: 'Sem saldo.' },
+      quando,
+    );
+    expect(tipos(pedidosSnapshot(FARMA)[0]!)).toEqual([
+      ['CRIADO', null],
+      ['RECUSADO', 'Sem saldo.'],
+      ['CANCELADO', 'PAGAMENTO_RECUSADO'],
+    ]);
+    const { json } = await call('api/v1/pedidos/ped-farmaceutica-0007/cancelamento', {
+      usuario: 'admin',
+      method: 'POST',
+    });
+    expect(tipos(json as unknown as Pedido).slice(2)).toEqual([
+      ['CANCELADO', 'CANCELADO_PELO_TENANT'],
+      ['ESTORNADO', 'pag-farmaceutica-0007'],
+    ]);
+  });
+
+  it('o comprador recebe o RECUSADO com detalhe null no GET e na listagem; gestor e admin recebem o motivo', async () => {
+    aplicarPagamento(
+      FARMA,
+      'ped-farmaceutica-0008',
+      { aprovado: false, motivo: MOTIVO_RECUSA_LIMITE },
+      '2026-11-26T12:00:00.000Z',
+    );
+    const recusado = (p: Pedido) => p.historico!.find((m) => m.tipo === 'RECUSADO');
+    const doComprador = (await call('api/v1/pedidos/ped-farmaceutica-0008'))
+      .json as unknown as Pedido;
+    expect(recusado(doComprador)).toMatchObject({ tipo: 'RECUSADO', detalhe: null });
+    const lista = (await call('api/v1/pedidos')).json as unknown as Pagina;
+    for (const p of lista.itens) {
+      if (recusado(p)) expect(recusado(p)!.detalhe).toBeNull();
+    }
+    expect(lista.itens.filter(recusado)).toHaveLength(1);
+    const doAdmin = (await call('api/v1/pedidos/ped-farmaceutica-0008', { usuario: 'admin' }))
+      .json as unknown as Pedido;
+    expect(recusado(doAdmin)!.detalhe).toBe(MOTIVO_RECUSA_LIMITE);
+    const listaAdmin = (await call('api/v1/pedidos?limite=100', { usuario: 'admin' }))
+      .json as unknown as Pagina;
+    expect(listaAdmin.itens.filter(recusado).map((p) => recusado(p)!.detalhe)).toEqual([
+      MOTIVO_RECUSA_LIMITE,
+      MOTIVO_RECUSA_LIMITE,
+    ]);
+    // O store guarda o motivo: a máscara é só na resposta.
+    expect(recusado(pedidosSnapshot(FARMA)[0]!)!.detalhe).toBe(MOTIVO_RECUSA_LIMITE);
+  });
+
+  it('aplicarEstorno só anota em pedido CANCELADO, uma vez; pedido sem histórico ganha um', () => {
+    const quando = '2026-11-26T12:00:00.000Z';
+    expect(aplicarEstorno(FARMA, 'nao-existe', 'pag-x', quando)).toBe(false);
+    expect(aplicarEstorno(FARMA, 'ped-farmaceutica-0007', 'pag-x', quando)).toBe(false); // CONFIRMADO
+    expect(aplicarEstorno(FARMA, 'ped-farmaceutica-0005', 'pag-x', quando)).toBe(false); // já estornado
+    const base = pedidosSnapshot(FARMA)[0]!;
+    resetPedidosStore({
+      [FARMA]: [{ ...base, status: 'CANCELADO', pagamentoId: 'pag-y', historico: undefined }],
+    });
+    expect(aplicarEstorno(FARMA, base.id, 'pag-y', quando)).toBe(true);
+    expect(pedidosSnapshot(FARMA)[0]).toMatchObject({
+      historico: [{ tipo: 'ESTORNADO', em: quando, detalhe: 'pag-y' }],
+      atualizadoEm: quando,
+    });
+  });
+});
+
+describe('GET /api/v1/pedidos/{id}/linha-do-tempo (SSE)', () => {
+  /** Abre a linha do tempo como o navegador e junta as mensagens que chegam. */
+  async function abrir(id: string, usuario = 'bruno') {
+    const controller = new AbortController();
+    const response = await fetch(apiUrl(`api/v1/pedidos/${id}/linha-do-tempo`), {
+      headers: { Authorization: `Bearer demo-${usuario}`, 'X-Tenant-Id': FARMA },
+      signal: controller.signal,
+    });
+    const mensagens: MensagemSse[] = [];
+    const comentarios: string[] = [];
+    let terminou = false;
+    if (response.ok) {
+      const parser = new SseParser({
+        onMessage: (m) => mensagens.push(m),
+        onComment: (c) => comentarios.push(c),
+      });
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      void (async () => {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          parser.push(decoder.decode(value, { stream: true }));
+        }
+        terminou = true;
+      })();
+    }
+    const pedidos = () => mensagens.map((m) => JSON.parse(m.data) as Pedido);
+    return { response, mensagens, comentarios, pedidos, fim: () => terminou, controller };
+  }
+
+  async function avancar(ms: number) {
+    await vi.advanceTimersByTimeAsync(ms);
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('responde text/event-stream e envia o estado atual (event pedido, id = versão, data = JSON numa linha)', async () => {
+    const fluxo = await abrir('ped-farmaceutica-0005');
+    expect(fluxo.response.status).toBe(200);
+    expect(fluxo.response.headers.get('Content-Type')).toBe('text/event-stream');
+    expect(fluxo.response.headers.get('Cache-Control')).toBe('no-cache');
+    await avancar(0);
+    expect(fluxo.mensagens).toHaveLength(1);
+    expect(fluxo.mensagens[0]).toMatchObject({ event: 'pedido', id: '4' });
+    expect(fluxo.mensagens[0]!.data).not.toContain('\n');
+    expect(fluxo.pedidos()[0]).toEqual(pedidosSnapshot(FARMA)[3]);
+    // Sem mudança, nada novo.
+    await avancar(LINHA_DO_TEMPO_VERIFICACAO_MS * 5);
+    expect(fluxo.mensagens).toHaveLength(1);
+    fluxo.controller.abort();
+  });
+
+  it('a cobrança vencida chega pelo fluxo, sem outra requisição; o cancelamento também', async () => {
+    const { json } = await criar({ itens: [{ produtoId: DIP, quantidade: 1 }] }, 'chave-sse-001');
+    const id = String(json.id);
+    const fluxo = await abrir(id);
+    await avancar(0);
+    expect(fluxo.pedidos().map((p) => p.status)).toEqual(['PENDENTE']);
+    await avancar(COBRANCA_ATRASO_MS + LINHA_DO_TEMPO_VERIFICACAO_MS);
+    expect(fluxo.pedidos().map((p) => p.status)).toEqual(['PENDENTE', 'CONFIRMADO']);
+    expect(fluxo.mensagens.map((m) => m.id)).toEqual(['1', '2']);
+
+    await call(`api/v1/pedidos/${id}/cancelamento`, { method: 'POST' });
+    await avancar(LINHA_DO_TEMPO_VERIFICACAO_MS);
+    expect(
+      fluxo
+        .pedidos()
+        .at(-1)!
+        .historico!.map((m) => m.tipo),
+    ).toEqual(['CRIADO', 'PAGO', 'CANCELADO', 'ESTORNADO']);
+    expect(fluxo.mensagens.at(-1)!.id).toBe('4');
+    fluxo.controller.abort();
+  });
+
+  it('envia de novo quando só o atualizadoEm muda', async () => {
+    const fluxo = await abrir('ped-farmaceutica-0008');
+    await avancar(0);
+    const base = pedidosSnapshot(FARMA);
+    resetPedidosStore({
+      [FARMA]: base.map((p, i) =>
+        i === 0 ? { ...p, atualizadoEm: '2026-11-26T00:00:00.000Z' } : p,
+      ),
+    });
+    // O reset fecha os fluxos abertos (nada fica rodando entre os testes).
+    await avancar(0);
+    expect(fluxo.fim()).toBe(true);
+    expect(linhasDoTempoAbertas()).toBe(0);
+  });
+
+  it('`: ping` a cada 15 s e fim do fluxo depois de 5 min', async () => {
+    const fluxo = await abrir('ped-farmaceutica-0008');
+    await avancar(LINHA_DO_TEMPO_PING_MS);
+    expect(fluxo.comentarios).toEqual(['ping']);
+    await avancar(LINHA_DO_TEMPO_PING_MS);
+    expect(fluxo.comentarios).toEqual(['ping', 'ping']);
+    expect(fluxo.fim()).toBe(false);
+    await avancar(LINHA_DO_TEMPO_TIMEOUT_MS);
+    expect(fluxo.fim()).toBe(true);
+    expect(linhasDoTempoAbertas()).toBe(0);
+    expect(fluxo.mensagens).toHaveLength(1);
+  });
+
+  it('abortar a requisição fecha o fluxo e para a verificação', async () => {
+    const fluxo = await abrir('ped-farmaceutica-0008');
+    await avancar(0);
+    expect(linhasDoTempoAbertas()).toBe(1);
+    fluxo.controller.abort();
+    await avancar(0);
+    expect(linhasDoTempoAbertas()).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('o pedido que some do store encerra o fluxo', async () => {
+    const fluxo = await abrir('ped-farmaceutica-0008');
+    await avancar(0);
+    // Troca o store por fora, sem o reset (que fecharia o fluxo antes).
+    aplicarPagamento(FARMA, 'ped-farmaceutica-0008', { aprovado: true, pagamentoId: 'p' }, 'x');
+    await avancar(LINHA_DO_TEMPO_VERIFICACAO_MS);
+    expect(fluxo.pedidos().map((p) => p.status)).toEqual(['PENDENTE', 'CONFIRMADO']);
+    fluxo.controller.abort();
+  });
+
+  it('o comprador recebe o RECUSADO sem o motivo do gateway no fluxo; o gestor, com', async () => {
+    aplicarPagamento(
+      FARMA,
+      'ped-farmaceutica-0008',
+      { aprovado: false, motivo: 'Sem saldo.' },
+      'x',
+    );
+    const recusado = (p: Pedido) => p.historico!.find((m) => m.tipo === 'RECUSADO');
+    const comprador = await abrir('ped-farmaceutica-0008');
+    const gestor = await abrir('ped-farmaceutica-0008', 'admin');
+    await avancar(0);
+    expect(recusado(comprador.pedidos()[0]!)).toMatchObject({ detalhe: null });
+    expect(recusado(gestor.pedidos()[0]!)).toMatchObject({ detalhe: 'Sem saldo.' });
+    comprador.controller.abort();
+    gestor.controller.abort();
+  });
+
+  it('mesmos 404 e 403 do GET do pedido', async () => {
+    const outro = await abrir('ped-farmaceutica-0007');
+    expect(outro.response.status).toBe(404);
+    expect(((await outro.response.json()) as { detail: string }).detail).toBe(
+      "Pedido 'ped-farmaceutica-0007' não encontrado neste tenant.",
+    );
+    const semPapel = await fetch(apiUrl('api/v1/pedidos/ped-farmaceutica-0008/linha-do-tempo'), {
+      headers: { Authorization: 'Bearer demo-ana', 'X-Tenant-Id': FARMA },
+    });
+    expect(semPapel.status).toBe(403);
+    const semToken = await fetch(apiUrl('api/v1/pedidos/ped-farmaceutica-0008/linha-do-tempo'));
+    expect(semToken.status).toBe(401);
+  });
+
+  it('mensagemPedido usa o tamanho do histórico como versão (0 sem histórico)', () => {
+    const p = { ...pedidosSnapshot(FARMA)[0]!, historico: undefined };
+    expect(mensagemPedido(p)).toBe(`event: pedido\nid: 0\ndata: ${JSON.stringify(p)}\n\n`);
   });
 });

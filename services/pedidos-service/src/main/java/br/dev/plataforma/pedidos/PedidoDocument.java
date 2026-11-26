@@ -2,6 +2,7 @@ package br.dev.plataforma.pedidos;
 
 import br.dev.plataforma.spring.tenancy.TenantOwned;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Version;
@@ -18,6 +19,9 @@ public class PedidoDocument implements TenantOwned {
   public record Item(
       String produtoId, String sku, String nome, int quantidade, long precoUnitarioCentavos) {}
 
+  /** Marco da saga na linha do tempo do pedido (schema {@code MarcoPedido}). */
+  public record Marco(TipoMarco tipo, Instant em, String detalhe) {}
+
   @Id private String id;
   private String tenantId;
   private String clienteId;
@@ -31,6 +35,7 @@ public class PedidoDocument implements TenantOwned {
   private MotivoCancelamento motivoCancelamento;
   private Instant criadoEm;
   private Instant atualizadoEm;
+  private List<Marco> historico;
   @Version private Long version;
 
   protected PedidoDocument() {}
@@ -54,6 +59,7 @@ public class PedidoDocument implements TenantOwned {
     this.moeda = moeda;
     this.criadoEm = agora;
     this.atualizadoEm = agora;
+    this.historico = new ArrayList<>(List.of(new Marco(TipoMarco.CRIADO, agora, null)));
   }
 
   /** Pagamento aprovado: PENDENTE vira CONFIRMADO. */
@@ -61,12 +67,57 @@ public class PedidoDocument implements TenantOwned {
     this.status = StatusPedido.CONFIRMADO;
     this.pagamentoId = pagamentoId;
     this.atualizadoEm = agora;
+    registrar(new Marco(TipoMarco.PAGO, agora, pagamentoId));
+  }
+
+  /** Pagamento recusado: anota o motivo do gateway; o cancelamento vem em seguida. */
+  void recusar(String motivo, Instant agora) {
+    registrar(new Marco(TipoMarco.RECUSADO, agora, motivo));
   }
 
   void cancelar(MotivoCancelamento motivo, Instant agora) {
     this.status = StatusPedido.CANCELADO;
     this.motivoCancelamento = motivo;
     this.atualizadoEm = agora;
+    registrar(new Marco(TipoMarco.CANCELADO, agora, motivo.name()));
+  }
+
+  /**
+   * pagamento.estornado: anota a devolução uma vez só (o evento pode chegar de novo).
+   *
+   * @return false se o estorno já estava anotado
+   */
+  boolean estornar(String pagamentoId, Instant agora) {
+    if (marcos().stream().anyMatch(m -> m.tipo() == TipoMarco.ESTORNADO)) {
+      return false;
+    }
+    this.atualizadoEm = agora;
+    registrar(new Marco(TipoMarco.ESTORNADO, agora, pagamentoId));
+    return true;
+  }
+
+  private void registrar(Marco marco) {
+    List<Marco> lista = new ArrayList<>(marcos());
+    lista.add(marco);
+    this.historico = lista;
+  }
+
+  /**
+   * Marcos do pedido. Pedido gravado antes do Dia 8 não tem histórico: ele é reconstruído do status
+   * (criação, mais a confirmação ou o cancelamento na data da última mudança).
+   */
+  public List<Marco> marcos() {
+    if (historico != null) {
+      return List.copyOf(historico);
+    }
+    List<Marco> derivado = new ArrayList<>();
+    derivado.add(new Marco(TipoMarco.CRIADO, criadoEm, null));
+    if (status == StatusPedido.CONFIRMADO) {
+      derivado.add(new Marco(TipoMarco.PAGO, atualizadoEm, pagamentoId));
+    } else if (status == StatusPedido.CANCELADO && motivoCancelamento != null) {
+      derivado.add(new Marco(TipoMarco.CANCELADO, atualizadoEm, motivoCancelamento.name()));
+    }
+    return List.copyOf(derivado);
   }
 
   @Override

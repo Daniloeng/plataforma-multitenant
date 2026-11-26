@@ -21,7 +21,7 @@ libs/platform-spring/     autoconfiguração comum: TenantContext/filtro X-Tenan
 services/gateway/         Spring Cloud Gateway (porta 8000): JWT do Keycloak, tenant do token, rate limit por plano, /api/v1/me
 services/tenant-service/  cadastro de tenants, /api/v1/tenants (porta 8081, só plataforma-admin); publica tenant.* pelo outbox
 services/catalogo-service/ produtos por tenant, /api/v1/produtos (porta 8082); publica produto.alterado e preco.alterado; consome tenant.*
-services/pedidos-service/ pedidos, /api/v1/pedidos (porta 8083); preço da cópia local do catálogo, Idempotency-Key; publica pedido.criado, pedido.confirmado e pedido.cancelado; consome pagamento.aprovado e pagamento.recusado; expira PENDENTE após 15 min
+services/pedidos-service/ pedidos, /api/v1/pedidos (porta 8083); preço da cópia local do catálogo, Idempotency-Key; publica pedido.criado, pedido.confirmado e pedido.cancelado; consome pagamento.*; expira PENDENTE após 15 min; histórico e linha do tempo ao vivo (SSE, change stream)
 services/pagamentos-service/ cobrança simulada, estorno e ledger, /api/v1/pagamentos e /api/v1/ledger (porta 8084, só gestor/admin); consome pedido.*; publica pagamento.*
 services/status-service/  saúde de MongoDB x4, Pulsar e serviços em GET /api/status (porta 8090)
 frontend/                 React + Vite + TS; modo demo com MSW (GitHub Pages)
@@ -82,6 +82,9 @@ no host no Compose e entra no `status-service`.
 - **Pagamentos** (ADR-0012): um pagamento por pedido (consulte antes de cobrar); `pedido.cancelado`
   antes da cobrança deixa uma marca que a impede; o ledger só recebe inserções, sempre em pares
   débito/crédito de mesmo valor; eventos de pagamento usam o `pedidoId` como agregado.
+- **Tempo real** (ADR-0013): a tela acompanha mudanças por SSE (`SseEmitter`) alimentado por change
+  stream do MongoDB, nunca por aviso local da réplica; o primeiro evento é sempre o estado atual. No
+  navegador, `fetch` com stream (o `EventSource` não manda o `Authorization`).
 - **APIs**: contract-first em `libs/contracts/src/main/resources/openapi/`; rotas `/api/v1/`;
   `X-Tenant-Id` obrigatório nas APIs de negócio; erros em Problem Details (RFC 9457).
 - **Decisões**: decisão de arquitetura vira ADR (skill `adr`); peça revisão ao subagente `arquiteto`

@@ -13,13 +13,22 @@ public record PedidoView(
     String pagamentoId,
     MotivoCancelamento motivoCancelamento,
     Instant criadoEm,
-    Instant atualizadoEm) {
+    Instant atualizadoEm,
+    List<PedidoDocument.Marco> historico) {
 
   /** Item do pedido (schema {@code ItemPedido}). */
   public record ItemView(
       String produtoId, String sku, String nome, int quantidade, Dinheiro precoUnitario) {}
 
   static PedidoView of(PedidoDocument doc) {
+    return of(doc, true);
+  }
+
+  /**
+   * @param veMotivoRecusa false para o comprador: o motivo exato da recusa do gateway é do tenant
+   *     (Dia 7), então o marco RECUSADO sai sem detalhe
+   */
+  static PedidoView of(PedidoDocument doc, boolean veMotivoRecusa) {
     return new PedidoView(
         doc.getId(),
         doc.getClienteId(),
@@ -38,7 +47,16 @@ public record PedidoView(
         doc.getPagamentoId(),
         doc.getMotivoCancelamento(),
         doc.getCriadoEm(),
-        doc.getAtualizadoEm());
+        doc.getAtualizadoEm(),
+        veMotivoRecusa
+            ? doc.marcos()
+            : doc.marcos().stream()
+                .map(
+                    m ->
+                        m.tipo() == TipoMarco.RECUSADO
+                            ? new PedidoDocument.Marco(m.tipo(), m.em(), null)
+                            : m)
+                .toList());
   }
 
   /** Página da listagem, do mais recente para o mais antigo. */

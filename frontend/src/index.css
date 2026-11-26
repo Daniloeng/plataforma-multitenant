@@ -1583,3 +1583,153 @@ summary:focus-visible {
     min-width: 0;
   }
 }
+
+/* ---- Saga do pedido: linha do tempo e indicador "Ao vivo" (Dia 8) ---- */
+
+.pedido__titulo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.ao-vivo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--up);
+}
+
+.ao-vivo__ponto {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: ao-vivo-pulso 1.6s ease-in-out infinite;
+}
+
+.ao-vivo--reconectando {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.ao-vivo--reconectando .ao-vivo__ponto {
+  animation: none;
+}
+
+@keyframes ao-vivo-pulso {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ao-vivo__ponto {
+    animation: none;
+  }
+}
+
+.linha-do-tempo {
+  margin: 0 0 16px;
+}
+
+.linha-do-tempo__titulo {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.linha-do-tempo__lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.marco {
+  --marco: var(--planned);
+  --marco-bg: var(--planned-bg);
+  position: relative;
+  display: flex;
+  gap: 12px;
+  padding: 0 0 14px;
+  min-width: 0;
+}
+
+/* Trilho vertical ligando um marco ao próximo. */
+.marco:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 13px;
+  top: 28px;
+  bottom: 2px;
+  width: 2px;
+  background: var(--border);
+}
+
+.marco:last-child {
+  padding-bottom: 0;
+}
+
+.marco--criado {
+  --marco: var(--publish);
+  --marco-bg: var(--publish-bg);
+}
+
+.marco--pago {
+  --marco: var(--up);
+  --marco-bg: var(--up-bg);
+}
+
+.marco--recusado,
+.marco--cancelado {
+  --marco: var(--down);
+  --marco-bg: var(--down-bg);
+}
+
+.marco--estornado {
+  --marco: var(--degraded);
+  --marco-bg: var(--degraded-bg);
+}
+
+.marco__icone {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--marco);
+  background: var(--marco-bg);
+  color: var(--marco);
+  font-weight: 700;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.marco__corpo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.marco__rotulo {
+  font-weight: 600;
+}
+
+.marco__quando {
+  font-size: 0.85rem;
+}
+
+.marco__detalhe {
+  flex-basis: 100%;
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}

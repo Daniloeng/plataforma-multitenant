@@ -3,10 +3,10 @@ import { ROADMAP } from '../data/roadmap';
 import { RoadmapSection } from './RoadmapSection';
 
 describe('RoadmapSection', () => {
-  it('lista status-service, Tenants, Gateway, Catálogo, Pedidos e Pagamentos ativos e a Saga planejada', () => {
+  it('lista status-service, Tenants, Gateway, Catálogo, Pedidos, Pagamentos e Saga ativos e os níveis de isolamento planejados', () => {
     render(<RoadmapSection />);
     const items = screen.getAllByRole('listitem');
-    expect(items).toHaveLength(7);
+    expect(items).toHaveLength(8);
 
     const status = screen.getByRole('listitem', { name: 'status-service' });
     expect(status).toHaveTextContent('Dia 1');
@@ -46,7 +46,13 @@ describe('RoadmapSection', () => {
 
     const saga = screen.getByRole('listitem', { name: 'Saga do pedido' });
     expect(saga).toHaveTextContent('Dia 8');
-    expect(within(saga).getByText('Planejado')).toHaveClass('pill--planned');
+    expect(within(saga).getByText('Ativo')).toHaveClass('pill--up');
+    expect(saga).toHaveTextContent('linha do tempo de cada pedido em tempo real (SSE)');
+
+    const niveis = screen.getByRole('listitem', { name: 'Níveis de isolamento' });
+    expect(niveis).toHaveTextContent('Dia 9');
+    expect(within(niveis).getByText('Planejado')).toHaveClass('pill--planned');
+    expect(niveis).toHaveTextContent('Pool, Bridge ou Silo');
   });
 
   it('cada serviço tem responsabilidade em uma frase', () => {

@@ -6,7 +6,9 @@
   "x-evento": "pagamento.estornado",
   "x-topico": "persistent://plataforma/pagamentos/pagamento.estornado.v1",
   "x-produtor": "pagamentos",
-  "x-consumidores": [],
+  "x-consumidores": [
+    "pedidos"
+  ],
   "fields": [
     {
       "name": "eventId",

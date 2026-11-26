@@ -2,17 +2,25 @@ import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import { signInAs } from '../test/session';
 import { ApiError } from './http';
+import { pedidosSnapshot } from '../mocks/pedidos';
 import {
+  CANCELAMENTO_LABEL,
+  MOTIVOS_CANCELAMENTO,
   PROBLEMA_CHAVE_REUTILIZADA,
+  RECUSA_GENERICA,
   PROBLEMA_PRODUTO_INDISPONIVEL,
   cancelarPedido,
   createPedido,
   describePedidoError,
+  acompanharPedido,
+  descreverMarco,
   getPedido,
+  historicoDe,
   isNetworkError,
   isPedido,
   listPedidos,
   novaIdempotencyKey,
+  pedidoFinal,
   pedidosUrl,
   podeComprar,
   quantidadeValida,
@@ -113,6 +121,27 @@ describe('regras e utilitários', () => {
     expect(isPedido(null)).toBe(false);
   });
 
+  it('isPedido aceita historico ausente (respostas antigas) e valida cada marco', () => {
+    const marco = { tipo: 'CRIADO', em: '2026-11-26T12:00:00Z' };
+    expect(isPedido({ ...pedido, historico: [] })).toBe(true);
+    expect(isPedido({ ...pedido, historico: null })).toBe(true);
+    expect(
+      isPedido({ ...pedido, historico: [marco, { ...marco, tipo: 'PAGO', detalhe: 'p' }] }),
+    ).toBe(true);
+    expect(isPedido({ ...pedido, historico: [{ ...marco, detalhe: null }] })).toBe(true);
+    expect(isPedido({ ...pedido, historico: [{ ...marco, tipo: 'ENVIADO' }] })).toBe(false);
+    expect(isPedido({ ...pedido, historico: [{ tipo: 'CRIADO' }] })).toBe(false);
+    expect(isPedido({ ...pedido, historico: [{ ...marco, detalhe: 3 }] })).toBe(false);
+    expect(isPedido({ ...pedido, historico: [null] })).toBe(false);
+    expect(isPedido({ ...pedido, historico: 'CRIADO' })).toBe(false);
+  });
+
+  it('pedidosUrl monta a linha do tempo', () => {
+    expect(pedidosUrl('ped-1', 'linha-do-tempo', '/', 'https://x.dev')).toBe(
+      'https://x.dev/api/v1/pedidos/ped-1/linha-do-tempo',
+    );
+  });
+
   it('describePedidoError e isNetworkError distinguem rede de resposta da API', () => {
     expect(describePedidoError(new ApiError('detalhe', 409))).toBe('detalhe');
     expect(describePedidoError(new TypeError('Failed to fetch'))).toBe(
@@ -120,6 +149,213 @@ describe('regras e utilitários', () => {
     );
     expect(isNetworkError(new TypeError('x'))).toBe(true);
     expect(isNetworkError(new ApiError('x', 500))).toBe(false);
+  });
+});
+
+describe('histórico do pedido', () => {
+  const em = '2026-11-26T12:00:01Z';
+  const base: Pedido = { ...pedido, atualizadoEm: em };
+  const tipos = (p: Pedido) => historicoDe(p).map((m) => [m.tipo, m.detalhe ?? null]);
+
+  it('usa o historico do servidor quando ele vem (mesmo vazio)', () => {
+    const historico = [{ tipo: 'CRIADO' as const, em: pedido.criadoEm }];
+    expect(historicoDe({ ...pedido, historico })).toBe(historico);
+    expect(historicoDe({ ...pedido, historico: [] })).toEqual([]);
+  });
+
+  it('sem historico, deriva do status: pendente, pago, recusado, estornado e cancelado antes da cobrança', () => {
+    expect(historicoDe(pedido)).toEqual([{ tipo: 'CRIADO', em: pedido.criadoEm, detalhe: null }]);
+    expect(tipos({ ...base, status: 'CONFIRMADO', pagamentoId: 'pag-1' })).toEqual([
+      ['CRIADO', null],
+      ['PAGO', 'pag-1'],
+    ]);
+    expect(historicoDe({ ...base, status: 'CONFIRMADO' })[1]).toEqual({
+      tipo: 'PAGO',
+      em,
+      detalhe: null,
+    });
+    expect(
+      tipos({ ...base, status: 'CANCELADO', motivoCancelamento: 'PAGAMENTO_RECUSADO' }),
+    ).toEqual([
+      ['CRIADO', null],
+      ['RECUSADO', null],
+      ['CANCELADO', 'PAGAMENTO_RECUSADO'],
+    ]);
+    expect(
+      tipos({
+        ...base,
+        status: 'CANCELADO',
+        motivoCancelamento: 'SOLICITADO_PELO_CLIENTE',
+        pagamentoId: 'pag-1',
+      }),
+    ).toEqual([
+      ['CRIADO', null],
+      ['PAGO', 'pag-1'],
+      ['CANCELADO', 'SOLICITADO_PELO_CLIENTE'],
+      ['ESTORNADO', 'pag-1'],
+    ]);
+    // Sem atualizadoEm nem motivo: a data do cancelamento fica a da criação.
+    expect(historicoDe({ ...pedido, status: 'CANCELADO' })).toEqual([
+      { tipo: 'CRIADO', em: pedido.criadoEm, detalhe: null },
+      { tipo: 'CANCELADO', em: pedido.criadoEm, detalhe: null },
+    ]);
+  });
+
+  it('pedidoFinal: CONFIRMADO, recusado, cancelado sem pagamento ou já estornado', () => {
+    const marco = (tipo: 'CRIADO' | 'PAGO' | 'CANCELADO' | 'ESTORNADO') => ({ tipo, em });
+    expect(pedidoFinal(pedido)).toBe(false);
+    expect(pedidoFinal({ ...pedido, status: 'CONFIRMADO' })).toBe(true);
+    expect(pedidoFinal({ ...pedido, status: 'CANCELADO' })).toBe(true);
+    expect(
+      pedidoFinal({ ...pedido, status: 'CANCELADO', motivoCancelamento: 'PAGAMENTO_RECUSADO' }),
+    ).toBe(true);
+    // Pago e cancelado, ainda sem o estorno: falta o pagamento.estornado.
+    const pagoECancelado: Pedido = {
+      ...pedido,
+      status: 'CANCELADO',
+      pagamentoId: 'pag-1',
+      historico: [marco('CRIADO'), marco('PAGO'), marco('CANCELADO')],
+    };
+    expect(pedidoFinal(pagoECancelado)).toBe(false);
+    expect(
+      pedidoFinal({
+        ...pagoECancelado,
+        historico: [...pagoECancelado.historico!, marco('ESTORNADO')],
+      }),
+    ).toBe(true);
+    // Sem historico, o derivado já traz o estorno.
+    expect(pedidoFinal({ ...pagoECancelado, historico: undefined })).toBe(true);
+  });
+
+  it('descreverMarco: rótulos em português e detalhe traduzido', () => {
+    const em2 = pedido.criadoEm;
+    expect(descreverMarco({ tipo: 'CRIADO', em: em2 })).toEqual({
+      rotulo: 'Pedido criado',
+      detalhe: null,
+    });
+    expect(descreverMarco({ tipo: 'PAGO', em: em2, detalhe: 'pag-1' })).toEqual({
+      rotulo: 'Pagamento aprovado',
+      detalhe: { tipo: 'pagamento', id: 'pag-1' },
+    });
+    expect(descreverMarco({ tipo: 'PAGO', em: em2, detalhe: '  ' }).detalhe).toBeNull();
+    expect(descreverMarco({ tipo: 'ESTORNADO', em: em2, detalhe: 'pag-1' })).toEqual({
+      rotulo: 'Valor estornado',
+      detalhe: { tipo: 'pagamento', id: 'pag-1' },
+    });
+    expect(descreverMarco({ tipo: 'RECUSADO', em: em2, detalhe: 'Saldo insuficiente.' })).toEqual({
+      rotulo: 'Pagamento recusado',
+      detalhe: { tipo: 'texto', texto: 'Saldo insuficiente.' },
+    });
+    // Sem o motivo (o comprador recebe detalhe null) ou sem permissão: a explicação genérica.
+    expect(descreverMarco({ tipo: 'RECUSADO', em: em2, detalhe: null }).detalhe).toEqual({
+      tipo: 'texto',
+      texto: RECUSA_GENERICA,
+    });
+    expect(
+      descreverMarco(
+        { tipo: 'RECUSADO', em: em2, detalhe: 'Saldo insuficiente.' },
+        { motivoRecusa: false },
+      ).detalhe,
+    ).toEqual({ tipo: 'texto', texto: RECUSA_GENERICA });
+    const cancelado = (detalhe?: string | null) =>
+      descreverMarco({ tipo: 'CANCELADO', em: em2, detalhe });
+    expect(MOTIVOS_CANCELAMENTO.map((m) => cancelado(m).rotulo)).toEqual([
+      'Pagamento recusado',
+      'Cancelado pelo cliente',
+      'Expirado (sem resposta do pagamento em 15 min)',
+      'Cancelado (outro motivo)',
+      'Cancelado pelo tenant',
+    ]);
+    expect(MOTIVOS_CANCELAMENTO.map((m) => CANCELAMENTO_LABEL[m])).toHaveLength(5);
+    expect(cancelado('PAGAMENTO_RECUSADO').detalhe).toEqual({
+      tipo: 'texto',
+      texto: 'Pedido cancelado pela recusa.',
+    });
+    expect(cancelado('SOLICITADO_PELO_CLIENTE').detalhe).toBeNull();
+    expect(cancelado('MOTIVO_NOVO')).toEqual({
+      rotulo: 'Pedido cancelado',
+      detalhe: { tipo: 'texto', texto: 'MOTIVO_NOVO' },
+    });
+    expect(cancelado(null)).toEqual({ rotulo: 'Pedido cancelado', detalhe: null });
+  });
+});
+
+describe('acompanharPedido (linha do tempo SSE)', () => {
+  beforeEach(() => signInAs('bruno', FARMA));
+
+  it('abre o fluxo com token e X-Tenant-Id e entrega o estado atual com o histórico', async () => {
+    const cabecalhos: Headers[] = [];
+    server.events.on('request:start', ({ request }) => {
+      if (request.url.endsWith('/linha-do-tempo')) cabecalhos.push(request.headers);
+    });
+    const controller = new AbortController();
+    const recebidos: Pedido[] = [];
+    const onAberto = vi.fn();
+    const fluxo = acompanharPedido('ped-farmaceutica-0008', {
+      signal: controller.signal,
+      onAberto,
+      onPedido: (p) => {
+        recebidos.push(p);
+        controller.abort();
+      },
+    });
+    await expect(fluxo).resolves.toBeUndefined();
+    server.events.removeAllListeners();
+    expect(onAberto).toHaveBeenCalledTimes(1);
+    expect(recebidos).toEqual([pedidosSnapshot(FARMA)[0]]);
+    expect(recebidos[0]!.historico).toEqual([
+      { tipo: 'CRIADO', em: recebidos[0]!.criadoEm, detalhe: null },
+    ]);
+    expect(cabecalhos[0]!.get('Authorization')).toBe('Bearer demo-bruno');
+    expect(cabecalhos[0]!.get('X-Tenant-Id')).toBe(FARMA);
+    expect(cabecalhos[0]!.get('Accept')).toBe('text/event-stream');
+  });
+
+  it('404 (pedido de outro cliente ou backend sem SSE) rejeita com ApiError sem abrir', async () => {
+    const onAberto = vi.fn();
+    await expect(
+      acompanharPedido('ped-farmaceutica-0007', { onAberto, onPedido: () => undefined }),
+    ).rejects.toMatchObject({ httpStatus: 404 });
+    expect(onAberto).not.toHaveBeenCalled();
+  });
+
+  it('resposta que não é text/event-stream não conta como fluxo aberto', async () => {
+    server.use(http.get('*/api/v1/pedidos/:id/linha-do-tempo', () => HttpResponse.json(pedido)));
+    await expect(acompanharPedido('ped-1', { onPedido: () => undefined })).rejects.toThrow(
+      'A linha do tempo não respondeu com um fluxo de eventos.',
+    );
+  });
+
+  /** Fluxo SSE fixo, que termina depois de enviar o texto. */
+  const fluxo = (texto: string) =>
+    http.get(
+      '*/api/v1/pedidos/:id/linha-do-tempo',
+      () =>
+        new HttpResponse(texto, {
+          headers: { 'Content-Type': 'text/event-stream; charset=utf-8' },
+        }),
+    );
+
+  it('ignora outros eventos e comentários; termina quando o servidor encerra', async () => {
+    server.use(
+      fluxo(
+        `: ping\n\nevent: outro\ndata: {}\n\nevent: pedido\nid: 1\ndata: ${JSON.stringify(pedido)}\n\n`,
+      ),
+    );
+    const recebidos: Pedido[] = [];
+    await acompanharPedido('ped-1', { onPedido: (p) => recebidos.push(p) });
+    expect(recebidos).toEqual([pedido]);
+  });
+
+  it('evento que não é JSON ou fora do contrato rejeita', async () => {
+    server.use(fluxo('event: pedido\ndata: {quebrado\n\n'));
+    await expect(acompanharPedido('ped-1', { onPedido: () => undefined })).rejects.toThrow(
+      'A linha do tempo enviou um evento que não é JSON.',
+    );
+    server.use(fluxo('event: pedido\ndata: {"id":1}\n\n'));
+    await expect(acompanharPedido('ped-1', { onPedido: () => undefined })).rejects.toThrow(
+      'A linha do tempo enviou um pedido fora do contrato.',
+    );
   });
 });
 

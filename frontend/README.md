@@ -10,8 +10,8 @@ cabeçalho, login (Keycloak) e troca de tenant:
 - **Produtos** (`#/produtos`): catálogo do tenant escolhido no cabeçalho (`/api/v1/produtos`).
   Gestores cadastram, mudam preço, renomeiam e ativam/desativam; compradores montam o carrinho.
 - **Pedidos** (`#/pedidos` e `#/pedidos/<id>`): pedidos do tenant (`/api/v1/pedidos`) — o comprador
-  vê os do próprio cliente, o gestor vê os de todos; detalhe (com a situação do pagamento) e
-  cancelamento.
+  vê os do próprio cliente, o gestor vê os de todos; detalhe (com a situação do pagamento e a
+  **linha do tempo** da saga, ao vivo por SSE) e cancelamento.
 - **Pagamentos** (`#/pagamentos`): o financeiro do tenant — saldo (receita líquida), pagamentos e o
   extrato do ledger (`/api/v1/pagamentos` e `/api/v1/ledger/lancamentos`). Só para `gestor-tenant` e
   `plataforma-admin`.
@@ -172,6 +172,7 @@ Consome `libs/contracts/src/main/resources/openapi/pedidos.yaml` (cliente e tipo
 | Criar    | `POST api/v1/pedidos` com `Idempotency-Key` → 201 (ou 200 repete)  | comprador                           |
 | Listar   | `GET api/v1/pedidos?limite=20&cursor=…&status=…`                   | comprador (os seus), gestor (todos) |
 | Detalhe  | `GET api/v1/pedidos/{id}`                                          | comprador (os seus), gestor         |
+| Ao vivo  | `GET api/v1/pedidos/{id}/linha-do-tempo` (Server-Sent Events)      | comprador (os seus), gestor         |
 | Cancelar | `POST api/v1/pedidos/{id}/cancelamento` → 200; 409 se já cancelado | comprador (os seus), gestor         |
 
 - **Carrinho** (só para `comprador`, na aba Produtos): cada produto ativo tem quantidade e
@@ -189,15 +190,36 @@ Consome `libs/contracts/src/main/resources/openapi/pedidos.yaml` (cliente e tipo
   no carrinho.
 - **Lista**: data, cliente (só gestor), resumo dos itens, total em R$, selo de status (Pendente,
   Confirmado, Cancelado), filtro de status e "Carregar mais" pelo `proximoCursor`, do mais recente
-  para o mais antigo. **Detalhe**: itens com SKU, nome e preço unitário gravados no pedido,
-  subtotal, total, o motivo do cancelamento e a **situação do pagamento**: "Aguardando o pagamento"
-  (`PENDENTE`), "Pago" com o `pagamentoId` (`CONFIRMADO`), "Pagamento recusado" (`CANCELADO` por
-  `PAGAMENTO_RECUSADO`; o gestor vê também o motivo do gateway), "Estornado" (pago e depois
-  cancelado) ou "Sem cobrança". Enquanto o pedido está `PENDENTE`, o detalhe consulta
-  `GET api/v1/pedidos/{id}` de novo a cada 1,5 s, até 10 vezes, e para ao sair da tela; depois
-  disso, "Consultar de novo" recomeça. É assim que, logo depois de "Fazer pedido", a confirmação
-  aparece sozinha. **Cancelar** pede confirmação na própria linha (sem
-  `window.confirm`).
+  para o mais antigo.
+- **Detalhe**: itens com SKU, nome e preço unitário gravados no pedido, subtotal, total, o motivo do
+  cancelamento, a **situação do pagamento** e a **linha do tempo**. **Cancelar** pede confirmação na
+  própria linha (sem `window.confirm`).
+- **Linha do tempo** (`src/components/pedidos/LinhaDoTempo.tsx`): o `historico` do pedido (Dia 8,
+  marcos `CRIADO`, `PAGO`, `RECUSADO`, `CANCELADO` e `ESTORNADO`, do mais antigo ao mais recente)
+  numa lista ordenada (`<ol>`) com ícone e cor por tipo, data e hora e o detalhe traduzido: "Pedido
+  criado", "Pagamento aprovado" e "Valor estornado" (com o `pagamentoId`), "Pagamento recusado" e,
+  nos cancelamentos, "Cancelado pelo cliente", "Cancelado pelo tenant", "Pagamento recusado" ou
+  "Expirado (sem resposta do pagamento em 15 min)". O motivo exato da recusa é só do gestor e do
+  admin: para o comprador o backend manda o `RECUSADO` com `detalhe: null` e a tela mostra a
+  explicação genérica. Resposta antiga, sem `historico`, ganha um histórico reconstruído a partir do
+  status (`historicoDe` em `src/api/pedidos.ts`).
+- **Situação do pagamento**, derivada do histórico: "Aguardando o pagamento" (`PENDENTE`), "Pago" com
+  o `pagamentoId`, "Pagamento recusado" (o gestor vê também o motivo do gateway — do histórico ou,
+  sem ele, do pagamentos-service), "Estornado" (pago, cancelado e com o `ESTORNADO`), "Estorno a
+  caminho" (pago e cancelado, ainda sem o estorno) ou "Sem cobrança".
+- **Ao vivo (SSE)**: com o pedido na tela, o detalhe assina
+  `GET api/v1/pedidos/{id}/linha-do-tempo` (`usePedidoAoVivo` em `src/hooks/usePedidoAoVivo.ts`).
+  O `EventSource` não envia o `Authorization`, então a assinatura usa `fetch` + `ReadableStream`
+  com os mesmos cabeçalhos do `apiFetch` (token e `X-Tenant-Id`) e um parser SSE próprio
+  (`src/api/sse.ts`: linhas `event`, `data`, `id`, comentários como `: ping`, CRLF/LF/CR e mensagens
+  partidas entre pedaços). Cada evento `pedido` substitui o pedido na tela (uma mensagem atrasada,
+  com menos marcos, não desfaz o que já está na tela) e o cabeçalho do pedido mostra o indicador
+  discreto "Ao vivo". A assinatura dura enquanto a tela estiver aberta — um `CONFIRMADO` ainda pode
+  ser cancelado e estornado — e sair da tela aborta (`AbortController`). Se o fluxo cair ou terminar
+  (o servidor encerra depois de 5 min), aparece "Reconectando…" e a tela reconecta com backoff
+  (1 s, 2 s, 4 s… até 30 s; 10 s com o pedido em estado final). Se a primeira conexão nem abrir
+  (404 de um backend sem SSE, rede fora), volta ao poll antigo: enquanto `PENDENTE`, consulta
+  `GET api/v1/pedidos/{id}` a cada 1,5 s, até 10 vezes; depois, "Consultar de novo" recomeça.
 - **Modo demo**: pedidos de exemplo no tenant de `bruno` (dele e de outros três clientes, visíveis
   para a `admin`) e nos tenants da `ana`. Preço, SKU e nome vêm do catálogo simulado; produto
   inativo ou de outro tenant responde 409 `produto-indisponivel`. Idempotência por (tenant, cliente,
@@ -205,6 +227,18 @@ Consome `libs/contracts/src/main/resources/openapi/pedidos.yaml` (cliente e tipo
   cobra 1,2 s depois (veja [Página Pagamentos](#página-pagamentos-e-extrato)); o cancelamento pelo
   comprador usa o motivo `SOLICITADO_PELO_CLIENTE` e pelo gestor `CANCELADO_PELO_TENANT`. Comprador lendo ou cancelando pedido de
   outro cliente recebe 404.
+- **Histórico e linha do tempo no modo demo**: cada pedido simulado guarda o `historico`, coerente
+  com a situação dos exemplos e anotado a cada mudança (criação, aprovação, recusa com o motivo,
+  cancelamento); o pagamentos simulado, ao estornar, avisa o pedidos simulado para anotar o
+  `ESTORNADO` (`aplicarEstorno`, como o evento `pagamento.estornado`). O comprador recebe o
+  `RECUSADO` com `detalhe: null` no GET, na listagem e no fluxo, como no backend. O handler MSW de
+  `linha-do-tempo` responde um `ReadableStream`: envia o estado atual (`event: pedido`, `id:` = número
+  de marcos, `data:` = o pedido em JSON) e, enquanto o fluxo está aberto, confere o pedido a cada
+  300 ms (entregando antes as cobranças vencidas, com o mesmo `processarCobrancas` de cada
+  requisição) e envia de novo quando a versão ou o `atualizadoEm` mudam; `: ping` a cada 15 s; fecha
+  em 5 min, quando a requisição é abortada (`request.signal`) ou o leitor cancela. Mesmos 404 e 403 do
+  GET do pedido. Nos testes, `resetPedidosStore()` também fecha os fluxos abertos, para nada ficar
+  rodando entre um teste e outro.
 
 ## Página Pagamentos e extrato
 
@@ -230,8 +264,8 @@ Consome `libs/contracts/src/main/resources/openapi/pagamentos.yaml` (cliente, ti
 - **Modo demo** (`src/mocks/pagamentos.ts`): o pedidos simulado avisa os assinantes de
   `pedido.criado` e `pedido.cancelado` (`assinarPedidos`); o pagamentos simulado agenda a cobrança
   para 1,2 s depois. Não há `setTimeout`: as cobranças vencidas são processadas no começo de cada
-  requisição aos pedidos e aos pagamentos (`processarCobrancas`), então o poll do detalhe vê a
-  confirmação chegar, nada fica rodando entre testes, e os testes controlam o tempo com os timers
+  requisição aos pedidos e aos pagamentos e a cada verificação da linha do tempo
+  (`processarCobrancas`), então o fluxo SSE (ou o poll) do detalhe vê a confirmação chegar, nada fica rodando entre testes, e os testes controlam o tempo com os timers
   falsos do Vitest (que também falsificam o `Date`). O gateway simulado aprova até R$ 10.000,00
   (pedido `CONFIRMADO` com `pagamentoId`, lançamentos de captura) e recusa acima ("Valor acima do
   limite de aprovação do gateway simulado (R$ 10.000,00)."; pedido `CANCELADO` por
@@ -283,3 +317,9 @@ Nos testes o módulo `mermaid` é sempre mockado (em `src/test/setup.ts`), porqu
 layout de SVG; cada teste pode forçar um erro com `vi.mocked(mermaid.render).mockRejectedValueOnce`.
 As funções de parse são testadas com fixtures (`src/test/architecture-fixtures.ts`), e há testes
 que leem os schemas e documentos reais do repositório.
+
+A linha do tempo é testada em camadas: o parser SSE (`src/api/sse.test.ts`) com pedaços partidos,
+CRLF e UTF-8 cortado; o hook (`src/hooks/usePedidoAoVivo.test.ts`) com um `fetch` falso que devolve
+um `ReadableStream` controlado pelo teste (backoff com os timers falsos); o handler MSW do fluxo
+(`src/mocks/pedidos.test.ts`); e a tela inteira (`src/pages/PedidosPage.test.tsx`), com o fluxo
+simulado de verdade.

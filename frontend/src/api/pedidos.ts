@@ -5,8 +5,9 @@
 // criação só traz produto e quantidade: o preço é sempre o do servidor.
 
 import { formatDinheiro, type Dinheiro } from './catalogo';
-import { ApiError, PROBLEM_BASE, apiFetch, apiUrl, readJson } from './http';
+import { ApiError, PROBLEM_BASE, apiFetch, apiUrl, readJson, toApiError } from './http';
 import type { Papel } from './me';
+import { lerSse } from './sse';
 
 export const STATUS_PEDIDO = ['PENDENTE', 'CONFIRMADO', 'CANCELADO'] as const;
 export type StatusPedido = (typeof STATUS_PEDIDO)[number];
@@ -33,6 +34,20 @@ export const MOTIVO_CANCELAMENTO_LABEL: Record<MotivoCancelamento, string> = {
   OUTRO: 'Outro motivo',
   CANCELADO_PELO_TENANT: 'Cancelado pelo tenant',
 };
+
+/** Marcos da saga do pedido (TipoMarco no contrato). */
+export const TIPOS_MARCO = ['CRIADO', 'PAGO', 'RECUSADO', 'CANCELADO', 'ESTORNADO'] as const;
+export type TipoMarco = (typeof TIPOS_MARCO)[number];
+
+/**
+ * Um marco do histórico. `detalhe`: em PAGO e ESTORNADO, o id do pagamento; em RECUSADO, o motivo
+ * do gateway; em CANCELADO, o MotivoCancelamento.
+ */
+export interface MarcoPedido {
+  tipo: TipoMarco;
+  em: string;
+  detalhe?: string | null;
+}
 
 /** Item como o servidor devolve: sku, nome e preço são do catálogo no momento do pedido. */
 export interface ItemPedido {
@@ -64,6 +79,8 @@ export interface Pedido {
   motivoCancelamento?: MotivoCancelamento | null;
   criadoEm: string;
   atualizadoEm?: string;
+  /** Marcos da saga, do mais antigo ao mais recente (Dia 8; pode faltar em respostas antigas). */
+  historico?: MarcoPedido[];
 }
 
 export interface PaginaPedidos {
@@ -179,6 +196,24 @@ function isItemPedido(value: unknown): value is ItemPedido {
   );
 }
 
+function isMarcoPedido(value: unknown): value is MarcoPedido {
+  if (typeof value !== 'object' || value === null) return false;
+  const m = value as Record<string, unknown>;
+  return (
+    typeof m.tipo === 'string' &&
+    (TIPOS_MARCO as readonly string[]).includes(m.tipo) &&
+    typeof m.em === 'string' &&
+    optionalString(m.detalhe)
+  );
+}
+
+/** `historico` é opcional (respostas anteriores ao Dia 8); presente, cada marco segue o contrato. */
+function isHistorico(value: unknown): boolean {
+  return (
+    value === undefined || value === null || (Array.isArray(value) && value.every(isMarcoPedido))
+  );
+}
+
 export function isPedido(value: unknown): value is Pedido {
   if (typeof value !== 'object' || value === null) return false;
   const p = value as Record<string, unknown>;
@@ -192,7 +227,8 @@ export function isPedido(value: unknown): value is Pedido {
     optionalString(p.pagamentoId) &&
     isMotivo(p.motivoCancelamento) &&
     typeof p.criadoEm === 'string' &&
-    optionalString(p.atualizadoEm)
+    optionalString(p.atualizadoEm) &&
+    isHistorico(p.historico)
   );
 }
 
@@ -204,10 +240,13 @@ function isPaginaPedidos(value: unknown): value is PaginaPedidos {
 
 // ---- Cliente HTTP ----
 
-/** URL absoluta de /api/v1/pedidos (ou de um pedido; `sub` = 'cancelamento' para o POST). */
+/**
+ * URL absoluta de /api/v1/pedidos (ou de um pedido; `sub` = 'cancelamento' para o POST ou
+ * 'linha-do-tempo' para o fluxo SSE).
+ */
 export function pedidosUrl(
   id?: string,
-  sub?: 'cancelamento',
+  sub?: 'cancelamento' | 'linha-do-tempo',
   baseUrl: string = import.meta.env.BASE_URL,
   origin: string = window.location.origin,
 ): string {
@@ -281,6 +320,161 @@ export async function cancelarPedido(id: string): Promise<Pedido> {
     headers: { Accept: ACCEPT },
   });
   return readJson(response, isPedido);
+}
+
+/** Evento SSE da linha do tempo que traz o pedido. */
+export const EVENTO_LINHA_DO_TEMPO = 'pedido';
+
+/**
+ * GET /api/v1/pedidos/{id}/linha-do-tempo (Server-Sent Events) com fetch, para levar o token e o
+ * X-Tenant-Id como as outras chamadas. `onAberto` avisa que o fluxo abriu (200 text/event-stream);
+ * cada evento `pedido` chega em `onPedido`. A promessa termina quando o servidor encerra o fluxo
+ * (depois de 5 min) ou quando `signal` aborta; rejeita com ApiError se o fluxo nem abrir (404,
+ * 403, outra resposta) ou se um evento vier fora do contrato, e com o erro de rede se a conexão
+ * cair.
+ */
+export async function acompanharPedido(
+  id: string,
+  {
+    signal,
+    onAberto,
+    onPedido,
+  }: { signal?: AbortSignal; onAberto?: () => void; onPedido: (pedido: Pedido) => void },
+): Promise<void> {
+  const response = await apiFetch(pedidosUrl(id, 'linha-do-tempo'), {
+    headers: { Accept: 'text/event-stream' },
+    cache: 'no-store',
+    signal,
+  });
+  if (!response.ok) throw await toApiError(response);
+  const tipo = response.headers.get('Content-Type') ?? '';
+  if (!tipo.includes('text/event-stream') || !response.body) {
+    throw new ApiError('A linha do tempo não respondeu com um fluxo de eventos.', response.status);
+  }
+  onAberto?.();
+  await lerSse(
+    response.body,
+    {
+      onMessage: (mensagem) => {
+        if (mensagem.event !== EVENTO_LINHA_DO_TEMPO) return;
+        let pedido: unknown;
+        try {
+          pedido = JSON.parse(mensagem.data);
+        } catch {
+          throw new ApiError('A linha do tempo enviou um evento que não é JSON.', response.status);
+        }
+        if (!isPedido(pedido)) {
+          throw new ApiError(
+            'A linha do tempo enviou um pedido fora do contrato.',
+            response.status,
+          );
+        }
+        onPedido(pedido);
+      },
+    },
+    signal,
+  );
+}
+
+// ---- Histórico (linha do tempo) ----
+
+/**
+ * Histórico do pedido: o do servidor ou, numa resposta sem `historico` (anterior ao Dia 8), um
+ * reconstruído a partir do status, como o pedidos-service faz com os pedidos antigos. Datas que o
+ * status não guarda ficam com a da última atualização.
+ */
+export function historicoDe(pedido: Pedido): MarcoPedido[] {
+  if (pedido.historico) return pedido.historico;
+  const criado: MarcoPedido = { tipo: 'CRIADO', em: pedido.criadoEm, detalhe: null };
+  const em = pedido.atualizadoEm ?? pedido.criadoEm;
+  const pago = (): MarcoPedido => ({ tipo: 'PAGO', em, detalhe: pedido.pagamentoId ?? null });
+  if (pedido.status === 'PENDENTE') return [criado];
+  if (pedido.status === 'CONFIRMADO') return [criado, pago()];
+  const motivo = pedido.motivoCancelamento ?? null;
+  const cancelado: MarcoPedido = { tipo: 'CANCELADO', em, detalhe: motivo };
+  if (motivo === 'PAGAMENTO_RECUSADO') {
+    return [criado, { tipo: 'RECUSADO', em, detalhe: null }, cancelado];
+  }
+  if (pedido.pagamentoId) {
+    return [criado, pago(), cancelado, { tipo: 'ESTORNADO', em, detalhe: pedido.pagamentoId }];
+  }
+  return [criado, cancelado];
+}
+
+/**
+ * Estado final da saga: CONFIRMADO, ou CANCELADO sem pagamento a estornar (recusado ou cancelado
+ * antes da cobrança) ou já com o ESTORNADO no histórico. Um CONFIRMADO ainda pode ser cancelado e
+ * estornado; por isso a tela continua acompanhando mesmo depois dele.
+ */
+export function pedidoFinal(pedido: Pedido): boolean {
+  if (pedido.status === 'CONFIRMADO') return true;
+  if (pedido.status !== 'CANCELADO') return false;
+  const historico = historicoDe(pedido);
+  if (historico.some((m) => m.tipo === 'ESTORNADO')) return true;
+  const pago = historico.some((m) => m.tipo === 'PAGO') || Boolean(pedido.pagamentoId);
+  return !pago || pedido.motivoCancelamento === 'PAGAMENTO_RECUSADO';
+}
+
+/** Rótulo de um cancelamento na linha do tempo, pelo motivo. */
+export const CANCELAMENTO_LABEL: Record<MotivoCancelamento, string> = {
+  SOLICITADO_PELO_CLIENTE: 'Cancelado pelo cliente',
+  CANCELADO_PELO_TENANT: 'Cancelado pelo tenant',
+  PAGAMENTO_RECUSADO: 'Pagamento recusado',
+  EXPIRADO: 'Expirado (sem resposta do pagamento em 15 min)',
+  OUTRO: 'Cancelado (outro motivo)',
+};
+
+/** Como a linha do tempo mostra o `detalhe`: id do pagamento (código) ou texto. */
+export type DetalheMarco = { tipo: 'pagamento'; id: string } | { tipo: 'texto'; texto: string };
+
+/** Explicação da recusa quando o motivo do gateway não vem (o comprador nunca o recebe). */
+export const RECUSA_GENERICA =
+  'O gateway de pagamento recusou a cobrança e o pedido foi cancelado; nada foi cobrado.';
+
+/**
+ * Rótulo em português e detalhe traduzido de um marco. O motivo exato da recusa é só do gestor e do
+ * admin (decisão do Dia 7): para o comprador o backend manda o RECUSADO com `detalhe` null e, com
+ * `motivoRecusa: false`, a tela usa a explicação genérica mesmo que um motivo venha.
+ */
+export function descreverMarco(
+  marco: MarcoPedido,
+  { motivoRecusa = true }: { motivoRecusa?: boolean } = {},
+): {
+  rotulo: string;
+  detalhe: DetalheMarco | null;
+} {
+  const detalhe = marco.detalhe?.trim() ? marco.detalhe.trim() : null;
+  const pagamento = detalhe ? ({ tipo: 'pagamento', id: detalhe } as const) : null;
+  switch (marco.tipo) {
+    case 'CRIADO':
+      return { rotulo: 'Pedido criado', detalhe: null };
+    case 'PAGO':
+      return { rotulo: 'Pagamento aprovado', detalhe: pagamento };
+    case 'ESTORNADO':
+      return { rotulo: 'Valor estornado', detalhe: pagamento };
+    case 'RECUSADO':
+      return {
+        rotulo: 'Pagamento recusado',
+        detalhe: { tipo: 'texto', texto: (motivoRecusa && detalhe) || RECUSA_GENERICA },
+      };
+    case 'CANCELADO': {
+      if (detalhe && (MOTIVOS_CANCELAMENTO as readonly string[]).includes(detalhe)) {
+        const motivo = detalhe as MotivoCancelamento;
+        return {
+          rotulo: CANCELAMENTO_LABEL[motivo],
+          // A recusa já tem o próprio marco; aqui fica claro que o pedido foi cancelado por ela.
+          detalhe:
+            motivo === 'PAGAMENTO_RECUSADO'
+              ? { tipo: 'texto', texto: 'Pedido cancelado pela recusa.' }
+              : null,
+        };
+      }
+      return {
+        rotulo: 'Pedido cancelado',
+        detalhe: detalhe ? { tipo: 'texto', texto: detalhe } : null,
+      };
+    }
+  }
 }
 
 /** Mensagem legível em pt-BR para qualquer falha (rede vira "não foi possível conectar"). */
