@@ -1,0 +1,102 @@
+# Valores padrão do chart (ADR-0016). Os nomes dos serviços e as portas são os mesmos do Compose,
+# para os serviços se acharem pelo DNS do Kubernetes como se acham no Compose.
+
+image:
+  # Imagens publicadas pelo workflow de release (ghcr.io/daniloeng/plataforma-<serviço>:<versão>).
+  registry: ghcr.io/daniloeng
+  prefix: plataforma-
+  # Vazio: usa o appVersion do chart.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Onde o frontend e o curl pegam o token: o emissor (iss) precisa ser o mesmo endereço que o
+# navegador usa para falar com o Keycloak (ADR-0009). No kind, é o port-forward em localhost:8180.
+keycloak:
+  enabled: true
+  image: keycloak/keycloak:26.4.7
+  hostname: http://localhost:8180
+  # Só para estudo: em produção, um Secret externo (ver docs/adr/0016).
+  adminPassword: admin
+  resources:
+    requests: { cpu: 100m, memory: 512Mi }
+    limits: { memory: 768Mi }
+
+pulsar:
+  image: apachepulsar/pulsar:4.0.7
+  initImage: curlimages/curl:8.11.1
+  mem: "-Xms256m -Xmx512m -XX:MaxDirectMemorySize=256m"
+  persistence:
+    enabled: true
+    size: 2Gi
+  resources:
+    requests: { cpu: 200m, memory: 768Mi }
+    limits: { memory: 1280Mi }
+
+mongo:
+  image: mongo:8.0
+  # Um MongoDB por serviço (regra do projeto), cada um replica set de um nó (transações).
+  databases: [tenants, catalogo, pedidos, pagamentos]
+  persistence:
+    enabled: true
+    size: 1Gi
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
+
+# Serviços de negócio. `mongo` é a database dele; `replicas` é o mínimo (o KEDA pode subir mais).
+services:
+  tenant-service:
+    port: 8081
+    mongo: tenants
+    replicas: 1
+  catalogo-service:
+    port: 8082
+    mongo: catalogo
+    replicas: 1
+  # Duas réplicas: o lease do relay do outbox (ADR-0015) deixa só uma publicar.
+  pedidos-service:
+    port: 8083
+    mongo: pedidos
+    replicas: 2
+  pagamentos-service:
+    port: 8084
+    mongo: pagamentos
+    replicas: 1
+
+serviceResources:
+  requests: { cpu: 100m, memory: 384Mi }
+  limits: { memory: 512Mi }
+
+gateway:
+  port: 8000
+  managementPort: 8001
+  replicas: 1
+  service:
+    type: ClusterIP
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 384Mi }
+
+statusService:
+  port: 8090
+  resources:
+    requests: { cpu: 50m, memory: 256Mi }
+    limits: { memory: 384Mi }
+
+tracing:
+  # Liga a exportação OTLP quando houver um coletor (Tempo) no cluster.
+  export: false
+  endpoint: http://tempo:4318/v1/traces
+
+# Escala o pagamentos-service pelo backlog do pedido.criado no Pulsar (precisa do KEDA instalado).
+keda:
+  enabled: false
+  service: pagamentos-service
+  minReplicas: 1
+  maxReplicas: 3
+  topic: persistent://plataforma/pedidos/pedido.criado.v1
+  subscription: pagamentos-service-pedido-criado
+  # Mensagens pendentes por réplica antes de subir mais uma.
+  backlogThreshold: 20
+  pollingInterval: 15
+  cooldownPeriod: 120

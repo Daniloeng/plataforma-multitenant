@@ -1,0 +1,128 @@
+# Pulsar standalone (um broker com BookKeeper e ZooKeeper embutidos), como no Compose.
+apiVersion: v1
+kind: Service
+metadata:
+  name: pulsar
+  labels:
+    {{- include "plataforma.labels" . | nindent 4 }}
+    app.kubernetes.io/name: pulsar
+spec:
+  selector:
+    app.kubernetes.io/name: pulsar
+  ports:
+    - { name: pulsar, port: 6650 }
+    - { name: admin, port: 8080 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: pulsar
+  labels:
+    {{- include "plataforma.labels" . | nindent 4 }}
+    app.kubernetes.io/name: pulsar
+spec:
+  serviceName: pulsar
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pulsar
+  template:
+    metadata:
+      labels:
+        {{- include "plataforma.labels" . | nindent 8 }}
+        app.kubernetes.io/name: pulsar
+        app.kubernetes.io/component: broker
+    spec:
+      containers:
+        - name: pulsar
+          image: {{ .Values.pulsar.image }}
+          command: ["bin/pulsar", "standalone", "--no-functions-worker", "--no-stream-storage"]
+          env:
+            - { name: PULSAR_MEM, value: {{ .Values.pulsar.mem | quote }} }
+          ports:
+            - { name: pulsar, containerPort: 6650 }
+            - { name: admin, containerPort: 8080 }
+          startupProbe:
+            httpGet: { path: /admin/v2/brokers/health, port: admin }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /admin/v2/brokers/health, port: admin }
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet: { path: /admin/v2/brokers/health, port: admin }
+            periodSeconds: 20
+            timeoutSeconds: 10
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.pulsar.resources | nindent 12 }}
+          volumeMounts:
+            - { name: data, mountPath: /pulsar/data }
+      {{- if not .Values.pulsar.persistence.enabled }}
+      volumes:
+        - name: data
+          emptyDir: {}
+      {{- end }}
+  {{- if .Values.pulsar.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: {{ .Values.pulsar.persistence.size }}
+  {{- end }}
+---
+# Tenant "plataforma" e um namespace por domínio (o mesmo script do Compose, em files/). O nome
+# leva o hash do script e da imagem: Job é imutável, então uma mudança cria um Job novo.
+{{- $script := .Files.Get "files/pulsar-init.sh" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pulsar-init
+  labels:
+    {{- include "plataforma.labels" . | nindent 4 }}
+data:
+  init.sh: |
+    {{- $script | nindent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pulsar-init-{{ printf "%s%s" $script .Values.pulsar.initImage | sha256sum | trunc 8 }}
+  labels:
+    {{- include "plataforma.labels" . | nindent 4 }}
+    app.kubernetes.io/name: pulsar-init
+spec:
+  backoffLimit: 30
+  template:
+    metadata:
+      labels:
+        {{- include "plataforma.labels" . | nindent 8 }}
+        app.kubernetes.io/name: pulsar-init
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: aguarda-broker
+          image: {{ .Values.pulsar.initImage }}
+          command:
+            - sh
+            - -c
+            - until curl -fsS -o /dev/null http://pulsar:8080/admin/v2/brokers/health; do sleep 3; done
+      containers:
+        - name: init
+          image: {{ .Values.pulsar.initImage }}
+          command: ["sh", "/scripts/init.sh"]
+          env:
+            - { name: PULSAR_ADMIN_URL, value: "http://pulsar:8080" }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 64Mi }
+          volumeMounts:
+            - { name: scripts, mountPath: /scripts }
+      volumes:
+        - name: scripts
+          configMap:
+            name: pulsar-init

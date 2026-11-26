@@ -21,11 +21,18 @@ public class StatusService implements AutoCloseable {
   private final List<ComponentCheck> checks;
   private final Clock clock;
   private final String version;
+  private final RuntimeInfo runtime;
 
   public StatusService(List<ComponentCheck> checks, Clock clock, String version) {
+    this(checks, clock, version, null);
+  }
+
+  public StatusService(
+      List<ComponentCheck> checks, Clock clock, String version, RuntimeInfo runtime) {
     this.checks = List.copyOf(checks);
     this.clock = clock;
     this.version = version;
+    this.runtime = runtime;
   }
 
   public PlatformStatus current() {
@@ -39,7 +46,8 @@ public class StatusService implements AutoCloseable {
               .mapToObj(i -> resultOf(futures.get(i), checks.get(i)))
               .toList();
     }
-    return new PlatformStatus(PlatformStatus.aggregate(components), checkedAt, version, components);
+    return new PlatformStatus(
+        PlatformStatus.aggregate(components), checkedAt, version, components, runtime);
   }
 
   private static ComponentStatus resultOf(Future<ComponentStatus> future, ComponentCheck check) {

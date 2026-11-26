@@ -1,0 +1,6 @@
+# Homologação gerenciada pelo Argo CD (deploy/argocd): imagens do ghcr.io na versão do chart.
+keda:
+  enabled: true
+
+tracing:
+  export: false

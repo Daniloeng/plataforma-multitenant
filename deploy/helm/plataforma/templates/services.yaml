@@ -1,0 +1,64 @@
+{{- range $name, $svc := .Values.services }}
+{{- $autoscaled := and $.Values.keda.enabled (eq $name $.Values.keda.service) }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "plataforma.labels" $ | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+  ports:
+    - { name: http, port: {{ $svc.port }} }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "plataforma.labels" $ | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  {{- if not $autoscaled }}
+  replicas: {{ $svc.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  template:
+    metadata:
+      labels:
+        {{- include "plataforma.labels" $ | nindent 8 }}
+        app.kubernetes.io/name: {{ $name }}
+        app.kubernetes.io/component: service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ $svc.port | quote }}
+        prometheus.io/path: /actuator/prometheus
+    spec:
+      terminationGracePeriodSeconds: 30
+      initContainers:
+        {{- include "plataforma.waitFor" (list $ $svc.mongo $svc.mongo) | nindent 8 }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "plataforma.image" (list $ $name) }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: {{ $svc.port }} }
+          env:
+            - name: MONGO_URI
+              value: {{ printf "mongodb://%s/%s?replicaSet=rs-%s" (include "plataforma.mongoHost" (list $ $svc.mongo)) $svc.mongo $svc.mongo | quote }}
+            {{- include "plataforma.commonEnv" $ | nindent 12 }}
+          {{- include "plataforma.probes" "http" | nindent 10 }}
+          {{- include "plataforma.containerSecurity" $ | nindent 10 }}
+          resources:
+            {{- toYaml $.Values.serviceResources | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

@@ -1,0 +1,9 @@
+# Cluster kind do CI e local: imagens construídas na hora e carregadas com `kind load`.
+image:
+  registry: plataforma
+  prefix: ""
+  tag: dev
+  pullPolicy: Never
+
+keda:
+  enabled: true

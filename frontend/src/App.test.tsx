@@ -159,13 +159,30 @@ describe('App', () => {
     expect(within(pulsar).queryByText('Requisições')).not.toBeInTheDocument();
   });
 
+  it('mostra onde a plataforma roda quando a API informa o runtime (Dia 11)', async () => {
+    mockApi(buildDemoStatus(() => 0, new Date('2026-11-26T12:00:00Z')) as unknown as JsonBodyType);
+    render(<App />);
+    await screen.findByTestId('overall-status');
+    expect(screen.getByText('0.1.0-mvp1')).toBeVisible();
+    expect(screen.getByRole('group', { name: 'Ambiente de execução' })).toHaveTextContent(
+      'Kubernetes, namespace plataforma, pod status-service-7c9d8-xk2lp',
+    );
+  });
+
+  it('não mostra o ambiente de execução quando a API não traz runtime', async () => {
+    mockApi(makeStatus());
+    render(<App />);
+    await screen.findByTestId('overall-status');
+    expect(screen.queryByRole('group', { name: 'Ambiente de execução' })).not.toBeInTheDocument();
+  });
+
   it('renderiza roadmap e progresso', async () => {
     mockApi(makeStatus());
     render(<App />);
     await screen.findByTestId('overall-status');
     expect(screen.getByRole('heading', { name: 'Microsserviços' })).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Progresso' })).toBeVisible();
-    expect(screen.getByText('Dia 10 de 22')).toBeVisible();
+    expect(screen.getByText('Dia 11 de 22')).toBeVisible();
   });
 
   it('mostra o selo de demo apenas no modo demo', async () => {

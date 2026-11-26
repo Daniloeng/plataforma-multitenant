@@ -1,0 +1,12 @@
+apiVersion: v2
+name: plataforma
+description: >-
+  Plataforma multi-tenant de pedidos B2B e pagamentos (projeto de estudo): gateway, quatro
+  microsserviços, status-service, um MongoDB por serviço, Pulsar standalone e Keycloak.
+type: application
+version: 0.1.0
+appVersion: "0.1.0-mvp1"
+home: https://github.com/Daniloeng/plataforma-multitenant
+sources:
+  - https://github.com/Daniloeng/plataforma-multitenant
+keywords: [multi-tenant, microsservicos, pulsar, mongodb, keda]

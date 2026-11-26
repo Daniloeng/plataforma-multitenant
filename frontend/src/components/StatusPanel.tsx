@@ -1,6 +1,7 @@
 import type { UsePlatformStatus } from '../hooks/usePlatformStatus';
 import { formatDateTime } from '../utils/format';
 import { AlertasPanel } from './AlertasPanel';
+import { AmbienteExecucao } from './AmbienteExecucao';
 import { ComponentCard } from './ComponentCard';
 import { StatusBadge } from './StatusBadge';
 
@@ -51,6 +52,7 @@ export function StatusPanel({ data, error, loading, refresh }: UsePlatformStatus
               <span className="summary__label">Versão</span>
               <code>{data.version}</code>
             </div>
+            <AmbienteExecucao runtime={data.runtime} />
           </div>
           <AlertasPanel components={data.components} />
           <ul className="grid" aria-label="Componentes verificados">

@@ -94,6 +94,7 @@ jobs:
           s = json.load(open("status.json"))
           assert s["status"] == "UP", s
           assert len(s["components"]) == 11, s
+          assert s["runtime"]["platform"] == "compose", s["runtime"]
           print("\nPlataforma UP com", len(s["components"]), "componentes")
           PY
       - name: Conferir namespaces Pulsar
@@ -425,3 +426,154 @@ jobs:
         run: docker compose -f infra/docker-compose.yml logs --tail 200
       - if: always()
         run: docker compose -f infra/docker-compose.yml --profile observabilidade down -v
+
+  kubernetes:
+    name: Kubernetes (kind, chart Helm, KEDA e lease do relay)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.17.3
+      - name: Cópias do chart iguais às do Compose
+        run: |
+          diff infra/pulsar/init.sh deploy/helm/plataforma/files/pulsar-init.sh
+          diff infra/keycloak/realm-plataforma.json deploy/helm/plataforma/files/realm-plataforma.json
+      - name: Lint e schemas (chart e Argo CD)
+        run: |
+          helm lint deploy/helm/plataforma -f deploy/helm/plataforma/values-kind.yaml --strict
+          helm lint deploy/helm/plataforma -f deploy/helm/plataforma/values-homolog.yaml --strict
+          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
+          # CRDs (KEDA e Argo CD) pelo catálogo de schemas da comunidade.
+          crds='https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          for v in values-kind.yaml values-homolog.yaml; do
+            helm template plataforma deploy/helm/plataforma -n plataforma -f deploy/helm/plataforma/$v |
+              ./kubeconform -strict -summary -kubernetes-version 1.32.0 -schema-location default -schema-location "$crds" -
+          done
+          ./kubeconform -strict -summary -schema-location default -schema-location "$crds" deploy/argocd/*.yaml deploy/argocd/apps/*.yaml
+      - name: Construir as imagens
+        run: docker compose -f infra/docker-compose.yml build
+      - uses: helm/kind-action@v1
+        with:
+          version: v0.27.0
+          node_image: kindest/node:v1.32.2
+          cluster_name: plataforma
+      - name: Carregar as imagens no kind
+        run: |
+          for svc in gateway status-service tenant-service catalogo-service pedidos-service pagamentos-service; do
+            kind load docker-image "plataforma/$svc:dev" --name plataforma
+          done
+      - name: Instalar o KEDA
+        run: |
+          helm repo add kedacore https://kedacore.github.io/charts
+          helm install keda kedacore/keda --version 2.17.2 -n keda --create-namespace --wait --timeout 5m
+      - name: Instalar a plataforma (helm install --wait)
+        run: |
+          helm install plataforma deploy/helm/plataforma -n plataforma --create-namespace \
+            -f deploy/helm/plataforma/values-kind.yaml --wait --timeout 15m
+          kubectl -n plataforma get pods -o wide
+      - name: helm test (status UP pelo gateway, rodando no Kubernetes)
+        run: helm test plataforma -n plataforma --logs --timeout 5m
+      - name: Gateway e Keycloak no localhost (port-forward)
+        run: |
+          kubectl -n plataforma port-forward svc/gateway 8000:8000 > pf-gateway.log 2>&1 &
+          kubectl -n plataforma port-forward svc/keycloak 8180:8080 > pf-keycloak.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS localhost:8000/api/status > status.json 2>/dev/null && break; sleep 1; done
+          python3 - <<'PY'
+          import json
+          s = json.load(open("status.json"))
+          assert s["status"] == "UP", s
+          assert len(s["components"]) == 11, s
+          assert s["runtime"]["platform"] == "kubernetes" and s["runtime"]["namespace"] == "plataforma", s["runtime"]
+          print("UP no Kubernetes:", s["runtime"])
+          PY
+          infra/seed.sh
+      - name: Lease do relay com duas réplicas do pedidos-service
+        run: |
+          total=0
+          for pod in $(kubectl -n plataforma get pods -l app.kubernetes.io/name=pedidos-service -o name); do
+            v=$(kubectl get --raw "/api/v1/namespaces/plataforma/pods/${pod#pod/}:8083/proxy/actuator/prometheus" |
+              awk '/^plataforma_outbox_relay_lider/ {print int($2)}')
+            echo "${pod#pod/}: líder=$v"
+            total=$((total + v))
+          done
+          test "$(kubectl -n plataforma get pods -l app.kubernetes.io/name=pedidos-service --no-headers | wc -l)" = 2
+          test "$total" = 1
+      - name: KEDA escala o pagamentos-service pelo backlog do Pulsar
+        run: |
+          kubectl -n plataforma wait scaledobject/pagamentos-service --for=condition=Ready --timeout 3m
+          # Pausa o consumidor (0 réplicas) para acumular backlog de pedido.criado.
+          kubectl -n plataforma annotate scaledobject/pagamentos-service autoscaling.keda.sh/paused-replicas=0 --overwrite
+          kubectl -n plataforma wait deploy/pagamentos-service --for=jsonpath='{.spec.replicas}'=0 --timeout 2m
+          kubectl -n plataforma wait pod -l app.kubernetes.io/name=pagamentos-service --for=delete --timeout 2m
+          python3 - <<'PY'
+          import json, time, urllib.request, urllib.parse, uuid
+          def token(user):
+              data = urllib.parse.urlencode({"grant_type": "password", "client_id": "plataforma-cli",
+                                             "username": user, "password": "senha123"}).encode()
+              with urllib.request.urlopen("http://localhost:8180/realms/plataforma/protocol/openid-connect/token", data) as r:
+                  return json.load(r)["access_token"]
+          bruno = token("bruno")
+          def call(method, path, body=None, key=None):
+              req = urllib.request.Request("http://localhost:8000" + path, method=method,
+                                           data=None if body is None else json.dumps(body).encode())
+              req.add_header("Authorization", "Bearer " + bruno)
+              req.add_header("X-Tenant-Id", "acme")
+              req.add_header("Content-Type", "application/json")
+              if key:
+                  req.add_header("Idempotency-Key", key)
+              for _ in range(60):
+                  try:
+                      with urllib.request.urlopen(req) as r:
+                          return r.status, json.load(r)
+                  except urllib.error.HTTPError as e:
+                      if e.code == 429:  # limite do plano: espera e repete
+                          time.sleep(1); continue
+                      if e.code == 409 and "produto-indisponivel" in e.read().decode():
+                          time.sleep(1); continue  # cópia local do catálogo ainda chegando
+                      raise
+              raise SystemExit("limite de tentativas")
+          _, produtos = call("GET", "/api/v1/produtos?busca=FITA-ISO")
+          produto = produtos["itens"][0]["id"]
+          ids = []
+          for i in range(60):
+              _, p = call("POST", "/api/v1/pedidos", {"itens": [{"produtoId": produto, "quantidade": 1}]}, str(uuid.uuid4()))
+              ids.append(p["id"])
+          json.dump(ids, open("pedidos.json", "w"))
+          print(len(ids), "pedidos PENDENTE com o pagamentos-service parado")
+          PY
+          backlog() {
+            curl -fsS localhost:8000/api/status > /dev/null  # mantém o port-forward vivo
+            kubectl -n plataforma exec statefulset/pulsar -- curl -fsS \
+              http://localhost:8080/admin/v2/persistent/plataforma/pedidos/pedido.criado.v1/stats |
+              python3 -c 'import json,sys; print(json.load(sys.stdin)["subscriptions"]["pagamentos-service-pedido-criado"]["msgBacklog"])'
+          }
+          echo "backlog antes: $(backlog)"
+          test "$(backlog)" -ge 40
+          # Volta o KEDA: com backlog 60 e limite 20 por réplica, ele pede 3 réplicas (o máximo).
+          kubectl -n plataforma annotate scaledobject/pagamentos-service autoscaling.keda.sh/paused-replicas-
+          max=0
+          for i in $(seq 1 90); do
+            r=$(kubectl -n plataforma get deploy/pagamentos-service -o jsonpath='{.spec.replicas}')
+            [ "${r:-0}" -gt "$max" ] && max=$r
+            [ "$max" -ge 2 ] && break
+            sleep 2
+          done
+          echo "réplicas pedidas pelo KEDA: $max"
+          kubectl -n plataforma get scaledobject,hpa
+          test "$max" -ge 2
+          # O backlog esvazia e os pedidos saem de PENDENTE.
+          for i in $(seq 1 90); do b=$(backlog); [ "$b" = 0 ] && break; sleep 2; done
+          echo "backlog depois: $b"
+          test "$b" = 0
+      - name: Diagnóstico em caso de falha
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide
+          kubectl -n plataforma get events --sort-by=.lastTimestamp | tail -60
+          for d in gateway status-service tenant-service catalogo-service pedidos-service pagamentos-service keycloak; do
+            echo "== $d"; kubectl -n plataforma logs deploy/$d --all-containers --tail 80 || true
+          done
+          kubectl -n plataforma logs statefulset/pulsar --tail 80 || true
+          kubectl -n keda logs deploy/keda-operator --tail 80 || true

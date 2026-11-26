@@ -10,9 +10,19 @@ import java.util.List;
  * @param checkedAt instante da verificação
  * @param version versão do status-service
  * @param components resultado por componente
+ * @param runtime onde a plataforma está rodando (Dia 11); null quando não informado
  */
 public record PlatformStatus(
-    HealthState status, Instant checkedAt, String version, List<ComponentStatus> components) {
+    HealthState status,
+    Instant checkedAt,
+    String version,
+    List<ComponentStatus> components,
+    RuntimeInfo runtime) {
+
+  public PlatformStatus(
+      HealthState status, Instant checkedAt, String version, List<ComponentStatus> components) {
+    this(status, checkedAt, version, components, null);
+  }
 
   /** Agrega os estados: todos UP = UP, nenhum UP = DOWN, senão DEGRADED. */
   public static HealthState aggregate(List<ComponentStatus> components) {

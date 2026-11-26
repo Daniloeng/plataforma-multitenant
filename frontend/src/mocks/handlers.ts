@@ -7,7 +7,14 @@ import { pagamentosHandlers } from './pagamentos';
 import { pedidosHandlers } from './pedidos';
 import { tenantHandlers } from './tenants';
 
-export const DEMO_VERSION = '0.1.0-dia10';
+export const DEMO_VERSION = '0.1.0-mvp1';
+
+/** Desde o Dia 11 (MVP1) a demo simula a plataforma rodando no cluster Kubernetes. */
+export const DEMO_RUNTIME = {
+  platform: 'kubernetes',
+  namespace: 'plataforma',
+  instance: 'status-service-7c9d8-xk2lp',
+} as const;
 
 type Random = () => number;
 
@@ -153,6 +160,7 @@ export function buildDemoStatus(
         details: 'realm plataforma',
       },
     ],
+    runtime: { ...DEMO_RUNTIME },
   };
 }
 

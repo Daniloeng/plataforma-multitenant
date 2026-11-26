@@ -133,6 +133,8 @@ class OpenApiContractsTest {
     assertThat(api.getSecurity()).isNullOrEmpty();
     Map<String, Schema> schemas = api.getComponents().getSchemas();
     assertThat(schemas.get("ComponentStatus").getRequired()).doesNotContain("metrics", "details");
+    assertThat(schemas.get("PlatformStatus").getRequired()).doesNotContain("runtime");
+    assertThat(schemas.get("RuntimeInfo").getRequired()).containsExactly("platform");
     Schema metricas = schemas.get("ServiceMetrics");
     assertThat(metricas.getRequired()).containsExactlyInAnyOrder("requests", "errorRate");
     assertThat(metricas.getProperties())

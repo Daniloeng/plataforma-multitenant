@@ -1,0 +1,23 @@
+# Projeto do Argo CD: limita de onde vêm os manifests e para onde vão.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: plataforma
+  namespace: argocd
+spec:
+  description: Plataforma multi-tenant (estudo) e o KEDA de que ela depende
+  sourceRepos:
+    - https://github.com/Daniloeng/plataforma-multitenant.git
+    - https://kedacore.github.io/charts
+  destinations:
+    - { server: https://kubernetes.default.svc, namespace: plataforma }
+    - { server: https://kubernetes.default.svc, namespace: keda }
+    - { server: https://kubernetes.default.svc, namespace: argocd }
+  # O KEDA instala CRDs e papéis de cluster.
+  clusterResourceWhitelist:
+    - { group: "", kind: Namespace }
+    - { group: apiextensions.k8s.io, kind: CustomResourceDefinition }
+    - { group: rbac.authorization.k8s.io, kind: ClusterRole }
+    - { group: rbac.authorization.k8s.io, kind: ClusterRoleBinding }
+    - { group: admissionregistration.k8s.io, kind: ValidatingWebhookConfiguration }
+    - { group: apiregistration.k8s.io, kind: APIService }

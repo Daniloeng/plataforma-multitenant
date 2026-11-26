@@ -48,12 +48,14 @@ class ContratoStatusTest {
             "dev",
             List.of(
                 ComponentStatus.up("pedidos-service", ComponentType.SERVICE, 3, "ok")
-                    .withMetrics(metricas)));
+                    .withMetrics(metricas)),
+            new RuntimeInfo("kubernetes", "plataforma", "status-service-7d9f-abc"));
     JsonNode json = new ObjectMapper().registerModule(new JavaTimeModule()).valueToTree(status);
 
     assertThat(campos(json)).isEqualTo(propriedades("PlatformStatus"));
     assertThat(campos(json.get("components").get(0))).isEqualTo(propriedades("ComponentStatus"));
     assertThat(campos(json.get("components").get(0).get("metrics")))
         .isEqualTo(propriedades("ServiceMetrics"));
+    assertThat(campos(json.get("runtime"))).isEqualTo(propriedades("RuntimeInfo"));
   }
 }

@@ -41,11 +41,25 @@ export interface StatusComponent {
   metrics?: ServiceMetrics | null;
 }
 
+/**
+ * Onde o status-service que respondeu está rodando (Dia 11). `platform` costuma ser
+ * 'kubernetes', 'compose' ou 'local', mas valores novos são exibidos como vieram.
+ */
+export interface RuntimeInfo {
+  platform: string;
+  /** Namespace do Kubernetes; null fora dele. */
+  namespace?: string | null;
+  /** Pod ou contêiner do status-service que respondeu. */
+  instance?: string | null;
+}
+
 export interface StatusResponse {
   status: PlatformStatus;
   checkedAt: string;
   version: string;
   components: StatusComponent[];
+  /** Opcional desde o Dia 11: respostas anteriores não trazem o campo. */
+  runtime?: RuntimeInfo | null;
 }
 
 const PLATFORM_STATUSES: readonly string[] = ['UP', 'DEGRADED', 'DOWN'];
@@ -74,6 +88,21 @@ function isServiceMetrics(value: unknown): value is ServiceMetrics {
     isOptionalNumber(m.eventsConsumed) &&
     isOptionalNumber(m.eventsFailed) &&
     (m.outboxUnreadable === undefined || typeof m.outboxUnreadable === 'boolean')
+  );
+}
+
+function isOptionalString(value: unknown): boolean {
+  return value === null || value === undefined || typeof value === 'string';
+}
+
+function isRuntimeInfo(value: unknown): value is RuntimeInfo {
+  if (typeof value !== 'object' || value === null) return false;
+  const r = value as Record<string, unknown>;
+  return (
+    typeof r.platform === 'string' &&
+    r.platform.trim() !== '' &&
+    isOptionalString(r.namespace) &&
+    isOptionalString(r.instance)
   );
 }
 
@@ -123,7 +152,7 @@ export async function fetchStatus(signal?: AbortSignal): Promise<StatusResponse>
   }
   // Métrica malformada (ex.: NaN de um serviço com o MongoDB lento) some só daquele card: a saúde
   // dos outros componentes continua visível.
-  return {
+  const result: StatusResponse = {
     ...body,
     components: body.components.map((c) =>
       c.metrics === null || c.metrics === undefined || isServiceMetrics(c.metrics)
@@ -131,6 +160,11 @@ export async function fetchStatus(signal?: AbortSignal): Promise<StatusResponse>
         : { ...c, metrics: null },
     ),
   };
+  // O mesmo vale para o ambiente de execução: malformado vira null e o painel só deixa de exibi-lo.
+  if (body.runtime !== undefined && body.runtime !== null && !isRuntimeInfo(body.runtime)) {
+    result.runtime = null;
+  }
+  return result;
 }
 
 /** Converte qualquer falha em uma mensagem legível em pt-BR. */
