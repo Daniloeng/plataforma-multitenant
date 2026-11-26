@@ -553,7 +553,7 @@ jobs:
               raise SystemExit("limite de tentativas")
           produto = call("GET", "/api/v1/produtos?busca=FITA-ISO")["itens"][0]["id"]
           ids = [call("POST", "/api/v1/pedidos", {"itens": [{"produtoId": produto, "quantidade": 1}]},
-                      str(uuid.uuid4()))["id"] for _ in range(120)]
+                      str(uuid.uuid4()))["id"] for _ in range(600)]
           json.dump(ids, open("pedidos.json", "w"))
           print(len(ids), "pedidos PENDENTE com o pagamentos-service parado")
           PY
@@ -561,16 +561,19 @@ jobs:
             curl -fsS http://localhost:8080/admin/v2/persistent/plataforma/pedidos/pedido.criado.v1/stats |
               python3 -c 'import json,sys; print(json.load(sys.stdin)["subscriptions"]["pagamentos-pedido-criado"]["msgBacklog"])'
           }
-          # O relay publica em lotes: espera os 120 chegarem ao tópico.
-          for i in $(seq 1 60); do b=$(backlog); [ "$b" -ge 120 ] && break; sleep 1; done
+          # O relay publica em lotes: espera os 600 chegarem ao tópico.
+          for i in $(seq 1 90); do b=$(backlog); [ "$b" -ge 600 ] && break; sleep 1; done
           echo "backlog antes: $b"
-          test "$b" -ge 120
-          # Volta o KEDA: backlog 120 e limite 20 por réplica pedem o máximo (3).
+          test "$b" -ge 600
+          # Volta o KEDA: backlog 600 e limite 20 por réplica pedem o máximo (3). O volume é grande
+          # para a primeira réplica não esvaziar a fila antes de o HPA (sincroniza a cada 15 s) reagir.
           kubectl -n plataforma annotate scaledobject/pagamentos-service autoscaling.keda.sh/paused-replicas-
           max=0
           for i in $(seq 1 90); do
-            r=$(kubectl -n plataforma get hpa keda-hpa-pagamentos-service -o jsonpath='{.status.desiredReplicas}' 2>/dev/null)
-            [ "${r:-0}" -gt "$max" ] && max=$r
+            for r in $(kubectl -n plataforma get hpa keda-hpa-pagamentos-service -o jsonpath='{.status.desiredReplicas}' 2>/dev/null) \
+                     $(kubectl -n plataforma get deploy/pagamentos-service -o jsonpath='{.spec.replicas}'); do
+              [ "${r:-0}" -gt "$max" ] && max=$r
+            done
             [ "$max" -ge 2 ] && break
             sleep 2
           done

@@ -54,7 +54,7 @@ escalar consumidores não quebra a ordem por agregado.
   `helm install --wait`, roda `helm test` e confere de ponta a ponta: status UP com
   `runtime.platform = kubernetes`, seed pelo gateway, um líder do relay entre as duas réplicas do
   pedidos-service e o KEDA subindo o pagamentos-service com backlog real (consumidor pausado,
-  60 pedidos, despausa). Lint estrito e `kubeconform` validam o chart e os manifests do Argo CD.
+  600 pedidos, despausa). Lint estrito e `kubeconform` validam o chart e os manifests do Argo CD.
 - **`/api/status` ganha `runtime`** (opcional): `kubernetes`, `compose` ou `local`, com namespace
   e instância. A página de saúde mostra onde a plataforma está rodando. O nome do pod passa a ser
   público; é um dado de baixo risco e ajuda a ver qual réplica respondeu.
