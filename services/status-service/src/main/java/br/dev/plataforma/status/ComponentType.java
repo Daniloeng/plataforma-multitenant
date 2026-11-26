@@ -1,7 +1,8 @@
 package br.dev.plataforma.status;
 
-/** Tipo de componente de infraestrutura verificado. */
+/** Tipo de componente verificado: infraestrutura ou microsserviço da plataforma. */
 public enum ComponentType {
   MONGODB,
-  PULSAR
+  PULSAR,
+  SERVICE
 }

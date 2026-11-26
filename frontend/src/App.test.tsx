@@ -140,7 +140,7 @@ describe('App', () => {
     await screen.findByTestId('overall-status');
     expect(screen.getByRole('heading', { name: 'Microsserviços' })).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Progresso' })).toBeVisible();
-    expect(screen.getByText('Dia 2 de 22')).toBeVisible();
+    expect(screen.getByText('Dia 3 de 22')).toBeVisible();
   });
 
   it('mostra o selo de demo apenas no modo demo', async () => {
@@ -193,5 +193,69 @@ describe('App', () => {
     expect(screen.getByRole('region', { name: 'Matriz produtor × consumidor' })).toBeVisible();
     // Os diagramas reais de docs/ terminam de renderizar (Mermaid mockado).
     await waitFor(() => expect(screen.queryByText('Carregando diagrama…')).not.toBeInTheDocument());
+  });
+
+  it('exibe o tenant-service (type SERVICE) entre os componentes', async () => {
+    const base = makeStatus();
+    mockApi({
+      ...base,
+      components: [
+        ...base.components,
+        {
+          name: 'tenant-service',
+          type: 'SERVICE',
+          status: 'UP',
+          latencyMs: 7,
+          details: 'readiness UP',
+        },
+      ],
+    });
+    render(<App />);
+    const card = await screen.findByRole('listitem', { name: 'tenant-service' });
+    expect(card).toHaveTextContent('SERVICE');
+    expect(card).toHaveTextContent('Disponível');
+    expect(card).toHaveTextContent('7 ms');
+    expect(card).toHaveTextContent('readiness UP');
+    expect(card).toHaveClass('component--up');
+  });
+
+  it('navega para a aba Tenants e cria um tenant', async () => {
+    const user = userEvent.setup();
+    mockApi(makeStatus());
+    render(<App />);
+    await screen.findByTestId('overall-status');
+    const nav = screen.getByRole('navigation', { name: 'Páginas' });
+    expect(
+      within(nav)
+        .getAllByRole('link')
+        .map((a) => a.textContent),
+    ).toEqual(['Status', 'Tenants', 'Arquitetura']);
+    const tenants = within(nav).getByRole('link', { name: 'Tenants' });
+    expect(tenants).toHaveAttribute('href', '#/tenants');
+
+    await user.click(tenants);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Tenants' })).toBeVisible();
+    expect(window.location.hash).toBe('#/tenants');
+    expect(tenants).toHaveAttribute('aria-current', 'page');
+    expect(document.title).toBe('Tenants');
+    expect(screen.getByText(/Dados do tenant-service/)).toBeVisible();
+    expect(screen.queryByTestId('overall-status')).not.toBeInTheDocument();
+
+    const table = await screen.findByRole('table', { name: 'Tenants cadastrados' });
+    expect(within(table).getByRole('row', { name: 'metalurgica-serra-azul' })).toBeVisible();
+
+    const form = screen.getByRole('form', { name: 'Novo tenant' });
+    await user.type(within(form).getByLabelText('Id'), 'textil-norte');
+    await user.type(within(form).getByLabelText('Nome'), 'Têxtil Norte');
+    await user.click(within(form).getByRole('button', { name: 'Criar tenant' }));
+    expect(await within(form).findByText('Tenant textil-norte criado.')).toBeVisible();
+    expect(within(table).getAllByRole('row')[1]).toHaveAccessibleName('textil-norte');
+  });
+
+  it('abre direto em Tenants quando a URL já tem #/tenants', async () => {
+    window.location.hash = '#/tenants';
+    render(<App />);
+    expect(screen.getByRole('heading', { level: 1, name: 'Tenants' })).toBeVisible();
+    expect(await screen.findByRole('table', { name: 'Tenants cadastrados' })).toBeVisible();
   });
 });

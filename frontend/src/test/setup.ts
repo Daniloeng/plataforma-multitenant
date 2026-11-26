@@ -2,11 +2,14 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, vi } from 'vitest';
 import { server } from '../mocks/server';
+import { resetTenantStore } from '../mocks/tenants';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => {
   cleanup();
   server.resetHandlers();
+  // Cada teste começa com os tenants iniciais do modo demo.
+  resetTenantStore();
 });
 afterAll(() => server.close());
 

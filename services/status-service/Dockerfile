@@ -1,12 +1,10 @@
 # Build a partir da raiz do repositório: docker build -f services/status-service/Dockerfile .
 FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /src
+# O pom raiz lista todos os módulos; o Maven exige que existam, mesmo construindo só um (-pl).
 COPY pom.xml .
-COPY libs/platform-core/pom.xml libs/platform-core/
-COPY services/status-service/pom.xml services/status-service/
-RUN mvn -B -q -pl services/status-service -am dependency:go-offline -DskipTests || true
 COPY libs libs
-COPY services/status-service services/status-service
+COPY services services
 RUN mvn -B -q -pl services/status-service -am package -DskipTests -Dspotless.check.skip=true -Djacoco.skip=true
 
 FROM eclipse-temurin:21-jre

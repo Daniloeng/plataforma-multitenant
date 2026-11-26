@@ -1,13 +1,15 @@
-# Frontend — Status e Arquitetura da plataforma
+# Frontend — Status, Tenants e Arquitetura da plataforma
 
-Frontend da plataforma multi-tenant (pedidos B2B + pagamentos), com duas páginas em abas:
+Frontend da plataforma multi-tenant (pedidos B2B + pagamentos), com três páginas em abas:
 
 - **Status** (`#/`): status do `status-service` (`GET /api/status`, atualizado a cada 10 s), o
   roadmap dos microsserviços e o progresso do estudo.
+- **Tenants** (`#/tenants`): administração do catálogo de tenants — cria, lista, suspende e
+  reativa tenants pelo Tenant Service (`/api/v1/tenants`).
 - **Arquitetura** (`#/arquitetura`): diagramas do event storming, catálogo de eventos, matriz
   produtor × consumidor e lista de ADRs — tudo lido **em build time** do próprio repositório.
 
-O roteamento é por hash (`#/` e `#/arquitetura`), sem biblioteca de rotas, para funcionar no
+O roteamento é por hash (`#/`, `#/tenants` e `#/arquitetura`), sem biblioteca de rotas, para funcionar no
 GitHub Pages (que não reescreve rotas para o `index.html`).
 
 Stack: React 19 + Vite 7 + TypeScript, testes com Vitest + Testing Library + MSW. Requer Node 22+.
@@ -16,17 +18,36 @@ Stack: React 19 + Vite 7 + TypeScript, testes com Vitest + Testing Library + MSW
 
 ```bash
 npm install
-npm run dev          # http://localhost:5173 — /api é encaminhado para http://localhost:8090
+npm run dev          # http://localhost:5173
 ```
 
-Para dados reais, suba antes o ambiente (Docker Compose na raiz do repositório) com o
-`status-service` ouvindo na porta 8090.
+O proxy do Vite (`vite.config.ts`) encaminha cada API para o seu serviço; a primeira regra que
+casar vence, por isso a específica vem antes da genérica:
+
+| Caminho           | Destino                 | Serviço          |
+| ----------------- | ----------------------- | ---------------- |
+| `/api/v1/tenants` | `http://localhost:8081` | `tenant-service` |
+| `/api`            | `http://localhost:8090` | `status-service` |
+
+Para dados reais, suba antes o ambiente na raiz do repositório:
+
+```bash
+docker compose -f infra/docker-compose.yml up -d --build --wait
+```
 
 ## Modo demo (sem backend)
 
-Com `VITE_DEMO=true`, o [MSW](https://mswjs.io) intercepta `/api/status` no navegador e devolve
-dados simulados (MongoDB e Pulsar no ar, latências variando). A página exibe o selo
-"Modo demo (API simulada)".
+Com `VITE_DEMO=true`, o [MSW](https://mswjs.io) intercepta as APIs no navegador e devolve dados
+simulados. A página exibe o selo "Modo demo (API simulada)".
+
+- `/api/status` (`src/mocks/handlers.ts`): MongoDB x4, Pulsar e `tenant-service` (type `SERVICE`,
+  "readiness UP") no ar, latências variando.
+- `/api/v1/tenants` e `/api/v1/tenants/:id` (`src/mocks/tenants.ts`): store em memória
+  pré-populado com 5 tenants fictícios (Pool, Bridge e Silo), com as mesmas regras do contrato —
+  400 em Problem Details (`application/problem+json`) para dados inválidos, 409 para id repetido,
+  404 para tenant inexistente e paginação por cursor real (ordem: mais recentes primeiro; cursor =
+  id do último item da página). O store vive só na aba do navegador: recarregar a página volta ao
+  estado inicial. Nos testes, `resetTenantStore()` roda depois de cada teste (`src/test/setup.ts`).
 
 ```bash
 VITE_DEMO=true npm run dev
@@ -35,6 +56,26 @@ VITE_DEMO=true VITE_BASE=/plataforma-multitenant/ npm run build
 ```
 
 O service worker (`public/mockServiceWorker.js`) é gerado por `npx msw init public --save`.
+
+## Página Tenants
+
+Consome o contrato `libs/contracts/src/main/resources/openapi/tenants.yaml` (cliente e tipos em
+`src/api/tenants.ts`; URLs absolutas a partir do `BASE_URL`, como em `src/api/status.ts`).
+
+| Ação               | Chamada                                                | Na tela                                          |
+| ------------------ | ------------------------------------------------------ | ------------------------------------------------ |
+| Listar             | `GET api/v1/tenants?limite=20&cursor=…`                | tabela (cartões no celular) + "Carregar mais"    |
+| Criar              | `POST api/v1/tenants` → 201                            | formulário "Novo tenant"; entra no topo da lista |
+| Suspender/reativar | `PATCH api/v1/tenants/{id}` com `{ "ativo": … }` → 200 | botão em cada linha                              |
+
+- O formulário valida no cliente com as mesmas regras do contrato e do `TenantId` de
+  `libs/platform-core`: id com `^[a-z][a-z0-9-]{1,38}[a-z0-9]$` e sem `--`; nome de 2 a 120
+  caracteres. Erros ficam ligados aos campos (`aria-invalid` + `aria-describedby`) e o foco vai
+  para o primeiro campo inválido.
+- Erros do servidor (400, 409, 404) mostram o `detail` do Problem Details; sem `detail`, o `title`;
+  sem corpo, o código HTTP.
+- Datas em pt-BR no fuso `America/Sao_Paulo`, como na página Status.
+- Se a API estiver inacessível, a página explica como subir o tenant-service ou usar o modo demo.
 
 ## Página Arquitetura
 

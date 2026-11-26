@@ -84,7 +84,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Subir MongoDB x4, Pulsar e status-service
+      - name: Subir MongoDB x4, Pulsar, tenant-service e status-service
         run: docker compose -f infra/docker-compose.yml up -d --build --wait --wait-timeout 300
       - name: Conferir /api/status
         run: |
@@ -93,7 +93,7 @@ jobs:
           import json
           s = json.load(open("status.json"))
           assert s["status"] == "UP", s
-          assert len(s["components"]) == 5, s
+          assert len(s["components"]) == 6, s
           print("\nPlataforma UP com", len(s["components"]), "componentes")
           PY
       - name: Conferir namespaces Pulsar
@@ -103,6 +103,19 @@ jobs:
             grep -q "plataforma/$ns" ns.json
             test "$(curl -fsS http://localhost:8080/admin/v2/namespaces/plataforma/$ns/schemaCompatibilityStrategy)" = '"FULL"'
           done
+      - name: Criar tenant e conferir tenant.criado no Pulsar (outbox de ponta a ponta)
+        run: |
+          curl -fsS -X POST http://localhost:8081/api/v1/tenants \
+            -H 'Content-Type: application/json' \
+            -d '{"id":"ci-smoke","nome":"Tenant do CI","plano":"GRATUITO"}' | tee tenant.json
+          curl -fsS http://localhost:8081/api/v1/tenants/ci-smoke
+          topico=http://localhost:8080/admin/v2/persistent/plataforma/tenants/tenant.criado.v1
+          for i in $(seq 1 30); do
+            n=$(curl -fsS "$topico/stats" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("msgInCounter", 0))' || echo 0)
+            [ "$n" -ge 1 ] && echo "tenant.criado publicado ($n mensagem)" && exit 0
+            sleep 1
+          done
+          echo "tenant.criado não chegou ao Pulsar em 30 s" && exit 1
       - name: Logs em caso de falha
         if: failure()
         run: docker compose -f infra/docker-compose.yml logs --tail 200

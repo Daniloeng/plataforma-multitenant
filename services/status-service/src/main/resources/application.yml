@@ -38,3 +38,6 @@ plataforma:
     pulsar:
       name: pulsar
       admin-url: ${PULSAR_ADMIN_URL:http://localhost:8080}
+    services:
+      - name: tenant-service
+        url: ${TENANT_SERVICE_URL:http://localhost:8081}

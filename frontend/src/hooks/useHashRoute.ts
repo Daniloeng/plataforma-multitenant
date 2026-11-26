@@ -1,19 +1,21 @@
 import { useEffect, useState } from 'react';
 
-// Roteamento por hash (#/ e #/arquitetura), sem biblioteca: funciona no GitHub Pages, que não
+// Roteamento por hash (#/, #/tenants e #/arquitetura), sem biblioteca: funciona no GitHub Pages, que não
 // reescreve rotas para o index.html.
 
-export type Route = 'status' | 'arquitetura';
+export type Route = 'status' | 'tenants' | 'arquitetura';
 
 export const ROUTE_HASH: Record<Route, string> = {
   status: '#/',
+  tenants: '#/tenants',
   arquitetura: '#/arquitetura',
 };
 
 /** Converte o hash em rota; qualquer hash desconhecido cai em "status". */
 export function parseHash(hash: string): Route {
   const path = hash.replace(/^#\/?/, '').replace(/\/+$/, '').toLowerCase();
-  return path === 'arquitetura' ? 'arquitetura' : 'status';
+  if (path === 'arquitetura' || path === 'tenants') return path;
+  return 'status';
 }
 
 export function useHashRoute(): Route {

@@ -15,14 +15,19 @@ import org.springframework.validation.annotation.Validated;
  * @param timeout tempo máximo de cada verificação
  * @param mongo instâncias MongoDB, uma por microsserviço
  * @param pulsar endereço do admin HTTP do Pulsar
+ * @param services microsserviços da plataforma, verificados pela readiness do Actuator
  */
 @Validated
 @ConfigurationProperties("plataforma.status")
 public record StatusProperties(
-    @NotNull Duration timeout, @Valid List<MongoTarget> mongo, @Valid PulsarTarget pulsar) {
+    @NotNull Duration timeout,
+    @Valid List<MongoTarget> mongo,
+    @Valid PulsarTarget pulsar,
+    @Valid List<ServiceTarget> services) {
 
   public StatusProperties {
     mongo = mongo == null ? List.of() : List.copyOf(mongo);
+    services = services == null ? List.of() : List.copyOf(services);
   }
 
   /** Uma instância MongoDB a verificar. */
@@ -30,4 +35,7 @@ public record StatusProperties(
 
   /** O Pulsar a verificar, pelo admin HTTP. */
   public record PulsarTarget(@NotBlank String name, @NotNull URI adminUrl) {}
+
+  /** Um microsserviço a verificar, pela URL base (ex.: http://tenant-service:8081). */
+  public record ServiceTarget(@NotBlank String name, @NotNull URI url) {}
 }

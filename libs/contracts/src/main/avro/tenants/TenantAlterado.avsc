@@ -59,6 +59,12 @@
       "name": "ativo",
       "type": "boolean",
       "doc": "Falso quando o tenant foi suspenso."
+    },
+    {
+      "name": "versao",
+      "type": "long",
+      "default": 0,
+      "doc": "Versão do cadastro do tenant (começa em 0 e sobe a cada alteração). tenant.criado e tenant.alterado chegam por tópicos diferentes, sem ordem entre si: o consumidor guarda a maior versão vista e ignora eventos com versão menor ou igual."
     }
   ]
 }

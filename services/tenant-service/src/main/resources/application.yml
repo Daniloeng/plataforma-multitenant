@@ -1,0 +1,43 @@
+server:
+  port: 8081
+  shutdown: graceful
+
+spring:
+  application:
+    name: tenant-service
+  threads:
+    virtual:
+      enabled: true
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+  data:
+    mongodb:
+      # Replica set de um nó: transações (estado + outbox) exigem replica set.
+      uri: ${MONGO_URI:mongodb://localhost:27017/tenants?directConnection=true}
+  pulsar:
+    client:
+      service-url: ${PULSAR_URL:pulsar://localhost:6650}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          # Pronto só com o MongoDB respondendo: o status-service e o Kubernetes leem esta probe.
+          include: readinessState,mongo
+
+plataforma:
+  # Contexto produtor (x-produtor): o outbox recusa eventos de outro serviço.
+  service: tenants
+  tenancy:
+    # API administrativa: opera sobre o catálogo de tenants, sem X-Tenant-Id (ADR-0005).
+    excluded-paths:
+      - /api/v1/tenants/**
+      - /api/v1/tenants

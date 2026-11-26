@@ -26,7 +26,7 @@ o evento se o serviço cair entre um e outro.
   - Pedidos ignora `pagamento.aprovado` ou `pagamento.recusado` de um pedido que já está em estado
     terminal (CANCELADO): o estorno, quando necessário, é responsabilidade de Pagamentos.
 - **Outbox transacional:** a mudança de estado e o evento são gravados na mesma transação MongoDB
-  (coleção `outbox`). Um relay lê a outbox por change stream e publica no Pulsar, marcando cada
+  (coleção `outbox`). Um relay lê a outbox (por polling, ver ADR-0008) e publica no Pulsar, marcando cada
   item como publicado. O evento sai pelo menos uma vez.
 - **Consumo idempotente:** cada consumidor registra o `eventId` processado (índice único com TTL);
   uma reentrega é descartada.
