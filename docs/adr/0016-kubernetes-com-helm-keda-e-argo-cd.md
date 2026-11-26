@@ -35,7 +35,7 @@ escalar consumidores não quebra a ordem por agregado.
   informada (ou um `existingSecret`). O Keycloak segue em `start-dev`, com os usuários de
   demonstração: não pode ser exposto por Ingress enquanto for assim.
 - **Gateway com uma réplica só:** o rate limit por plano é em memória e se multiplicaria.
-- **KEDA** escala o pagamentos-service pelo backlog da assinatura `pagamentos-service-pedido-criado`
+- **KEDA** escala o pagamentos-service pelo backlog da assinatura `pagamentos-pedido-criado`
   no Pulsar (scaler nativo, 20 mensagens por réplica, de 1 a 3 réplicas). O pedidos-service roda
   com 2 réplicas fixas para exercitar o lease do relay. Quem escala pelo backlog usa fila pequena no
   consumidor (`plataforma.events.receiver-queue-size`, 20 no pagamentos-service; o padrão do

@@ -109,7 +109,7 @@ keda:
   minReplicas: 1
   maxReplicas: 3
   topic: persistent://plataforma/pedidos/pedido.criado.v1
-  subscription: pagamentos-service-pedido-criado
+  subscription: pagamentos-pedido-criado
   # Mensagens pendentes por réplica antes de subir mais uma.
   backlogThreshold: 20
   pollingInterval: 15

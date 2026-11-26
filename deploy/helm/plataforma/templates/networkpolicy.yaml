@@ -3,6 +3,7 @@
 #   gateway:8000          de qualquer lugar (é a porta de entrada)
 #   gateway:8001          só do status-service (métricas com nomes de tenants)
 #   serviços de negócio   só do gateway e do status-service (os cabeçalhos X-* vêm só do gateway)
+#   status-service        só do gateway (/api/status)
 #   mongo-<db>            só do serviço dono e do status-service (banco por serviço)
 #   pulsar                dos pods da plataforma e do KEDA
 #   keycloak:8080         de qualquer lugar (login); 9000 só do status-service
@@ -35,6 +36,23 @@ spec:
             matchLabels: { app.kubernetes.io/name: status-service }
       ports:
         - { port: {{ .Values.gateway.managementPort }} }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: status-service
+  labels:
+    {{- include "plataforma.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: status-service }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: gateway }
+      ports:
+        - { port: {{ .Values.statusService.port }} }
 {{- range $name, $svc := .Values.services }}
 ---
 apiVersion: networking.k8s.io/v1

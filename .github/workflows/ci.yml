@@ -559,7 +559,7 @@ jobs:
           PY
           backlog() {
             curl -fsS http://localhost:8080/admin/v2/persistent/plataforma/pedidos/pedido.criado.v1/stats |
-              python3 -c 'import json,sys; print(json.load(sys.stdin)["subscriptions"]["pagamentos-service-pedido-criado"]["msgBacklog"])'
+              python3 -c 'import json,sys; print(json.load(sys.stdin)["subscriptions"]["pagamentos-pedido-criado"]["msgBacklog"])'
           }
           # O relay publica em lotes: espera os 120 chegarem ao tópico.
           for i in $(seq 1 60); do b=$(backlog); [ "$b" -ge 120 ] && break; sleep 1; done
