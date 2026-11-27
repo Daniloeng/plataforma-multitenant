@@ -34,6 +34,10 @@ spec:
     - from:
         - podSelector:
             matchLabels: { app.kubernetes.io/name: status-service }
+        {{- range .Values.networkPolicy.metricsNamespaces }}
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ . }} }
+        {{- end }}
       ports:
         - { port: {{ .Values.gateway.managementPort }} }
 ---
@@ -71,6 +75,10 @@ spec:
             matchLabels: { app.kubernetes.io/name: gateway }
         - podSelector:
             matchLabels: { app.kubernetes.io/name: status-service }
+        {{- range $.Values.networkPolicy.metricsNamespaces }}
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ . }} }
+        {{- end }}
       ports:
         - { port: {{ $svc.port }} }
 ---

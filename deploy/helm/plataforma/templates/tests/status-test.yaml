@@ -1,4 +1,5 @@
-# helm test: a página de saúde responde pelo gateway, com tudo UP e rodando no Kubernetes.
+# helm test: a página de saúde responde pelo gateway, com tudo UP e rodando no Kubernetes. O
+# status agregado é o primeiro campo da resposta; os componentes também têm "status".
 apiVersion: v1
 kind: Pod
 metadata:
@@ -20,6 +21,6 @@ spec:
         - >-
           for i in $(seq 1 40); do
           body=$(curl -fsS http://gateway:{{ .Values.gateway.port }}/api/status) &&
-          echo "$body" | grep -q '"status":"UP"' &&
+          echo "$body" | grep -q '^{"status":"UP"' &&
           echo "$body" | grep -q '"platform":"kubernetes"' && echo "$body" && exit 0;
           sleep 3; done; echo "$body"; exit 1

@@ -18,5 +18,7 @@ spec:
     automated: { prune: true, selfHeal: true }
     syncOptions: [CreateNamespace=true]
     retry:
-      limit: 5
+      # Na primeira instalação, o CRD do KEDA pode demorar: a onda -1 não espera a saúde de uma
+      # Application, então a plataforma tenta de novo até ele existir.
+      limit: 10
       backoff: { duration: 10s, factor: 2, maxDuration: 3m }

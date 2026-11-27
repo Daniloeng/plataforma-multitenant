@@ -24,7 +24,7 @@ ferramentas gratuitas.
 | Pedidos | ✅ Ativo: `/api/v1/pedidos` com preço da cópia local do catálogo, `Idempotency-Key`, cancelamento e histórico da saga; linha do tempo ao vivo (SSE) em `/api/v1/pedidos/{id}/linha-do-tempo`; tenants Bridge e Silo em database própria (`pedidos_t_<tenant>`), visível em `/api/v1/isolamento/pedidos` |
 | Pagamentos | ✅ Ativo: cobra cada `pedido.criado` num gateway simulado (aprova até R$ 10.000,00), estorna pedidos cancelados, ledger de partida dobrada em `/api/v1/ledger/lancamentos`; Pedidos confirma, cancela recusados e expira PENDENTE após 15 min |
 | Contratos | 10 eventos Avro, 6 APIs OpenAPI, 16 ADRs ([arquitetura](docs/arquitetura/event-storming.md)) |
-| Cobertura (linhas) | `platform-core` 100% · `contracts` 100% · `platform-spring` 88,1% · `gateway` 91,6% · `catalogo-service` 94,2% · `pedidos-service` 94,0% · `pagamentos-service` 99,1% · `tenant-service` 95,4% · `status-service` 99,0% · frontend 99,7% (mínimo exigido: 80%) |
+| Cobertura (linhas) | `platform-core` 100% · `contracts` 100% · `platform-spring` 88,3% · `gateway` 92,7% · `catalogo-service` 94,2% · `pedidos-service` 94,0% · `pagamentos-service` 99,1% · `tenant-service` 95,4% · `status-service` 99,0% · frontend 99,75% (mínimo exigido: 80%) |
 
 ## Arquitetura (visão alvo)
 
@@ -136,6 +136,8 @@ com PR mergeado, tag `dia-NN`, frontend funcionando e esta seção atualizada.
   `values-kind.yaml` e `helm test` (passo a passo em `docs/dias/11.md`).
 - **Claude Code:** frontend por subagente em paralelo; revisão do `arquiteto`; workflow do Claude
   Code Action no GitHub.
+- **Cobertura:** `platform-spring` 88,3%, `status-service` 99,0%, `pagamentos-service` 99,1%,
+  frontend 99,75% de linhas.
 
 ### Dia 10: observabilidade · [detalhes](docs/dias/10.md)
 

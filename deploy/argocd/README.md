@@ -19,6 +19,9 @@ deploy/argocd/
 kubectl create namespace argocd
 kubectl apply -n argocd --server-side \
   -f https://raw.githubusercontent.com/argoproj/argo-cd/v2.14.11/manifests/install.yaml
+# Senha do admin do Keycloak (o Argo CD não gera segredos de forma estável).
+kubectl create namespace plataforma
+kubectl -n plataforma create secret generic keycloak-admin --from-literal=senha="$(openssl rand -base64 18)"
 kubectl apply -f deploy/argocd/projeto.yaml -f deploy/argocd/raiz.yaml
 kubectl -n argocd get applications -w
 ```

@@ -33,7 +33,10 @@ spec:
         app.kubernetes.io/name: pulsar
         app.kubernetes.io/component: broker
     spec:
-      {{- include "plataforma.podSecurity" . | nindent 6 }}
+      # A imagem roda com o UID 10000; o fsGroup deixa o volume gravável em qualquer provisionador.
+      securityContext:
+        seccompProfile: { type: RuntimeDefault }
+        fsGroup: 10000
       containers:
         - name: pulsar
           image: {{ .Values.pulsar.image }}

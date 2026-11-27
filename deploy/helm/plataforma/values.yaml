@@ -96,6 +96,8 @@ networkPolicy:
   enabled: true
   # Namespaces que leem o admin do Pulsar (o operador do KEDA).
   pulsarAdminNamespaces: [keda]
+  # Namespaces de um Prometheus que raspe /actuator/prometheus (os pods têm as anotações).
+  metricsNamespaces: []
 
 tracing:
   # Liga a exportação OTLP quando houver um coletor (Tempo) no cluster.

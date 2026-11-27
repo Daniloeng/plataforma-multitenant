@@ -6,6 +6,9 @@ keycloak:
   # Emissor dos tokens: o endereço pelo qual o navegador fala com o Keycloak. Na homologação
   # gerenciada pelo Argo CD, o acesso é por port-forward enquanto o Keycloak rodar em modo dev.
   hostname: http://localhost:8180
+  # O Argo CD renderiza com helm template, sem lookup: uma senha gerada mudaria a cada sync. Crie o
+  # Secret antes (deploy/argocd/README.md).
+  existingSecret: keycloak-admin
 
 tracing:
   export: false

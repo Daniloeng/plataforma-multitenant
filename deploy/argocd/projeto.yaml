@@ -12,6 +12,8 @@ spec:
   destinations:
     - { server: https://kubernetes.default.svc, namespace: plataforma }
     - { server: https://kubernetes.default.svc, namespace: keda }
+    # O chart do KEDA cria um RoleBinding no kube-system (leitura da autenticação do apiserver).
+    - { server: https://kubernetes.default.svc, namespace: kube-system }
   # O KEDA instala CRDs e papéis de cluster.
   clusterResourceWhitelist:
     - { group: "", kind: Namespace }
