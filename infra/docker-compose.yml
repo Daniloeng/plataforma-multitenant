@@ -109,6 +109,8 @@ services:
       PAGAMENTOS_SERVICE_URL: http://pagamentos-service:8084
       GATEWAY_URL: http://gateway:8001
       KEYCLOAK_MANAGEMENT_URL: http://keycloak:9000
+      # A página de saúde mostra onde a plataforma roda (Dia 11).
+      PLATAFORMA_RUNTIME: compose
     depends_on:
       mongo-tenants: { condition: service_healthy }
       mongo-catalogo: { condition: service_healthy }

@@ -1,0 +1,111 @@
+{{- if .Values.keycloak.enabled }}
+{{- if not .Values.keycloak.existingSecret }}
+# Senha do admin: a dos values ou, vazia, uma gerada na primeira instalação e mantida depois.
+{{- $existing := lookup "v1" "Secret" .Release.Namespace "keycloak-admin" }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: keycloak-admin
+  labels:
+    {{- include "plataforma.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+type: Opaque
+data:
+  {{- if .Values.keycloak.adminPassword }}
+  senha: {{ .Values.keycloak.adminPassword | b64enc }}
+  {{- else if $existing }}
+  senha: {{ index $existing.data "senha" }}
+  {{- else }}
+  senha: {{ randAlphaNum 24 | b64enc }}
+  {{- end }}
+---
+{{- end }}
+# Identidade (ADR-0009): realm "plataforma" importado na subida, em modo dev (estudo).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm
+  labels:
+    {{- include "plataforma.labels" . | nindent 4 }}
+data:
+  realm.json: |
+    {{- .Files.Get "files/realm-plataforma.json" | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  labels:
+    {{- include "plataforma.labels" . | nindent 4 }}
+    app.kubernetes.io/name: keycloak
+spec:
+  selector:
+    app.kubernetes.io/name: keycloak
+  ports:
+    - { name: http, port: 8080 }
+    - { name: management, port: 9000 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  labels:
+    {{- include "plataforma.labels" . | nindent 4 }}
+    app.kubernetes.io/name: keycloak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak
+  template:
+    metadata:
+      labels:
+        {{- include "plataforma.labels" . | nindent 8 }}
+        app.kubernetes.io/name: keycloak
+        app.kubernetes.io/component: identity
+      annotations:
+        checksum/realm: {{ .Files.Get "files/realm-plataforma.json" | sha256sum }}
+    spec:
+      {{- include "plataforma.podSecurity" . | nindent 6 }}
+      containers:
+        - name: keycloak
+          image: {{ .Values.keycloak.image }}
+          args: ["start-dev", "--import-realm"]
+          env:
+            - { name: KC_HOSTNAME, value: {{ .Values.keycloak.hostname | quote }} }
+            - { name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC, value: "true" }
+            - { name: KC_HEALTH_ENABLED, value: "true" }
+            - { name: KC_BOOTSTRAP_ADMIN_USERNAME, value: admin }
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default "keycloak-admin" .Values.keycloak.existingSecret }}
+                  key: senha
+            - { name: JAVA_OPTS_KC_HEAP, value: "-XX:MaxRAMPercentage=60" }
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: management, containerPort: 9000 }
+          startupProbe:
+            httpGet: { path: /health/started, port: management }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /health/ready, port: management }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health/live, port: management }
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.keycloak.resources | nindent 12 }}
+          volumeMounts:
+            - name: realm
+              mountPath: /opt/keycloak/data/import/realm.json
+              subPath: realm.json
+              readOnly: true
+      volumes:
+        - name: realm
+          configMap:
+            name: keycloak-realm
+{{- end }}

@@ -183,6 +183,7 @@ public class PlatformAutoConfiguration {
               new TransactionTemplate(transactions),
               props.service(),
               props.events().maxRedeliveries());
+      subscriber.setReceiverQueueSize(props.events().receiverQueueSize());
       subscriber.setObservationRegistry(
           observations.getIfAvailable(() -> ObservationRegistry.NOOP));
       return subscriber;

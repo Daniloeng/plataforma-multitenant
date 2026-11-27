@@ -80,6 +80,40 @@ describe('fetchStatus', () => {
     await expect(fetchStatus()).resolves.toEqual(body);
   });
 
+  it('aceita runtime completo, com namespace e instância nulos, nulo ou ausente (Dia 11)', async () => {
+    const corpos = [
+      {
+        ...makeStatus(),
+        runtime: {
+          platform: 'kubernetes',
+          namespace: 'plataforma',
+          instance: 'status-service-7c9d8-xk2lp',
+        },
+      },
+      { ...makeStatus(), runtime: { platform: 'compose', namespace: null, instance: 'abc123' } },
+      { ...makeStatus(), runtime: { platform: 'local' } },
+      { ...makeStatus(), runtime: null },
+      makeStatus(),
+    ];
+    for (const body of corpos) {
+      server.use(http.get('*/api/status', () => HttpResponse.json(body)));
+      await expect(fetchStatus()).resolves.toStrictEqual(body);
+    }
+  });
+
+  it.each([
+    ['texto', 'kubernetes'],
+    ['sem platform', { namespace: 'plataforma' }],
+    ['platform vazio', { platform: '  ' }],
+    ['platform não textual', { platform: 1 }],
+    ['namespace não textual', { platform: 'kubernetes', namespace: 42 }],
+    ['instância não textual', { platform: 'kubernetes', instance: ['a'] }],
+  ])('troca runtime malformado por null sem invalidar a resposta (%s)', async (_, runtime) => {
+    const base = makeStatus();
+    server.use(http.get('*/api/status', () => HttpResponse.json({ ...base, runtime })));
+    await expect(fetchStatus()).resolves.toStrictEqual({ ...base, runtime: null });
+  });
+
   it.each([
     ['nulo', null],
     ['status desconhecido', { ...makeStatus(), status: 'MAYBE' }],

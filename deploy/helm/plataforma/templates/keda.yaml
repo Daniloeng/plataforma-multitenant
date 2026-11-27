@@ -1,0 +1,29 @@
+{{- if .Values.keda.enabled }}
+# KEDA (ADR-0016): o {{ .Values.keda.service }} ganha réplicas quando o backlog da assinatura dele no
+# Pulsar passa do limite. A assinatura é Key_Shared (ADR-0010), então réplicas novas dividem os
+# tenants sem quebrar a ordem por agregado; o lease do relay mantém um só publicador do outbox.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ .Values.keda.service }}
+  annotations:
+    # Argo CD: na primeira sincronização o CRD do KEDA pode ainda não existir.
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+  labels:
+    {{- include "plataforma.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ .Values.keda.service }}
+  minReplicaCount: {{ .Values.keda.minReplicas }}
+  maxReplicaCount: {{ .Values.keda.maxReplicas }}
+  pollingInterval: {{ .Values.keda.pollingInterval }}
+  cooldownPeriod: {{ .Values.keda.cooldownPeriod }}
+  triggers:
+    - type: pulsar
+      metadata:
+        adminURL: http://pulsar.{{ .Release.Namespace }}.svc.cluster.local:8080
+        topic: {{ .Values.keda.topic }}
+        subscription: {{ .Values.keda.subscription }}
+        msgBacklogThreshold: {{ .Values.keda.backlogThreshold | quote }}
+        isPartitionedTopic: "false"
+{{- end }}

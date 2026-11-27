@@ -1,0 +1,24 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: plataforma
+  namespace: argocd
+spec:
+  project: plataforma
+  source:
+    repoURL: https://github.com/Daniloeng/plataforma-multitenant.git
+    targetRevision: main
+    path: deploy/helm/plataforma
+    helm:
+      valueFiles: [values.yaml, values-homolog.yaml]
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: plataforma
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true]
+    retry:
+      # Na primeira instalação, o CRD do KEDA pode demorar: a onda -1 não espera a saúde de uma
+      # Application, então a plataforma tenta de novo até ele existir.
+      limit: 10
+      backoff: { duration: 10s, factor: 2, maxDuration: 3m }

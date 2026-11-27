@@ -1,0 +1,90 @@
+{{- range $db := .Values.mongo.databases }}
+---
+# MongoDB do serviço {{ $db }}: replica set de um nó (rs-{{ $db }}), como no Compose.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo-{{ $db }}
+  labels:
+    {{- include "plataforma.labels" $ | nindent 4 }}
+    app.kubernetes.io/name: mongo-{{ $db }}
+spec:
+  clusterIP: None
+  # O nó precisa resolver o próprio nome antes de ficar pronto, para iniciar o replica set.
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: mongo-{{ $db }}
+  ports:
+    - name: mongo
+      port: 27017
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongo-{{ $db }}
+  labels:
+    {{- include "plataforma.labels" $ | nindent 4 }}
+    app.kubernetes.io/name: mongo-{{ $db }}
+spec:
+  serviceName: mongo-{{ $db }}
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mongo-{{ $db }}
+  template:
+    metadata:
+      labels:
+        {{- include "plataforma.labels" $ | nindent 8 }}
+        app.kubernetes.io/name: mongo-{{ $db }}
+        app.kubernetes.io/component: database
+    spec:
+      {{- include "plataforma.podSecurity" $ | nindent 6 }}
+      containers:
+        - name: mongo
+          image: {{ $.Values.mongo.image }}
+          args: ["--replSet", "rs-{{ $db }}", "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.25", "--quiet"]
+          ports:
+            - { name: mongo, containerPort: 27017 }
+          env:
+            - { name: RS_NAME, value: rs-{{ $db }} }
+            - { name: RS_HOST, value: {{ include "plataforma.mongoHost" (list $ $db) | quote }} }
+          # Inicia o replica set na primeira vez; depois só confirma que o nó é PRIMARY (igual ao
+          # healthcheck do Compose).
+          readinessProbe:
+            exec:
+              command:
+                - bash
+                - -c
+                - >-
+                  mongosh --quiet --eval "try { rs.status().ok } catch (e) {
+                  rs.initiate({_id: '$RS_NAME', members: [{_id: 0, host: '$RS_HOST'}]}).ok };
+                  db.hello().isWritablePrimary || quit(1)"
+            periodSeconds: 5
+            timeoutSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            exec:
+              command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 10
+          resources:
+            {{- toYaml $.Values.mongo.resources | nindent 12 }}
+          volumeMounts:
+            - { name: data, mountPath: /data/db }
+      {{- if not $.Values.mongo.persistence.enabled }}
+      volumes:
+        - name: data
+          emptyDir: {}
+      {{- end }}
+  {{- if $.Values.mongo.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: {{ $.Values.mongo.persistence.size }}
+  {{- end }}
+{{- end }}

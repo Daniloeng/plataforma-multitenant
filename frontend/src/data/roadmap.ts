@@ -77,11 +77,11 @@ export const ROADMAP: readonly RoadmapService[] = [
     name: 'Kubernetes e MVP1',
     day: 11,
     responsibility:
-      'Empacota os serviços com Helm, sobe tudo num cluster kind com escala por KEDA e entrega contínua pelo Argo CD, fechando o MVP1.',
-    situation: 'Planejado',
+      'Empacota a plataforma num chart Helm testado num cluster kind no CI, escala o pagamentos-service com KEDA pelo backlog do Pulsar e entrega por GitOps com o Argo CD, fechando o MVP1 na versão v0.1.0-mvp1.',
+    situation: 'Ativo',
   },
 ];
 
-export const CURRENT_DAY = 10;
+export const CURRENT_DAY = 11;
 export const TOTAL_DAYS = 22;
 export const REPOSITORY_URL = 'https://github.com/Daniloeng/plataforma-multitenant';

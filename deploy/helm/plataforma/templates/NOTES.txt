@@ -1,0 +1,15 @@
+Plataforma instalada no namespace {{ .Release.Namespace }}.
+
+Gateway e Keycloak (o emissor dos tokens é {{ .Values.keycloak.hostname }}):
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/gateway 8000:8000 &
+  kubectl -n {{ .Release.Namespace }} port-forward svc/keycloak 8180:8080 &
+  curl -s localhost:8000/api/status | jq '.status, .runtime'
+  infra/seed.sh   # tenants e produtos de demonstração
+
+{{- if .Values.keda.enabled }}
+
+Escala do {{ .Values.keda.service }} pelo backlog do Pulsar (KEDA):
+
+  kubectl -n {{ .Release.Namespace }} get scaledobject,hpa
+{{- end }}

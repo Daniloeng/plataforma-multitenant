@@ -39,6 +39,6 @@ public class StatusConfiguration {
       List<ComponentCheck> componentChecks,
       Clock clock,
       @Value("${plataforma.status.version:dev}") String version) {
-    return new StatusService(componentChecks, clock, version);
+    return new StatusService(componentChecks, clock, version, RuntimeInfo.detect(System.getenv()));
   }
 }

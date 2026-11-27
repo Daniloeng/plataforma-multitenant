@@ -26,6 +26,8 @@ services/pagamentos-service/ cobrança simulada, estorno e ledger, /api/v1/pagam
 services/status-service/  saúde de MongoDB x4, Pulsar e serviços em GET /api/status (porta 8090), com métricas lidas do /actuator/prometheus de cada serviço
 frontend/                 React + Vite + TS; modo demo com MSW (GitHub Pages)
 infra/                    Docker Compose (MongoDB por serviço, Pulsar, Keycloak), keycloak/realm-plataforma.json, seed.sh; observabilidade/ (Prometheus + alertas testados, Grafana, Tempo; perfil observabilidade)
+deploy/helm/plataforma/   chart Helm da plataforma inteira (values-kind para o CI, values-homolog para o Argo CD)
+deploy/argocd/            Argo CD: AppProject e app of apps (KEDA e plataforma)
 docs/runbooks/            um runbook por alerta (skill runbook)
 docs/dias/NN.md           diário detalhado de cada dia
 docs/adr/                 decisões de arquitetura (ADRs)
@@ -37,7 +39,8 @@ infraestrutura de borda, não um serviço de negócio), como módulo do `pom.xml
 `platform-spring` e seguem o `tenant-service` (Dockerfile, `application.yml`, `*IT` com Mongo + Pulsar).
 As dependências web, data-mongodb e pulsar do `platform-spring` são opcionais: o serviço declara as
 que usa. Todo serviço novo ganha uma rota em `services/gateway/.../Routes.java`, não publica porta
-no host no Compose e entra no `status-service`.
+no host no Compose, entra no `status-service` e no chart (`services:` do `values.yaml`, mais a
+variável `<NOME>_URL` do gateway e do status-service).
 
 ## Comandos
 | O quê | Comando |
@@ -49,6 +52,8 @@ no host no Compose e entra no `status-service`.
 | Ambiente local | `docker compose -f infra/docker-compose.yml up -d --build --wait` |
 | Com Prometheus, Grafana e Tempo | `TRACING_EXPORT=true docker compose -f infra/docker-compose.yml --profile observabilidade up -d --build --wait` |
 | Testar os alertas | `docker run --rm -v "$PWD/infra/observabilidade/prometheus:/p" -w /p --entrypoint promtool prom/prometheus:v3.4.2 test rules alertas.test.yml` |
+| Kubernetes local (kind) | `kind create cluster --name plataforma && docker compose -f infra/docker-compose.yml build && for s in gateway status-service tenant-service catalogo-service pedidos-service pagamentos-service; do kind load docker-image plataforma/$s:dev --name plataforma; done && helm install plataforma deploy/helm/plataforma -n plataforma --create-namespace -f deploy/helm/plataforma/values-kind.yaml --wait --timeout 15m && helm test plataforma -n plataforma` |
+| Validar o chart | `helm lint deploy/helm/plataforma -f deploy/helm/plataforma/values-kind.yaml --strict` |
 | Frontend com API real | `cd frontend && npm run dev` (proxy `/api` → gateway em `localhost:8000`; login no Keycloak em `localhost:8180`) |
 | Tenants de demonstração | `infra/seed.sh` (Compose de pé) |
 | Token para curl | `curl -s localhost:8180/realms/plataforma/protocol/openid-connect/token -d grant_type=password -d client_id=plataforma-cli -d username=ana -d password=senha123` |
@@ -101,6 +106,10 @@ no host no Compose e entra no `status-service`.
   `alertas.test.yml`. Nunca use dado de corpo ou id de pedido como tag (cardinalidade); a tag
   `tenant` já vem do filtro. O relay do outbox tem lease (`outbox_relay_lease`): várias réplicas
   podem subir.
+- **Kubernetes** (ADR-0016): o chart é a fonte de verdade da implantação; `files/pulsar-init.sh` e
+  `files/realm-plataforma.json` são cópias das de `infra/` (o CI confere). Imagem nova sobe com o
+  `appVersion` do chart e o workflow `release.yml`. Consumidor que escala usa assinatura Key_Shared
+  (já é o padrão do `EventSubscriber`); nada de estado em memória que precise de réplica única.
 - **APIs**: contract-first em `libs/contracts/src/main/resources/openapi/`; rotas `/api/v1/`;
   `X-Tenant-Id` obrigatório nas APIs de negócio; erros em Problem Details (RFC 9457).
 - **Decisões**: decisão de arquitetura vira ADR (skill `adr`); peça revisão ao subagente `arquiteto`

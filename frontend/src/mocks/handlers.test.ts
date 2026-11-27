@@ -1,6 +1,6 @@
 import { fetchStatus, type ServiceMetrics } from '../api/status';
 import { avaliarAlertas } from '../utils/metricas';
-import { DEMO_VERSION, buildDemoMetrics, buildDemoStatus } from './handlers';
+import { DEMO_RUNTIME, DEMO_VERSION, buildDemoMetrics, buildDemoStatus } from './handlers';
 
 describe('buildDemoStatus', () => {
   it('monta Mongo, Pulsar, tenant-service, catalogo-service, pedidos-service, pagamentos-service, gateway e keycloak no ar com latência base quando random = 0', () => {
@@ -9,6 +9,13 @@ describe('buildDemoStatus', () => {
     expect(status.status).toBe('UP');
     expect(status.checkedAt).toBe('2026-11-26T12:00:00.000Z');
     expect(status.version).toBe(DEMO_VERSION);
+    expect(DEMO_VERSION).toBe('0.1.0-mvp1');
+    expect(status.runtime).toEqual({
+      platform: 'kubernetes',
+      namespace: 'plataforma',
+      instance: 'status-service-7c9d8-xk2lp',
+    });
+    expect(status.runtime).not.toBe(DEMO_RUNTIME);
     expect(status.components.map((c) => c.name)).toEqual([
       'mongo-tenants',
       'mongo-catalogo',

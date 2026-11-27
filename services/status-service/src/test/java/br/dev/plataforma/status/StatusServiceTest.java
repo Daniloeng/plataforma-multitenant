@@ -32,6 +32,15 @@ class StatusServiceTest {
   }
 
   @Test
+  void levaOndeAPlataformaRodaNaResposta() {
+    var runtime = new RuntimeInfo("kubernetes", "plataforma", "status-service-0");
+    var service = new StatusService(List.of(FakeCheck.up("mongo-a")), RELOGIO, "v", runtime);
+
+    assertThat(service.current().runtime()).isEqualTo(runtime);
+    assertThat(new StatusService(List.of(), RELOGIO, "v").current().runtime()).isNull();
+  }
+
+  @Test
   void verificacaoQueLancaExcecaoViraDown() {
     var falha =
         new FakeCheck(

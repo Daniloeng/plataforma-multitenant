@@ -176,6 +176,11 @@ h2 {
   font-size: 0.8rem;
 }
 
+/* Nome de pod é longo e sem espaços: quebra em vez de estourar a largura no celular. */
+.ambiente__valor {
+  overflow-wrap: anywhere;
+}
+
 .button {
   font: inherit;
   font-weight: 600;

@@ -1,0 +1,64 @@
+# Saúde de MongoDB x4, Pulsar, Keycloak e serviços (GET /api/status, pelo gateway).
+apiVersion: v1
+kind: Service
+metadata:
+  name: status-service
+  labels:
+    {{- include "plataforma.labels" . | nindent 4 }}
+    app.kubernetes.io/name: status-service
+spec:
+  selector:
+    app.kubernetes.io/name: status-service
+  ports:
+    - { name: http, port: {{ .Values.statusService.port }} }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: status-service
+  labels:
+    {{- include "plataforma.labels" . | nindent 4 }}
+    app.kubernetes.io/name: status-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: status-service
+  template:
+    metadata:
+      labels:
+        {{- include "plataforma.labels" . | nindent 8 }}
+        app.kubernetes.io/name: status-service
+        app.kubernetes.io/component: service
+    spec:
+      {{- include "plataforma.podSecurity" . | nindent 6 }}
+      containers:
+        - name: status-service
+          image: {{ include "plataforma.image" (list . "status-service") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: {{ .Values.statusService.port }} }
+          env:
+            # A página de saúde mostra onde a plataforma roda (Dia 11).
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef: { fieldPath: metadata.namespace }
+            {{- range $db := .Values.mongo.databases }}
+            - name: MONGO_{{ $db | upper }}_URI
+              value: {{ printf "mongodb://%s/?directConnection=true" (include "plataforma.mongoHost" (list $ $db)) | quote }}
+            {{- end }}
+            - { name: PULSAR_ADMIN_URL, value: "http://pulsar:8080" }
+            - { name: GATEWAY_URL, value: "http://gateway-management:{{ .Values.gateway.managementPort }}" }
+            - { name: KEYCLOAK_MANAGEMENT_URL, value: "http://keycloak:9000" }
+            {{- range $name, $svc := .Values.services }}
+            - name: {{ $name | upper | replace "-" "_" }}_URL
+              value: "http://{{ $name }}:{{ $svc.port }}"
+            {{- end }}
+          {{- include "plataforma.probes" "http" | nindent 10 }}
+          {{- include "plataforma.containerSecurity" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.statusService.resources | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        {{- include "plataforma.tmpVolume" . | nindent 8 }}

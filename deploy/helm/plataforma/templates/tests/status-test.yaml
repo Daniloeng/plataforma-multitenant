@@ -1,0 +1,26 @@
+# helm test: a página de saúde responde pelo gateway, com tudo UP e rodando no Kubernetes. O
+# status agregado é o primeiro campo da resposta; os componentes também têm "status".
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ .Release.Name }}-teste-status
+  labels:
+    {{- include "plataforma.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  restartPolicy: Never
+  {{- include "plataforma.podSecurity" . | nindent 2 }}
+  containers:
+    - name: status
+      image: {{ .Values.pulsar.initImage }}
+      command:
+        - sh
+        - -c
+        - >-
+          for i in $(seq 1 40); do
+          body=$(curl -fsS http://gateway:{{ .Values.gateway.port }}/api/status) &&
+          echo "$body" | grep -q '^{"status":"UP"' &&
+          echo "$body" | grep -q '"platform":"kubernetes"' && echo "$body" && exit 0;
+          sleep 3; done; echo "$body"; exit 1

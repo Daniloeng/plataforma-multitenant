@@ -1,0 +1,11 @@
+# Cluster kind do CI e local: imagens construídas na hora e carregadas com `kind load`.
+image:
+  registry: plataforma
+  prefix: ""
+  tag: dev
+  pullPolicy: Never
+
+keda:
+  enabled: true
+  # Reage rápido no CI, para o teste ver a escala antes de o backlog esvaziar.
+  pollingInterval: 5

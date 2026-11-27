@@ -6,7 +6,8 @@ info:
     Saúde agregada da plataforma, servida pelo status-service e publicada pelo gateway sem
     autenticação (é a página inicial do frontend). Desde o Dia 10 (ADR-0015), cada serviço da
     plataforma que respondeu traz também as métricas lidas do /actuator/prometheus dele,
-    acumuladas desde a subida e sem nomes de tenants. Fica fora de /api/v1 por ser a primeira API
+    acumuladas desde a subida e sem nomes de tenants. Desde o Dia 11, diz também onde a plataforma
+    roda (Compose ou Kubernetes). Fica fora de /api/v1 por ser a primeira API
     do projeto (Dia 1) e não ter dado de tenant.
 servers:
   - url: http://localhost:8000
@@ -35,6 +36,18 @@ components:
         components:
           type: array
           items: { $ref: '#/components/schemas/ComponentStatus' }
+        runtime:
+          description: Onde a plataforma está rodando (Dia 11); ausente ou nulo em versões anteriores.
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeInfo'
+            - type: 'null'
+    RuntimeInfo:
+      type: object
+      required: [platform]
+      properties:
+        platform: { type: string, examples: [kubernetes, compose, local], description: Ambiente de execução. }
+        namespace: { type: [string, 'null'], description: Namespace do Kubernetes; nulo fora dele. }
+        instance: { type: [string, 'null'], description: Pod ou contêiner do status-service que respondeu. }
     HealthState:
       type: string
       description: Todos UP = UP, nenhum UP = DOWN, senão DEGRADED.
